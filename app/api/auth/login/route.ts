@@ -24,10 +24,17 @@ export async function POST(request: NextRequest) {
       include: { tenant: true },
     });
 
-    if (!user || !user.isActive) {
+    if (!user) {
       return NextResponse.json(
         { error: "Invalid credentials" },
         { status: 401 }
+      );
+    }
+
+    if (!user.isActive) {
+      return NextResponse.json(
+        { error: "This user account has been blocked or suspended by an Administrator. Please contact Super Admin." },
+        { status: 403 }
       );
     }
 

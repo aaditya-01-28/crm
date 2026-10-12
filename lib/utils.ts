@@ -139,3 +139,33 @@ export function getLanguageMeta(code?: string | null) {
   if (match) return match;
   return { code, label: code.toUpperCase(), flag: "🌐" };
 }
+
+export function parseLanguages(langStr?: string | null): string[] {
+  if (!langStr) return [];
+  return langStr
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+export function formatLanguageLabels(langStr?: string | null): string {
+  const codes = parseLanguages(langStr);
+  if (codes.length === 0) return "";
+  return codes
+    .map((c) => {
+      const meta = getLanguageMeta(c);
+      return meta ? `${meta.flag} ${meta.label.split(" (")[0]}` : c.toUpperCase();
+    })
+    .join(", ");
+}
+
+export function hasLanguageMatch(
+  repLanguagesStr?: string | null,
+  leadLanguageStr?: string | null
+): boolean {
+  if (!repLanguagesStr || !leadLanguageStr) return false;
+  const repLangs = parseLanguages(repLanguagesStr);
+  const leadLangs = parseLanguages(leadLanguageStr);
+  return leadLangs.some((lang) => repLangs.includes(lang));
+}
+

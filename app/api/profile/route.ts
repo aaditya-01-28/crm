@@ -102,11 +102,18 @@ export async function PATCH(request: NextRequest) {
       updateData.phoneNumber = phoneNumber ? phoneNumber.trim() : null;
     }
 
-    // 3. Update Language Preference
+    // 3. Update Language Preference (supports comma-separated string or array)
     if (language !== undefined) {
-      const langTrimmed = language.trim().toLowerCase();
-      if (langTrimmed) {
-        updateData.language = langTrimmed;
+      if (Array.isArray(language)) {
+        const joined = language.map((l: string) => String(l).trim().toLowerCase()).filter(Boolean).join(",");
+        updateData.language = joined || "en";
+      } else if (typeof language === "string") {
+        const cleaned = language
+          .split(",")
+          .map((l) => l.trim().toLowerCase())
+          .filter(Boolean)
+          .join(",");
+        updateData.language = cleaned || "en";
       }
     }
 

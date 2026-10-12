@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
@@ -31,8 +32,10 @@ model User {
   passwordHash     String          @map("password_hash") @db.VarChar(255)
   phoneNumber      String?         @map("phone_number") @db.VarChar(20)
   role             String          @default("sales_rep") @db.VarChar(50)
-  language         String          @default("en") @map("language") @db.VarChar(10)
+  language         String          @default("en") @map("language") @db.VarChar(255)
   isActive         Boolean         @default(true) @map("is_active")
+  resetToken       String?         @map("reset_token") @db.VarChar(255)
+  resetTokenExpiry DateTime?       @map("reset_token_expiry") @db.Timestamptz(6)
   createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   callLogs         CallLog[]
   deals            Deal[]

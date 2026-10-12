@@ -32,6 +32,8 @@ import {
   SERVICE_INTERESTS,
   LEAD_LANGUAGES,
   getLanguageMeta,
+  formatLanguageLabels,
+  hasLanguageMatch,
 } from "@/lib/utils";
 import { toast } from "sonner";
 import { useCanAssignLeads } from "@/components/layout/SessionProvider";
@@ -265,7 +267,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                   <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-900/60 text-indigo-200 border border-indigo-700/60 font-medium flex items-center gap-1.5">
                     <Languages className="w-3 h-3 text-indigo-400" />
                     <span>Customer Lang:</span>
-                    <strong>{getLanguageMeta(lead.preferredLanguage)?.label || lead.preferredLanguage}</strong>
+                    <strong>{formatLanguageLabels(lead.preferredLanguage) || lead.preferredLanguage}</strong>
                   </span>
                 ) : (
                   <button
@@ -449,14 +451,11 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                   >
                     <option value="">Unassigned Pool</option>
                     {teamReps.map((rep: { id: string; fullName: string; language?: string }) => {
-                      const repLangMeta = getLanguageMeta(rep.language);
-                      const isMatch =
-                        editLanguage &&
-                        rep.language &&
-                        rep.language.toLowerCase() === editLanguage.toLowerCase();
+                      const repLanguagesLabel = formatLanguageLabels(rep.language);
+                      const isMatch = hasLanguageMatch(rep.language, editLanguage);
                       return (
                         <option key={rep.id} value={rep.id}>
-                          {rep.fullName} {repLangMeta ? `(${repLangMeta.flag} ${repLangMeta.label})` : ""} {isMatch ? "⭐ [Language Match]" : ""}
+                          {rep.fullName} {repLanguagesLabel ? `(${repLanguagesLabel})` : ""} {isMatch ? "⭐ [Language Match]" : ""}
                         </option>
                       );
                     })}

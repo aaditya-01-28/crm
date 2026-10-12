@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LogOut, User } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { toast } from "sonner";
 import type { JWTPayload } from "@/lib/auth";
 
@@ -62,14 +62,6 @@ export default function TopBar({ user }: { user: JWTPayload }) {
           </div>
         </Link>
 
-        <Link
-          href="/profile"
-          className="flex items-center gap-1.5 text-gray-500 hover:text-emerald-700 transition text-xs font-semibold px-2.5 py-1.5 rounded-lg hover:bg-gray-100 border border-gray-200"
-          title="Account Profile"
-        >
-          <User className="w-3.5 h-3.5 text-emerald-600" />
-          <span className="hidden md:inline">Profile</span>
-        </Link>
 
         <button
           onClick={handleLogout}

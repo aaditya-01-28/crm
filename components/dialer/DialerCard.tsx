@@ -21,6 +21,7 @@ import {
   SERVICE_INTERESTS,
   LEAD_LANGUAGES,
   getLanguageMeta,
+  formatLanguageLabels,
 } from "@/lib/utils";
 import { DispositionBar } from "./DispositionBar";
 import { toast } from "sonner";
@@ -181,7 +182,7 @@ export function DialerCard({ lead: initialLead, onDisposed }: DialerCardProps) {
               {lead.preferredLanguage && (
                 <span className="text-xs bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full font-semibold flex items-center gap-1">
                   <Languages className="w-3 h-3 text-indigo-400" />
-                  {getLanguageMeta(lead.preferredLanguage)?.label || lead.preferredLanguage}
+                  {formatLanguageLabels(lead.preferredLanguage) || lead.preferredLanguage}
                 </span>
               )}
               {lead.rnrCount > 0 && (

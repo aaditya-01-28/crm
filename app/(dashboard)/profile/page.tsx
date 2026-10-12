@@ -120,7 +120,7 @@ export default function ProfilePage() {
   // Profile fields state
   const [fullName, setFullName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [language, setLanguage] = useState("en");
+  const [selectedLanguages, setSelectedLanguages] = useState<string[]>(["en"]);
 
   // Password fields state
   const [currentPassword, setCurrentPassword] = useState("");
@@ -149,7 +149,11 @@ export default function ProfilePage() {
     if (user) {
       setFullName(user.fullName || "");
       setPhoneNumber(user.phoneNumber || "");
-      setLanguage(user.language || "en");
+      const parsed = (user.language || "en")
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+      setSelectedLanguages(parsed.length > 0 ? parsed : ["en"]);
     }
   }, [user]);
 
@@ -188,16 +192,32 @@ export default function ProfilePage() {
     },
   });
 
+  const toggleLanguage = (code: string) => {
+    if (selectedLanguages.includes(code)) {
+      if (selectedLanguages.length === 1) {
+        toast.warning("Please keep at least one spoken language selected");
+        return;
+      }
+      setSelectedLanguages(selectedLanguages.filter((c) => c !== code));
+    } else {
+      setSelectedLanguages([...selectedLanguages, code]);
+    }
+  };
+
   const handleSaveDetails = (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName.trim()) {
       toast.error("Full name cannot be empty");
       return;
     }
+    if (selectedLanguages.length === 0) {
+      toast.error("Please select at least one language you can speak");
+      return;
+    }
     updateProfileMutation.mutate({
       fullName: fullName.trim(),
       phoneNumber: phoneNumber.trim(),
-      language,
+      language: selectedLanguages.join(","),
     });
   };
 
@@ -322,13 +342,23 @@ export default function ProfilePage() {
               <div className="flex items-start gap-3">
                 <Globe className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <span className="text-gray-400 font-medium block text-[11px] uppercase tracking-wider">Representative Spoken Language</span>
-                  <span className="text-gray-800 font-semibold flex items-center gap-1.5">
-                    <span>{SUPPORTED_LANGUAGES.find((l) => l.code === user.language)?.flag || "🌐"}</span>
-                    <span>{SUPPORTED_LANGUAGES.find((l) => l.code === user.language)?.name || user.language.toUpperCase()}</span>
-                  </span>
-                  <span className="text-[10px] text-emerald-600 block mt-0.5 font-medium">
-                    Regional leads matched to this calling language
+                  <span className="text-gray-400 font-medium block text-[11px] uppercase tracking-wider">Representative Spoken Languages</span>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {(user.language || "en").split(",").map((c) => {
+                      const lang = SUPPORTED_LANGUAGES.find((l) => l.code === c.trim().toLowerCase());
+                      return (
+                        <span
+                          key={c}
+                          className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 font-medium"
+                        >
+                          <span>{lang?.flag || "🌐"}</span>
+                          <span>{lang?.name || c.toUpperCase()}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <span className="text-[10px] text-emerald-600 block mt-1 font-medium">
+                    Leads matching any of your spoken languages will be routed to you
                   </span>
                 </div>
               </div>
@@ -473,30 +503,59 @@ export default function ProfilePage() {
                 </p>
               </div>
 
-              {/* Language Selector */}
+              {/* Multi-Language Selector */}
               <div>
-                <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
-                  Representative Spoken / Calling Language <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <Globe className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <select
-                    value={language}
-                    onChange={(e) => setLanguage(e.target.value)}
-                    className="w-full pl-10 pr-10 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm bg-gray-50/40 cursor-pointer appearance-none font-medium"
-                  >
-                    {SUPPORTED_LANGUAGES.map((lang) => (
-                      <option key={lang.code} value={lang.code}>
-                        {lang.flag} {lang.name} — ({lang.native})
-                      </option>
-                    ))}
-                  </select>
-                  <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-xs text-gray-400 font-semibold">
-                    ▼
-                  </div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    Representative Spoken Languages <span className="text-red-500">*</span>
+                  </label>
+                  <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                    {selectedLanguages.length} selected
+                  </span>
                 </div>
-                <p className="text-[11px] text-emerald-600 mt-1 font-medium">
-                  Leads with matching customer preferred language (e.g. Tamil, Hindi, Gujarati) will be routed and assigned to you.
+                <p className="text-xs text-gray-500 mb-2.5">
+                  Select all languages you can comfortably communicate in with prospects and clients:
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {SUPPORTED_LANGUAGES.map((lang) => {
+                    const isSelected = selectedLanguages.includes(lang.code);
+                    return (
+                      <button
+                        key={lang.code}
+                        type="button"
+                        onClick={() => toggleLanguage(lang.code)}
+                        className={`flex items-center justify-between p-2.5 rounded-xl border text-left transition text-xs font-medium cursor-pointer ${
+                          isSelected
+                            ? "bg-emerald-50/90 border-emerald-500 text-emerald-950 shadow-xs ring-1 ring-emerald-500/30"
+                            : "bg-gray-50/60 border-gray-200 text-gray-700 hover:bg-gray-100/80 hover:border-gray-300"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 truncate">
+                          <span className="text-base leading-none">{lang.flag}</span>
+                          <div className="truncate">
+                            <span className="font-semibold block truncate leading-tight">
+                              {lang.name}
+                            </span>
+                            <span className="text-[10px] text-gray-400 block truncate">
+                              {lang.native}
+                            </span>
+                          </div>
+                        </div>
+                        <div
+                          className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ml-1.5 transition ${
+                            isSelected
+                              ? "bg-emerald-600 text-white"
+                              : "border border-gray-300 bg-white"
+                          }`}
+                        >
+                          {isSelected && <CheckCircle2 className="w-3.5 h-3.5" />}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-emerald-600 mt-2 font-medium">
+                  Leads arriving with any of your spoken languages (e.g. Tamil, Hindi, Gujarati) will be routed and matched to you.
                 </p>
               </div>
 

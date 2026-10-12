@@ -30,6 +30,7 @@ import {
   SERVICE_INTERESTS,
   LEAD_LANGUAGES,
   getLanguageMeta,
+  formatLanguageLabels,
 } from "@/lib/utils";
 import { LeadDetailModal } from "@/components/leads/LeadDetailModal";
 import { CSVImporter } from "@/components/dialer/CSVImporter";
@@ -626,7 +627,7 @@ export default function LeadsDirectoryPage() {
                           {lead.preferredLanguage && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center gap-1">
                               <Languages className="w-2.5 h-2.5 text-indigo-500" />
-                              {getLanguageMeta(lead.preferredLanguage)?.label || lead.preferredLanguage}
+                              {formatLanguageLabels(lead.preferredLanguage) || lead.preferredLanguage}
                             </span>
                           )}
                         </div>
