@@ -3,7 +3,7 @@ import { verifyToken } from "@/lib/auth";
 
 const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/auth/register"];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Allow public paths
@@ -11,16 +11,20 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Allow Next.js internals
+  // Allow Next.js internals and static assets (images, icons, etc.)
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
-    pathname.startsWith("/icons")
+    pathname.startsWith("/icons") ||
+    pathname.startsWith("/logo") ||
+    /\.(png|jpg|jpeg|svg|webp|ico|csv)$/i.test(pathname)
   ) {
     return NextResponse.next();
   }
 
-  const token = request.cookies.get("access_token")?.value;
+  const authHeader = request.headers.get("authorization");
+  const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
+  const token = request.cookies.get("access_token")?.value || bearerToken;
 
   if (!token) {
     if (pathname.startsWith("/api/")) {
@@ -57,5 +61,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|csv)$).*)",
+  ],
 };

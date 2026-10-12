@@ -21,7 +21,10 @@ export function formatDate(date: string | Date): string {
   }).format(new Date(date));
 }
 
-export function formatDateTime(date: string | Date): string {
+export function formatDateTime(date?: string | Date | null): string {
+  if (!date) return "Date & time TBD";
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return "Date & time TBD";
   return new Intl.DateTimeFormat("en-IN", {
     day: "2-digit",
     month: "short",
@@ -29,7 +32,7 @@ export function formatDateTime(date: string | Date): string {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
-  }).format(new Date(date));
+  }).format(d);
 }
 
 export function normalizePhone(raw: string): string {
@@ -86,4 +89,53 @@ export function calculateGST(baseAmount: number): {
     tax,
     total: Math.round((baseAmount + tax) * 100) / 100,
   };
+}
+
+export function formatDuration(seconds: number): string {
+  if (!seconds || seconds <= 0) return "0s";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) {
+    return `${h}h ${m}m ${s}s`;
+  }
+  if (m > 0) {
+    return `${m}m ${s}s`;
+  }
+  return `${s}s`;
+}
+
+export const SERVICE_INTERESTS = [
+  "WhatsApp API",
+  "Virtual WhatsApp",
+  "Bulk SMS",
+  "RCS Messaging",
+  "Voice SMS / OBD",
+  "OTP API",
+  "DLT & SMS Gateway",
+];
+
+export const LEAD_LANGUAGES = [
+  { code: "en", label: "English", flag: "🇬🇧" },
+  { code: "hi", label: "Hindi (हिन्दी)", flag: "🇮🇳" },
+  { code: "ta", label: "Tamil (தமிழ்)", flag: "🇮🇳" },
+  { code: "te", label: "Telugu (తెలుగు)", flag: "🇮🇳" },
+  { code: "kn", label: "Kannada (ಕನ್ನಡ)", flag: "🇮🇳" },
+  { code: "ml", label: "Malayalam (മലയാളം)", flag: "🇮🇳" },
+  { code: "mr", label: "Marathi (मराठी)", flag: "🇮🇳" },
+  { code: "gu", label: "Gujarati (ગુજરાતી)", flag: "🇮🇳" },
+  { code: "bn", label: "Bengali (বাংলা)", flag: "🇮🇳" },
+  { code: "pa", label: "Punjabi (ਪੰਜਾਬੀ)", flag: "🇮🇳" },
+  { code: "or", label: "Odia (ଓଡ଼ିଆ)", flag: "🇮🇳" },
+  { code: "as", label: "Assamese (অসমীয়া)", flag: "🇮🇳" },
+  { code: "ur", label: "Urdu (اردو)", flag: "🇮🇳" },
+];
+
+export function getLanguageMeta(code?: string | null) {
+  if (!code) return null;
+  const match = LEAD_LANGUAGES.find(
+    (l) => l.code.toLowerCase() === code.toLowerCase()
+  );
+  if (match) return match;
+  return { code, label: code.toUpperCase(), flag: "🌐" };
 }

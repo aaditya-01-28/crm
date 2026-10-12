@@ -58,6 +58,8 @@ export async function POST(request: NextRequest) {
         role: user.role,
         tenantName: user.tenant.name,
       },
+      accessToken,
+      refreshToken,
     });
 
     setAuthCookies(response, accessToken, refreshToken);

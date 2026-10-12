@@ -37,14 +37,17 @@ export async function GET(request: NextRequest) {
     },
   });
 
-  // Partition into overdue / today / upcoming
-  const overdue = tasks.filter((t) => t.scheduledTime < startOfDay);
-  const today = tasks.filter(
-    (t) => t.scheduledTime >= startOfDay && t.scheduledTime <= endOfDay
-  );
-  const upcoming = tasks.filter((t) => t.scheduledTime > endOfDay);
+  // Partition into unconfirmed (TBD) / overdue / today / upcoming
+  const unconfirmed = tasks.filter((t) => !t.scheduledTime);
+  const scheduled = tasks.filter((t) => t.scheduledTime !== null);
 
-  return NextResponse.json({ overdue, today, upcoming });
+  const overdue = scheduled.filter((t) => t.scheduledTime! < startOfDay);
+  const today = scheduled.filter(
+    (t) => t.scheduledTime! >= startOfDay && t.scheduledTime! <= endOfDay
+  );
+  const upcoming = scheduled.filter((t) => t.scheduledTime! > endOfDay);
+
+  return NextResponse.json({ unconfirmed, overdue, today, upcoming });
 }
 
 export async function POST(request: NextRequest) {
@@ -59,7 +62,7 @@ export async function POST(request: NextRequest) {
         leadId: body.leadId,
         repId,
         taskType: body.taskType,
-        scheduledTime: new Date(body.scheduledTime),
+        scheduledTime: body.scheduledTime ? new Date(body.scheduledTime) : null,
         meetingLink: body.meetingLink || null,
         notes: body.notes || null,
       },

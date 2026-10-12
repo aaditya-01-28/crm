@@ -42,16 +42,36 @@ export async function PATCH(
       },
     });
 
-    // Update lead status if deal is won/lost
+    // Update lead status according to deal stage
     if (stage === "closed_won") {
       await prisma.lead.update({
         where: { id: deal.leadId },
-        data: { status: "won" },
+        data: { status: "won", updatedAt: new Date() },
       });
     } else if (stage === "closed_lost") {
       await prisma.lead.update({
         where: { id: deal.leadId },
-        data: { status: "lost" },
+        data: { status: "lost", updatedAt: new Date() },
+      });
+    } else if (stage === "demo_done") {
+      await prisma.lead.update({
+        where: { id: deal.leadId },
+        data: { status: "demo_done", updatedAt: new Date() },
+      });
+      // Mark any pending product_demo tasks completed
+      await prisma.scheduledTask.updateMany({
+        where: { leadId: deal.leadId, taskType: "product_demo", status: "pending" },
+        data: { status: "completed", updatedAt: new Date() },
+      });
+    } else if (stage === "demo_scheduled") {
+      await prisma.lead.update({
+        where: { id: deal.leadId },
+        data: { status: "demo_scheduled", updatedAt: new Date() },
+      });
+    } else if (stage === "quote_sent" || stage === "payment_pending") {
+      await prisma.lead.update({
+        where: { id: deal.leadId },
+        data: { status: "deal_created", updatedAt: new Date() },
       });
     }
 

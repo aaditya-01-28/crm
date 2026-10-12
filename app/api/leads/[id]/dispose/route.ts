@@ -62,36 +62,39 @@ export async function PATCH(
         break;
       case "Callback":
         newStatus = "callback";
-        if (callbackDatetime) {
-          tasksToCreate.push({
-            tenantId,
-            leadId: id,
-            repId,
-            taskType: "callback",
-            scheduledTime: new Date(callbackDatetime),
-            notes: remark || null,
-          });
-        }
+        tasksToCreate.push({
+          tenantId,
+          leadId: id,
+          repId,
+          taskType: "callback",
+          scheduledTime: callbackDatetime ? new Date(callbackDatetime) : null,
+          notes: remark || null,
+        });
         break;
       case "Demo Scheduled":
         newStatus = "demo_scheduled";
-        if (demoDatetime) {
-          tasksToCreate.push({
-            tenantId,
-            leadId: id,
-            repId,
-            taskType: "product_demo",
-            scheduledTime: new Date(demoDatetime),
-            meetingLink: meetingLink || null,
-            notes: decisionMakerName
-              ? `Decision Maker: ${decisionMakerName}`
-              : null,
-          });
-        }
+        tasksToCreate.push({
+          tenantId,
+          leadId: id,
+          repId,
+          taskType: "product_demo",
+          scheduledTime: demoDatetime ? new Date(demoDatetime) : null,
+          meetingLink: meetingLink || null,
+          notes: [
+            decisionMakerName ? `Decision Maker: ${decisionMakerName}` : null,
+            remark ? remark : null,
+          ]
+            .filter(Boolean)
+            .join(" | ") || null,
+        });
+        break;
+      case "Demo Done":
+      case "Demo Completed":
+        newStatus = "demo_done";
         break;
     }
 
-    // Transactionally update lead + create call log + create tasks
+    // Transactionally update lead + create call log + create tasks + sync pipeline deals
     await prisma.$transaction(async (tx) => {
       await tx.lead.update({
         where: { id },
@@ -111,6 +114,47 @@ export async function PATCH(
 
       for (const taskData of tasksToCreate) {
         await tx.scheduledTask.create({ data: taskData });
+      }
+
+      // If demo was marked done, complete any pending product_demo tasks
+      if (newStatus === "demo_done") {
+        await tx.scheduledTask.updateMany({
+          where: { leadId: id, taskType: "product_demo", status: "pending" },
+          data: { status: "completed", updatedAt: new Date() },
+        });
+      }
+
+      // Sync Deal Pipeline for demo stages
+      if (newStatus === "demo_scheduled" || newStatus === "demo_done") {
+        const existingDeal = await tx.deal.findFirst({
+          where: { leadId: id, tenantId },
+        });
+
+        if (existingDeal) {
+          await tx.deal.update({
+            where: { id: existingDeal.id },
+            data: {
+              stage: newStatus,
+              updatedAt: new Date(),
+            },
+          });
+        } else {
+          await tx.deal.create({
+            data: {
+              tenantId,
+              leadId: id,
+              repId: lead.assignedRepId || repId,
+              serviceType: lead.serviceType || "WhatsApp API",
+              quantity: 10000,
+              quotedPrice: 0,
+              stage: newStatus,
+              closingNotes:
+                newStatus === "demo_done"
+                  ? "Product demo completed"
+                  : "Product demo scheduled",
+            },
+          });
+        }
       }
     });
 

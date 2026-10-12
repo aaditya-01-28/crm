@@ -1,36 +1,155 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Textora Engage — Sales & Follow-Up CRM
 
-## Getting Started
+A unified, web-first Sales CRM for Textora Technologies, replacing fragmented Google Sheets and Forms.
 
-First, run the development server:
+## 🚀 Quick Start (Development)
 
+### 1. Start the database and storage
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+docker-compose up -d
+```
+This starts:
+- **PostgreSQL 16** on `localhost:5432`
+- **MinIO** on `localhost:9000` (API) and `localhost:9001` (Web UI)
+
+### 2. Configure environment
+```bash
+copy .env.example .env.local
+# The defaults match docker-compose — no changes needed for local dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 3. Install dependencies
+```bash
+npm install
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 4. Run database migrations
+```bash
+npm run db:migrate
+# Enter migration name: "init"
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 5. Seed the database
+```bash
+npm run db:seed
+```
 
-## Learn More
+**Seed creates these accounts:**
+| Role | Email | Password |
+|---|---|---|
+| Super Admin | aaditya@textorasms.com | Admin@1234 |
+| Sales Manager | manager@textorasms.com | Manager@1234 |
+| Sales Rep 1 | rep1@textorasms.com | Rep@1234 |
+| Sales Rep 2 | rep2@textorasms.com | Rep@1234 |
+| Accounts Ops | accounts@textorasms.com | Accounts@1234 |
 
-To learn more about Next.js, take a look at the following resources:
+### 6. Start the app
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 📦 Project Structure
 
-## Deploy on Vercel
+```
+textora-engage/
+├── app/
+│   ├── (dashboard)/          ← Protected pages (sidebar layout)
+│   │   ├── dialer/           ← Module 1: Cold Calling Console
+│   │   ├── agenda/           ← Module 2: Follow-Up & Demo Agenda
+│   │   ├── pipeline/         ← Module 3: Kanban Deal Pipeline
+│   │   ├── payments/         ← Module 4: Payment Ops
+│   │   └── reports/          ← Module 5: EOD Sales Dashboard
+│   ├── api/                  ← API Route Handlers
+│   │   ├── auth/             ← Login, Register, Logout, Me
+│   │   ├── leads/            ← CRUD + CSV import + disposition
+│   │   ├── tasks/            ← Callbacks & demos
+│   │   ├── deals/            ← Pipeline deals
+│   │   ├── payments/         ← Payment collection & approval
+│   │   ├── upload/           ← MinIO presigned URL
+│   │   └── reports/          ← EOD metrics aggregation
+│   └── login/                ← Login page
+├── components/
+│   ├── dialer/               ← DialerCard, DispositionBar, CSVImporter
+│   ├── pipeline/             ← KanbanBoard, DealCard, DealModal
+│   ├── payments/             ← PaymentModal
+│   └── layout/               ← Sidebar, TopBar
+├── lib/
+│   ├── auth.ts               ← JWT helpers (jose)
+│   ├── prisma.ts             ← Prisma singleton
+│   ├── minio.ts              ← MinIO client + presigned URLs
+│   └── utils.ts              ← Currency, phone, WA pitch
+├── prisma/
+│   ├── schema.prisma         ← 7 multi-tenant tables
+│   └── seed.ts               ← Initial data
+├── middleware.ts             ← Edge JWT auth + tenant injection
+└── docker-compose.yml        ← PostgreSQL + MinIO
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 🔑 Key Features
+
+### Module 1 — Cold Calling Console (`/dialer`)
+- **tel: deep link** → opens native phone dialer (Windows Phone Link / mobile)
+- **wa.me deep link** → opens WhatsApp with pre-filled Aaditya pitch (₹0 Meta API cost)
+- 7-disposition quick-action bar: RNR, Connected, Callback, Demo Scheduled, Not Interested, Already Using, Invalid
+- CSV/Excel bulk importer with phone normalization and deduplication
+- Auto-advances to next lead after each disposition
+
+### Module 2 — Follow-Up Agenda (`/agenda`)
+- Partitioned into: **Overdue**, **Today's Schedule**, **Upcoming Demos**
+- Web Notifications API 5-minute pre-alerts for upcoming tasks
+- One-click mark as completed
+
+### Module 3 — Kanban Pipeline (`/pipeline`)
+- 5-column drag-and-drop board using `@hello-pangea/dnd`
+- Per-column revenue (₹) and credit aggregation
+- Dragging to Payment Pending / Closed Won auto-triggers Payment Modal
+
+### Module 4 — Payment Collection (`/payments`)
+- 18% GST auto-calculation with TDS deduction support
+- MinIO drag-and-drop receipt upload (presigned direct upload)
+- Ops verification queue with screenshot lightbox
+- Approve → auto-closes deal to Closed Won + provisions credits
+
+### Module 5 — EOD Reports (`/reports`)
+- Real-time 10-metric dashboard per rep + team totals
+- Rep leaderboard with 🥇🥈🥉 rankings
+- Date picker for historical reports
+- One-click CSV export
+
+---
+
+## 🔐 RBAC Roles
+
+| Role | Dialer | Agenda | Pipeline | Payments | Reports | Team |
+|---|---|---|---|---|---|---|
+| `super_admin` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `sales_manager` | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| `sales_rep` | ✅ | ✅ | ✅ own | ✅ own | — | — |
+| `accounts_ops` | — | — | — | ✅ all | — | — |
+
+---
+
+## 🛠 Tech Stack
+- **Frontend + API**: Next.js 14 App Router, TypeScript, Tailwind CSS
+- **ORM**: Prisma + PostgreSQL 16
+- **Auth**: JWT (jose) with HttpOnly cookies
+- **Drag-and-drop**: @hello-pangea/dnd
+- **Data fetching**: TanStack Query v5
+- **File storage**: MinIO (dev) → AWS S3 (prod, toggle via env)
+- **CSV parsing**: papaparse + xlsx
+- **Toasts**: sonner
+
+---
+
+## 🔧 Useful Commands
+```bash
+npm run db:studio     # Open Prisma Studio (visual DB browser)
+npm run db:migrate    # Run a new migration
+npm run db:reset      # Reset DB and re-run all migrations
+docker-compose down   # Stop all containers
+```

@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,191 +7,159 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ============================================================
-// 1. Multi-Tenant Organizations
-// ============================================================
 model Organization {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name      String   @db.VarChar(255)
-  subdomain String?  @unique @db.VarChar(100)
-  planTier  String   @default("internal") @map("plan_tier") @db.VarChar(50)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
-
-  users    User[]
-  leads    Lead[]
-  callLogs CallLog[]
-  tasks    ScheduledTask[]
-  deals    Deal[]
-  payments Payment[]
+  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String          @db.VarChar(255)
+  subdomain String?         @unique @db.VarChar(100)
+  planTier  String          @default("internal") @map("plan_tier") @db.VarChar(50)
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  callLogs  CallLog[]
+  deals     Deal[]
+  leads     Lead[]
+  payments  Payment[]
+  tasks     ScheduledTask[]
+  users     User[]
 
   @@map("organizations")
 }
 
-// ============================================================
-// 2. Users & RBAC
-// ============================================================
 model User {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId     String   @map("tenant_id") @db.Uuid
-  fullName     String   @map("full_name") @db.VarChar(150)
-  email        String   @unique @db.VarChar(255)
-  passwordHash String   @map("password_hash") @db.VarChar(255)
-  phoneNumber  String?  @map("phone_number") @db.VarChar(20)
-  role         String   @default("sales_rep") @db.VarChar(50)
-  // roles: 'super_admin' | 'sales_manager' | 'sales_rep' | 'accounts_ops'
-  isActive     Boolean  @default(true) @map("is_active")
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz()
-
-  tenant           Organization    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  assignedLeads    Lead[]          @relation("AssignedRep")
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String          @map("tenant_id") @db.Uuid
+  fullName         String          @map("full_name") @db.VarChar(150)
+  email            String          @unique @db.VarChar(255)
+  passwordHash     String          @map("password_hash") @db.VarChar(255)
+  phoneNumber      String?         @map("phone_number") @db.VarChar(20)
+  role             String          @default("sales_rep") @db.VarChar(50)
+  language         String          @default("en") @map("language") @db.VarChar(10)
+  isActive         Boolean         @default(true) @map("is_active")
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   callLogs         CallLog[]
-  tasks            ScheduledTask[]
   deals            Deal[]
-  payments         Payment[]       @relation("PaymentRep")
+  assignedLeads    Lead[]          @relation("AssignedRep")
+  firstAssignedLeads Lead[]        @relation("FirstAssignedRep")
   approvedPayments Payment[]       @relation("PaymentApprover")
+  payments         Payment[]       @relation("PaymentRep")
+  tasks            ScheduledTask[]
+  tenant           Organization    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("users")
 }
 
-// ============================================================
-// 3. Unified Leads Table
-// ============================================================
 model Lead {
-  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId         String   @map("tenant_id") @db.Uuid
-  assignedRepId    String?  @map("assigned_rep_id") @db.Uuid
-  phoneNumber      String   @map("phone_number") @db.VarChar(20)
-  contactName      String?  @map("contact_name") @db.VarChar(150)
-  companyName      String?  @map("company_name") @db.VarChar(200)
-  websiteUrl       String?  @map("website_url") @db.VarChar(255)
-  businessVertical String?  @map("business_vertical") @db.VarChar(100)
-  serviceType      String?  @map("service_type") @db.VarChar(100)
-  source           String   @default("Vendor Cold List") @db.VarChar(100)
-  status           String   @default("new") @db.VarChar(50)
-  // statuses: 'new' | 'rnr' | 'callback' | 'demo_scheduled' | 'deal_created' | 'won' | 'lost' | 'not_interested' | 'invalid'
-  rnrCount         Int      @default(0) @map("rnr_count")
-  batchDate        DateTime @default(dbgenerated("CURRENT_DATE")) @map("batch_date") @db.Date
-  customMetadata   Json     @default("{}") @map("custom_metadata")
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String          @map("tenant_id") @db.Uuid
+  assignedRepId    String?         @map("assigned_rep_id") @db.Uuid
+  firstAssignedRepId String?       @map("first_assigned_rep_id") @db.Uuid
+  firstAssignedAt  DateTime?       @map("first_assigned_at") @db.Timestamptz(6)
+  phoneNumber      String          @map("phone_number") @db.VarChar(20)
+  contactName      String?         @map("contact_name") @db.VarChar(150)
+  companyName      String?         @map("company_name") @db.VarChar(200)
+  websiteUrl       String?         @map("website_url") @db.VarChar(255)
+  businessVertical String?         @map("business_vertical") @db.VarChar(100)
+  serviceType      String?         @map("service_type") @db.VarChar(100)
+  source           String          @default("Vendor Cold List") @db.VarChar(100)
+  status           String          @default("new") @db.VarChar(50)
+  rnrCount         Int             @default(0) @map("rnr_count")
+  batchDate        DateTime        @default(dbgenerated("CURRENT_DATE")) @map("batch_date") @db.Date
+  customMetadata   Json            @default("{}") @map("custom_metadata")
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  callLogs         CallLog[]
+  deals            Deal[]
+  assignedRep      User?           @relation("AssignedRep", fields: [assignedRepId], references: [id])
+  firstAssignedRep User?           @relation("FirstAssignedRep", fields: [firstAssignedRepId], references: [id])
+  tenant           Organization    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payments         Payment[]
+  tasks            ScheduledTask[]
 
-  tenant      Organization    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  assignedRep User?           @relation("AssignedRep", fields: [assignedRepId], references: [id], onDelete: SetNull)
-  callLogs    CallLog[]
-  tasks       ScheduledTask[]
-  deals       Deal[]
-  payments    Payment[]
-
-  @@index([tenantId, status], name: "idx_leads_tenant_status")
-  @@index([phoneNumber], name: "idx_leads_phone")
+  @@index([tenantId, status], map: "idx_leads_tenant_status")
+  @@index([phoneNumber], map: "idx_leads_phone")
   @@map("leads")
 }
 
-// ============================================================
-// 4. Call & Telephony Activity Logs
-// ============================================================
 model CallLog {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId        String   @map("tenant_id") @db.Uuid
-  leadId          String   @map("lead_id") @db.Uuid
-  repId           String   @map("rep_id") @db.Uuid
-  disposition     String   @db.VarChar(50)
-  // dispositions: 'RNR' | 'Connected' | 'Callback' | 'Not Interested' | 'Invalid' | 'Demo Scheduled' | 'Already Using'
-  durationSeconds Int      @default(0) @map("duration_seconds")
-  remark          String?  @db.Text
-  callTimestamp   DateTime @default(now()) @map("call_timestamp") @db.Timestamptz()
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String       @map("tenant_id") @db.Uuid
+  leadId          String       @map("lead_id") @db.Uuid
+  repId           String       @map("rep_id") @db.Uuid
+  disposition     String       @db.VarChar(50)
+  durationSeconds Int          @default(0) @map("duration_seconds")
+  remark          String?
+  callTimestamp   DateTime     @default(now()) @map("call_timestamp") @db.Timestamptz(6)
+  lead            Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  rep             User         @relation(fields: [repId], references: [id])
+  tenant          Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  tenant Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  lead   Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  rep    User         @relation(fields: [repId], references: [id])
-
-  @@index([repId, callTimestamp], name: "idx_call_logs_rep_date")
+  @@index([repId, callTimestamp], map: "idx_call_logs_rep_date")
   @@map("call_logs")
 }
 
-// ============================================================
-// 5. Scheduled Tasks — Callbacks & Demos
-// ============================================================
 model ScheduledTask {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId      String   @map("tenant_id") @db.Uuid
-  leadId        String   @map("lead_id") @db.Uuid
-  repId         String   @map("rep_id") @db.Uuid
-  taskType      String   @map("task_type") @db.VarChar(50)
-  // types: 'callback' | 'product_demo' | 'payment_followup'
-  scheduledTime DateTime @map("scheduled_time") @db.Timestamptz()
-  status        String   @default("pending") @db.VarChar(20)
-  // statuses: 'pending' | 'completed' | 'cancelled' | 'rescheduled'
-  meetingLink   String?  @map("meeting_link") @db.VarChar(255)
-  notes         String?  @db.Text
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz()
-
-  tenant Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  lead   Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  rep    User         @relation(fields: [repId], references: [id])
+  id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId      String       @map("tenant_id") @db.Uuid
+  leadId        String       @map("lead_id") @db.Uuid
+  repId         String       @map("rep_id") @db.Uuid
+  taskType      String       @map("task_type") @db.VarChar(50)
+  scheduledTime DateTime?    @map("scheduled_time") @db.Timestamptz(6)
+  status        String       @default("pending") @db.VarChar(20)
+  meetingLink   String?      @map("meeting_link") @db.VarChar(255)
+  notes         String?
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  lead          Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  rep           User         @relation(fields: [repId], references: [id])
+  tenant        Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("scheduled_tasks")
 }
 
-// ============================================================
-// 6. Pipeline Deals & Projections
-// ============================================================
 model Deal {
-  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId            String   @map("tenant_id") @db.Uuid
-  leadId              String   @map("lead_id") @db.Uuid
-  repId               String   @map("rep_id") @db.Uuid
-  serviceType         String   @map("service_type") @db.VarChar(100)
+  id                  String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId            String       @map("tenant_id") @db.Uuid
+  leadId              String       @map("lead_id") @db.Uuid
+  repId               String       @map("rep_id") @db.Uuid
+  serviceType         String       @map("service_type") @db.VarChar(100)
   quantity            Int
-  quotedPrice         Decimal  @map("quoted_price") @db.Decimal(12, 2)
-  expectedClosingDate DateTime? @map("expected_closing_date") @db.Date
-  stage               String   @default("quote_sent") @db.VarChar(50)
-  // stages: 'demo_scheduled' | 'demo_done' | 'quote_sent' | 'payment_pending' | 'closed_won' | 'closed_lost'
-  closingNotes        String?  @map("closing_notes") @db.Text
-  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz()
-
-  tenant   Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  lead     Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  rep      User         @relation(fields: [repId], references: [id])
-  payments Payment[]
+  quotedPrice         Decimal      @map("quoted_price") @db.Decimal(12, 2)
+  expectedClosingDate DateTime?    @map("expected_closing_date") @db.Date
+  stage               String       @default("quote_sent") @db.VarChar(50)
+  closingNotes        String?      @map("closing_notes")
+  createdAt           DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  lead                Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  rep                 User         @relation(fields: [repId], references: [id])
+  tenant              Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payments            Payment[]
 
   @@map("deals")
 }
 
-// ============================================================
-// 7. Payment Collections & Operations Sync
-// ============================================================
 model Payment {
-  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId           String   @map("tenant_id") @db.Uuid
-  dealId             String   @map("deal_id") @db.Uuid
-  leadId             String   @map("lead_id") @db.Uuid
-  repId              String   @map("rep_id") @db.Uuid
-  userType           String   @map("user_type") @db.VarChar(20)
-  // 'new_user' | 'existing_user'
-  panelUserId        String   @map("panel_user_id") @db.VarChar(100)
-  creditsToAdd       Int      @map("credits_to_add")
-  originalAmount     Decimal  @map("original_amount") @db.Decimal(12, 2)
-  taxAmount          Decimal  @map("tax_amount") @db.Decimal(12, 2)
-  tdsAmount          Decimal  @default(0) @map("tds_amount") @db.Decimal(12, 2)
-  finalAmount        Decimal  @map("final_amount") @db.Decimal(12, 2)
-  paymentMode        String   @map("payment_mode") @db.VarChar(50)
-  // 'UPI' | 'NEFT/IMPS' | 'Cheque' | 'Gateway'
-  gstin              String?  @db.VarChar(15)
-  screenshotUrl      String   @map("screenshot_url") @db.Text
-  opsApprovalStatus  String   @default("pending_verification") @map("ops_approval_status") @db.VarChar(30)
-  // 'pending_verification' | 'approved' | 'rejected'
-  approvedBy         String?  @map("approved_by") @db.Uuid
-  creditsProvisioned Boolean  @default(false) @map("credits_provisioned")
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz()
-
-  tenant   Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  deal     Deal         @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  lead     Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
-  rep      User         @relation("PaymentRep", fields: [repId], references: [id])
-  approver User?        @relation("PaymentApprover", fields: [approvedBy], references: [id])
+  id                 String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId           String       @map("tenant_id") @db.Uuid
+  dealId             String       @map("deal_id") @db.Uuid
+  leadId             String       @map("lead_id") @db.Uuid
+  repId              String       @map("rep_id") @db.Uuid
+  userType           String       @map("user_type") @db.VarChar(20)
+  panelUserId        String       @map("panel_user_id") @db.VarChar(100)
+  creditsToAdd       Int          @map("credits_to_add")
+  originalAmount     Decimal      @map("original_amount") @db.Decimal(12, 2)
+  taxAmount          Decimal      @map("tax_amount") @db.Decimal(12, 2)
+  tdsAmount          Decimal      @default(0) @map("tds_amount") @db.Decimal(12, 2)
+  finalAmount        Decimal      @map("final_amount") @db.Decimal(12, 2)
+  paymentMode        String       @map("payment_mode") @db.VarChar(50)
+  gstin              String?      @db.VarChar(15)
+  screenshotUrl      String       @map("screenshot_url")
+  opsApprovalStatus  String       @default("pending_verification") @map("ops_approval_status") @db.VarChar(30)
+  approvedBy         String?      @map("approved_by") @db.Uuid
+  creditsProvisioned Boolean      @default(false) @map("credits_provisioned")
+  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  approver           User?        @relation("PaymentApprover", fields: [approvedBy], references: [id])
+  deal               Deal         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  lead               Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  rep                User         @relation("PaymentRep", fields: [repId], references: [id])
+  tenant             Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("payments")
 }
