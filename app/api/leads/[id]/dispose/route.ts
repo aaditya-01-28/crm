@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { withClient } from "@/lib/db";
+import { getSession } from "@/lib/auth";
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const tenantId = request.headers.get("x-tenant-id")!;
-  const repId = request.headers.get("x-user-id")!;
+  const session = await getSession();
+  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
+  const repId = request.headers.get("x-user-id") || session?.sub || "";
+
+  if (!tenantId || !repId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   try {
     const body = await request.json();
@@ -15,7 +21,6 @@ export async function PATCH(
       disposition,
       remark,
       callbackDatetime,
-      demoDuration,
       demoDatetime,
       decisionMakerName,
       meetingLink,
@@ -29,152 +34,174 @@ export async function PATCH(
       );
     }
 
-    // Validate lead belongs to tenant
-    const lead = await prisma.lead.findFirst({
-      where: { id, tenantId },
-    });
-    if (!lead) {
-      return NextResponse.json({ error: "Lead not found" }, { status: 404 });
-    }
+    return await withClient(async (client) => {
+      // Validate lead belongs to tenant
+      const leadRes = await client.query(
+        "SELECT id, status, rnr_count, assigned_rep_id, service_type FROM leads WHERE id = $1 AND tenant_id = $2",
+        [id, tenantId]
+      );
 
-    // Map disposition to lead status & additional actions
-    let newStatus = lead.status;
-    let rnrCount = lead.rnrCount;
-    const tasksToCreate: Parameters<typeof prisma.scheduledTask.create>[0]["data"][] = [];
-
-    switch (disposition) {
-      case "RNR":
-        newStatus = "rnr";
-        rnrCount += 1;
-        break;
-      case "Not Interested":
-        newStatus = "not_interested";
-        break;
-      case "Invalid":
-      case "Switched Off":
-        newStatus = "invalid";
-        break;
-      case "Already Using":
-        newStatus = "already_using";
-        break;
-      case "Connected":
-        newStatus = "callback"; // keep in active queue
-        break;
-      case "Callback":
-        newStatus = "callback";
-        tasksToCreate.push({
-          tenantId,
-          leadId: id,
-          repId,
-          taskType: "callback",
-          scheduledTime: callbackDatetime ? new Date(callbackDatetime) : null,
-          notes: remark || null,
-        });
-        break;
-      case "Demo Scheduled":
-        newStatus = "demo_scheduled";
-        tasksToCreate.push({
-          tenantId,
-          leadId: id,
-          repId,
-          taskType: "product_demo",
-          scheduledTime: demoDatetime ? new Date(demoDatetime) : null,
-          meetingLink: meetingLink || null,
-          notes: [
-            decisionMakerName ? `Decision Maker: ${decisionMakerName}` : null,
-            remark ? remark : null,
-          ]
-            .filter(Boolean)
-            .join(" | ") || null,
-        });
-        break;
-      case "Demo Done":
-      case "Demo Completed":
-        newStatus = "demo_done";
-        break;
-    }
-
-    // Transactionally update lead + create call log + create tasks + sync pipeline deals
-    await prisma.$transaction(async (tx) => {
-      await tx.lead.update({
-        where: { id },
-        data: { status: newStatus, rnrCount, updatedAt: new Date() },
-      });
-
-      await tx.callLog.create({
-        data: {
-          tenantId,
-          leadId: id,
-          repId,
-          disposition,
-          durationSeconds,
-          remark: remark || null,
-        },
-      });
-
-      for (const taskData of tasksToCreate) {
-        await tx.scheduledTask.create({ data: taskData });
+      if (leadRes.rows.length === 0) {
+        return NextResponse.json({ error: "Lead not found" }, { status: 404 });
       }
 
-      // If demo was marked done, complete any pending product_demo tasks
+      const lead = leadRes.rows[0];
+      let newStatus = lead.status;
+      let rnrCount = lead.rnr_count || 0;
+
+      let taskToCreate: {
+        taskType: string;
+        scheduledTime: Date | null;
+        meetingLink?: string | null;
+        notes?: string | null;
+      } | null = null;
+
+      switch (disposition) {
+        case "RNR":
+          newStatus = "rnr";
+          rnrCount += 1;
+          break;
+        case "Not Interested":
+          newStatus = "not_interested";
+          break;
+        case "Invalid":
+        case "Switched Off":
+          newStatus = "invalid";
+          break;
+        case "Already Using":
+          newStatus = "already_using";
+          break;
+        case "Connected":
+          newStatus = "callback";
+          break;
+        case "Callback":
+          newStatus = "callback";
+          taskToCreate = {
+            taskType: "callback",
+            scheduledTime: callbackDatetime ? new Date(callbackDatetime) : null,
+            notes: remark || null,
+          };
+          break;
+        case "Demo Scheduled":
+          newStatus = "demo_scheduled";
+          taskToCreate = {
+            taskType: "product_demo",
+            scheduledTime: demoDatetime ? new Date(demoDatetime) : null,
+            meetingLink: meetingLink || null,
+            notes: [
+              decisionMakerName ? `Decision Maker: ${decisionMakerName}` : null,
+              remark ? remark : null,
+            ]
+              .filter(Boolean)
+              .join(" | ") || null,
+          };
+          break;
+        case "Demo Done":
+        case "Demo Completed":
+          newStatus = "demo_done";
+          break;
+      }
+
+      // Update lead
+      await client.query(
+        "UPDATE leads SET status = $1, rnr_count = $2, updated_at = NOW() WHERE id = $3",
+        [newStatus, rnrCount, id]
+      );
+
+      // Create call log
+      await client.query(
+        `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, call_timestamp)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+        [tenantId, id, repId, disposition, durationSeconds, remark || null]
+      );
+
+      // Create scheduled task if needed
+      if (taskToCreate) {
+        await client.query(
+          `INSERT INTO scheduled_tasks (tenant_id, lead_id, rep_id, task_type, scheduled_time, meeting_link, notes, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')`,
+          [
+            tenantId,
+            id,
+            repId,
+            taskToCreate.taskType,
+            taskToCreate.scheduledTime,
+            taskToCreate.meetingLink || null,
+            taskToCreate.notes || null,
+          ]
+        );
+      }
+
+      // Complete pending product_demo tasks if demo done
       if (newStatus === "demo_done") {
-        await tx.scheduledTask.updateMany({
-          where: { leadId: id, taskType: "product_demo", status: "pending" },
-          data: { status: "completed", updatedAt: new Date() },
-        });
+        await client.query(
+          "UPDATE scheduled_tasks SET status = 'completed', updated_at = NOW() WHERE lead_id = $1 AND task_type = 'product_demo' AND status = 'pending'",
+          [id]
+        );
       }
 
       // Sync Deal Pipeline for demo stages
       if (newStatus === "demo_scheduled" || newStatus === "demo_done") {
-        const existingDeal = await tx.deal.findFirst({
-          where: { leadId: id, tenantId },
-        });
+        const dealCheck = await client.query(
+          "SELECT id FROM deals WHERE lead_id = $1 AND tenant_id = $2 LIMIT 1",
+          [id, tenantId]
+        );
 
-        if (existingDeal) {
-          await tx.deal.update({
-            where: { id: existingDeal.id },
-            data: {
-              stage: newStatus,
-              updatedAt: new Date(),
-            },
-          });
+        if (dealCheck.rows.length > 0) {
+          await client.query(
+            "UPDATE deals SET stage = $1, updated_at = NOW() WHERE id = $2",
+            [newStatus, dealCheck.rows[0].id]
+          );
         } else {
-          await tx.deal.create({
-            data: {
+          await client.query(
+            `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes)
+             VALUES ($1, $2, $3, $4, 10000, 0, $5, $6)`,
+            [
               tenantId,
-              leadId: id,
-              repId: lead.assignedRepId || repId,
-              serviceType: lead.serviceType || "WhatsApp API",
-              quantity: 10000,
-              quotedPrice: 0,
-              stage: newStatus,
-              closingNotes:
-                newStatus === "demo_done"
-                  ? "Product demo completed"
-                  : "Product demo scheduled",
-            },
-          });
+              id,
+              lead.assigned_rep_id || repId,
+              lead.service_type || "WhatsApp API",
+              newStatus,
+              newStatus === "demo_done" ? "Product demo completed" : "Product demo scheduled",
+            ]
+          );
         }
       }
-    });
 
-    // Fetch next queued lead for this rep
-    const nextLead = await prisma.lead.findFirst({
-      where: {
-        tenantId,
-        assignedRepId: repId,
-        id: { not: id },
-        OR: [{ status: "new" }, { status: "rnr", rnrCount: { lt: 3 } }],
-      },
-      orderBy: [{ rnrCount: "asc" }, { createdAt: "asc" }],
-    });
+      // Fetch next queued lead for this rep
+      const nextLeadRes = await client.query(
+        `SELECT l.id, l.tenant_id as "tenantId", l.assigned_rep_id as "assignedRepId",
+                l.phone_number as "phoneNumber", l.contact_name as "contactName",
+                l.company_name as "companyName", l.website_url as "websiteUrl",
+                l.business_vertical as "businessVertical", l.service_type as "serviceType",
+                l.source, l.status, l.rnr_count as "rnrCount", l.custom_metadata as "customMetadata",
+                l.created_at as "createdAt", l.updated_at as "updatedAt",
+                u.full_name as "assignedRepFullName",
+                (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = l.id) as "callLogsCount"
+         FROM leads l
+         LEFT JOIN users u ON l.assigned_rep_id = u.id
+         WHERE l.tenant_id = $1 AND l.assigned_rep_id = $2 AND l.id <> $3
+           AND (l.status = 'new' OR (l.status = 'rnr' AND l.rnr_count < 3))
+         ORDER BY l.rnr_count ASC, l.created_at ASC
+         LIMIT 1`,
+        [tenantId, repId, id]
+      );
 
-    return NextResponse.json({ success: true, nextLead });
+      const nextLead =
+        nextLeadRes.rows.length > 0
+          ? {
+              ...nextLeadRes.rows[0],
+              assignedRep: nextLeadRes.rows[0].assignedRepFullName
+                ? { fullName: nextLeadRes.rows[0].assignedRepFullName }
+                : null,
+              _count: { callLogs: nextLeadRes.rows[0].callLogsCount },
+            }
+          : null;
+
+      return NextResponse.json({ success: true, nextLead });
+    });
   } catch (error) {
     console.error("[DISPOSE]", error);
-    return NextResponse.json(
-      { error: "Failed to log disposition" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to log disposition" }, { status: 500 });
   }
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { withClient } from "@/lib/db";
 import { sendPasswordResetEmail } from "@/lib/mail";
 import crypto from "crypto";
 
@@ -16,57 +16,56 @@ export async function POST(request: NextRequest) {
     }
 
     const cleanEmail = email.toLowerCase().trim();
-    const user = await prisma.user.findUnique({
-      where: { email: cleanEmail },
-    });
 
-    // If user does not exist, return a generic success message so attacker cannot enumerate emails
-    if (!user) {
+    return await withClient(async (client) => {
+      const userRes = await client.query(
+        "SELECT id, email, full_name as \"fullName\", is_active as \"isActive\" FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1",
+        [cleanEmail]
+      );
+
+      if (userRes.rows.length === 0) {
+        return NextResponse.json({
+          success: true,
+          message: "If this email is registered with Textora Engage, password reset instructions have been dispatched to the inbox.",
+        });
+      }
+
+      const user = userRes.rows[0];
+
+      if (!user.isActive) {
+        return NextResponse.json(
+          { error: "This account has been deactivated or suspended by an Administrator. Please reach out to your organization Super Admin." },
+          { status: 403 }
+        );
+      }
+
+      const resetToken = crypto.randomBytes(32).toString("hex");
+      const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+      await client.query(
+        "UPDATE users SET reset_token = $1, reset_token_expiry = $2 WHERE id = $3",
+        [resetToken, resetTokenExpiry, user.id]
+      );
+
+      const origin =
+        request.headers.get("origin") ||
+        process.env.NEXT_PUBLIC_APP_URL ||
+        "http://localhost:3000";
+
+      const resetUrl = `${origin}/reset-password?token=${resetToken}`;
+
+      const mailResult = await sendPasswordResetEmail({
+        to: user.email,
+        fullName: user.fullName,
+        resetUrl,
+      });
+
       return NextResponse.json({
         success: true,
-        message: "If this email is registered with Textora Engage, password reset instructions have been dispatched to the inbox.",
+        message: `Password reset link has been dispatched to ${user.email}. Please check your inbox and spam folder.`,
+        delivered: mailResult.delivered,
+        ...(!mailResult.delivered ? { devPreviewUrl: resetUrl } : {}),
       });
-    }
-
-    // If user is deactivated/blocked
-    if (!user.isActive) {
-      return NextResponse.json(
-        { error: "This account has been deactivated or suspended by an Administrator. Please reach out to your organization Super Admin." },
-        { status: 403 }
-      );
-    }
-
-    // Generate secure random token valid for 60 minutes
-    const resetToken = crypto.randomBytes(32).toString("hex");
-    const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        resetToken,
-        resetTokenExpiry,
-      },
-    });
-
-    const origin =
-      request.headers.get("origin") ||
-      process.env.NEXT_PUBLIC_APP_URL ||
-      "http://localhost:3000";
-
-    const resetUrl = `${origin}/reset-password?token=${resetToken}`;
-
-    const mailResult = await sendPasswordResetEmail({
-      to: user.email,
-      fullName: user.fullName,
-      resetUrl,
-    });
-
-    return NextResponse.json({
-      success: true,
-      message: `Password reset link has been dispatched to ${user.email}. Please check your inbox and spam folder.`,
-      delivered: mailResult.delivered,
-      // Provide previewUrl if SMTP is not configured in dev
-      ...(!mailResult.delivered ? { devPreviewUrl: resetUrl } : {}),
     });
   } catch (error) {
     console.error("[FORGOT_PASSWORD_ERROR]", error);

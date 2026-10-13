@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { withClient } from "@/lib/db";
+import { getSession } from "@/lib/auth";
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const tenantId = request.headers.get("x-tenant-id")!;
-  const approverId = request.headers.get("x-user-id")!;
-  const role = request.headers.get("x-user-role")!;
+  const session = await getSession();
+  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
+  const approverId = request.headers.get("x-user-id") || session?.sub || "";
+  const role = request.headers.get("x-user-role") || session?.role || "";
 
   if (!["super_admin", "accounts_ops", "sales_manager"].includes(role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -18,38 +20,39 @@ export async function PATCH(
     const body = await request.json();
     const { status } = body; // 'approved' | 'rejected'
 
-    const payment = await prisma.payment.findFirst({ where: { id, tenantId } });
-    if (!payment) {
-      return NextResponse.json({ error: "Payment not found" }, { status: 404 });
-    }
+    return await withClient(async (client) => {
+      const paymentRes = await client.query(
+        "SELECT id, deal_id, lead_id FROM payments WHERE id = $1 AND tenant_id = $2",
+        [id, tenantId]
+      );
 
-    const updated = await prisma.payment.update({
-      where: { id },
-      data: {
-        opsApprovalStatus: status,
-        approvedBy: approverId,
-        creditsProvisioned: status === "approved",
-      },
+      if (paymentRes.rows.length === 0) {
+        return NextResponse.json({ error: "Payment not found" }, { status: 404 });
+      }
+
+      const payment = paymentRes.rows[0];
+
+      const updateRes = await client.query(
+        `UPDATE payments
+         SET ops_approval_status = $1, approved_by = $2, credits_provisioned = $3
+         WHERE id = $4
+         RETURNING *`,
+        [status, approverId, status === "approved", id]
+      );
+
+      if (status === "approved") {
+        await client.query("UPDATE deals SET stage = 'closed_won', updated_at = NOW() WHERE id = $1", [
+          payment.deal_id,
+        ]);
+        await client.query("UPDATE leads SET status = 'won', updated_at = NOW() WHERE id = $1", [
+          payment.lead_id,
+        ]);
+      }
+
+      return NextResponse.json({ payment: updateRes.rows[0] });
     });
-
-    // If approved, move deal to closed_won
-    if (status === "approved") {
-      await prisma.deal.update({
-        where: { id: payment.dealId },
-        data: { stage: "closed_won" },
-      });
-      await prisma.lead.update({
-        where: { id: payment.leadId },
-        data: { status: "won" },
-      });
-    }
-
-    return NextResponse.json({ payment: updated });
   } catch (error) {
     console.error("[PAYMENT APPROVE]", error);
-    return NextResponse.json(
-      { error: "Failed to update payment" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to update payment" }, { status: 500 });
   }
 }

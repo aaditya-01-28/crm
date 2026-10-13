@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 
 export async function PATCH(
@@ -44,50 +44,47 @@ export async function PATCH(
       }
     }
 
-    const targetUser = await prisma.user.findFirst({
-      where: { id, tenantId },
-    });
-
-    if (!targetUser) {
-      return NextResponse.json(
-        { error: "User not found in this organization" },
-        { status: 404 }
+    return await withClient(async (client) => {
+      const targetRes = await client.query(
+        "SELECT id, role, is_active FROM users WHERE id = $1 AND tenant_id = $2",
+        [id, tenantId]
       );
-    }
 
-    const updateData: { isActive?: boolean; role?: string } = {};
-
-    if (typeof isActive === "boolean") {
-      updateData.isActive = isActive;
-    }
-
-    if (newRole) {
-      const allowedRoles = ["sales_rep", "sales_manager", "accounts_ops", "super_admin"];
-      if (!allowedRoles.includes(newRole)) {
-        return NextResponse.json({ error: "Invalid role specified" }, { status: 400 });
+      if (targetRes.rows.length === 0) {
+        return NextResponse.json(
+          { error: "User not found in this organization" },
+          { status: 404 }
+        );
       }
-      updateData.role = newRole;
-    }
 
-    const updatedUser = await prisma.user.update({
-      where: { id },
-      data: updateData,
-      select: {
-        id: true,
-        fullName: true,
-        email: true,
-        phoneNumber: true,
-        role: true,
-        language: true,
-        isActive: true,
-        createdAt: true,
-      },
-    });
+      const existing = targetRes.rows[0];
+      const targetIsActive = typeof isActive === "boolean" ? isActive : existing.is_active;
 
-    return NextResponse.json({
-      success: true,
-      user: updatedUser,
-      message: `User ${updatedUser.fullName} updated successfully`,
+      let targetRole = existing.role;
+      if (newRole) {
+        const allowedRoles = ["sales_rep", "sales_manager", "accounts_ops", "super_admin"];
+        if (!allowedRoles.includes(newRole)) {
+          return NextResponse.json({ error: "Invalid role specified" }, { status: 400 });
+        }
+        targetRole = newRole;
+      }
+
+      const updateRes = await client.query(
+        `UPDATE users
+         SET is_active = $1, role = $2
+         WHERE id = $3 AND tenant_id = $4
+         RETURNING id, full_name as "fullName", email, phone_number as "phoneNumber",
+                   role, language, is_active as "isActive", created_at as "createdAt"`,
+        [targetIsActive, targetRole, id, tenantId]
+      );
+
+      const updatedUser = updateRes.rows[0];
+
+      return NextResponse.json({
+        success: true,
+        user: updatedUser,
+        message: `User ${updatedUser.fullName} updated successfully`,
+      });
     });
   } catch (error) {
     console.error("[TEAM_PATCH_USER_ERROR]", error);

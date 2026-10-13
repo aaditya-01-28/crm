@@ -1,45 +1,61 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { withClient } from "@/lib/db";
+import { getSession } from "@/lib/auth";
 import bcrypt from "bcryptjs";
 
 export async function GET(request: NextRequest) {
-  const tenantId = request.headers.get("x-tenant-id")!;
-  const role = request.headers.get("x-user-role")!;
+  const session = await getSession();
+  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId;
+  const role = request.headers.get("x-user-role") || session?.role;
 
-  if (!["super_admin", "sales_manager"].includes(role)) {
+  if (!tenantId || !role || !["super_admin", "sales_manager"].includes(role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const users = await prisma.user.findMany({
-    where: { tenantId },
-    select: {
-      id: true,
-      fullName: true,
-      email: true,
-      phoneNumber: true,
-      role: true,
-      language: true,
-      isActive: true,
-      createdAt: true,
-      _count: {
-        select: {
-          assignedLeads: true,
-          callLogs: true,
-          deals: true,
-        },
-      },
-    },
-    orderBy: { createdAt: "asc" },
-  });
+  try {
+    return await withClient(async (client) => {
+      const res = await client.query(
+        `SELECT u.id, u.full_name as "fullName", u.email, u.phone_number as "phoneNumber",
+                u.role, u.language, u.is_active as "isActive", u.created_at as "createdAt",
+                (SELECT COUNT(*)::int FROM leads WHERE assigned_rep_id = u.id) as "assignedLeadsCount",
+                (SELECT COUNT(*)::int FROM call_logs WHERE rep_id = u.id) as "callLogsCount",
+                (SELECT COUNT(*)::int FROM deals WHERE rep_id = u.id) as "dealsCount"
+         FROM users u
+         WHERE u.tenant_id = $1
+         ORDER BY u.created_at ASC`,
+        [tenantId]
+      );
 
-  return NextResponse.json({ users });
+      const users = res.rows.map((r) => ({
+        id: r.id,
+        fullName: r.fullName,
+        email: r.email,
+        phoneNumber: r.phoneNumber,
+        role: r.role,
+        language: r.language,
+        isActive: r.isActive,
+        createdAt: r.createdAt,
+        _count: {
+          assignedLeads: r.assignedLeadsCount,
+          callLogs: r.callLogsCount,
+          deals: r.dealsCount,
+        },
+      }));
+
+      return NextResponse.json({ users });
+    });
+  } catch (error) {
+    console.error("[TEAM_GET_ERROR]", error);
+    return NextResponse.json({ error: "Failed to fetch team members" }, { status: 500 });
+  }
 }
 
 export async function POST(request: NextRequest) {
-  const tenantId = request.headers.get("x-tenant-id")!;
-  const role = request.headers.get("x-user-role")!;
+  const session = await getSession();
+  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId;
+  const role = request.headers.get("x-user-role") || session?.role;
 
-  if (role !== "super_admin") {
+  if (!tenantId || role !== "super_admin") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -54,36 +70,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      return NextResponse.json(
-        { error: "A user with this email already exists" },
-        { status: 409 }
+    return await withClient(async (client) => {
+      const existing = await client.query(
+        "SELECT id FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1",
+        [email.trim()]
       );
-    }
+      if (existing.rows.length > 0) {
+        return NextResponse.json(
+          { error: "A user with this email already exists" },
+          { status: 409 }
+        );
+      }
 
-    const passwordHash = await bcrypt.hash(password, 12);
-    const user = await prisma.user.create({
-      data: {
-        tenantId,
-        fullName,
-        email,
-        passwordHash,
-        role: userRole,
-        phoneNumber: phoneNumber || null,
-      },
-      select: {
-        id: true,
-        fullName: true,
-        email: true,
-        phoneNumber: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-      },
+      const passwordHash = await bcrypt.hash(password, 12);
+      const insertRes = await client.query(
+        `INSERT INTO users (tenant_id, full_name, email, password_hash, role, phone_number, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, true)
+         RETURNING id, full_name as "fullName", email, phone_number as "phoneNumber",
+                   role, is_active as "isActive", created_at as "createdAt"`,
+        [tenantId, fullName.trim(), email.trim(), passwordHash, userRole, phoneNumber ? phoneNumber.trim() : null]
+      );
+
+      return NextResponse.json({ user: insertRes.rows[0] }, { status: 201 });
     });
-
-    return NextResponse.json({ user }, { status: 201 });
   } catch (error) {
     console.error("[TEAM POST]", error);
     return NextResponse.json({ error: "Failed to create user" }, { status: 500 });

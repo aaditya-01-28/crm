@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { withClient } from "@/lib/db";
 import { can, isSalesRep } from "@/lib/rbac";
 import { getSession } from "@/lib/auth";
 
@@ -13,72 +13,136 @@ export async function GET(
   const repId = request.headers.get("x-user-id") || session?.sub || "";
   const role = request.headers.get("x-user-role") || session?.role || "";
 
+  if (!tenantId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const isLevel1 = isSalesRep(role);
-  const where: Record<string, unknown> = { id, tenantId };
-  if (isLevel1) {
-    where.assignedRepId = repId;
+
+  try {
+    return await withClient(async (client) => {
+      const leadRes = await client.query(
+        `SELECT l.id, l.tenant_id as "tenantId", l.assigned_rep_id as "assignedRepId",
+                l.first_assigned_rep_id as "firstAssignedRepId", l.first_assigned_at as "firstAssignedAt",
+                l.phone_number as "phoneNumber", l.contact_name as "contactName",
+                l.company_name as "companyName", l.website_url as "websiteUrl",
+                l.business_vertical as "businessVertical", l.service_type as "serviceType",
+                l.source, l.status, l.rnr_count as "rnrCount", l.custom_metadata as "customMetadata",
+                l.created_at as "createdAt", l.updated_at as "updatedAt",
+                ar.id as "arId", ar.full_name as "arFullName", ar.email as "arEmail",
+                far.id as "farId", far.full_name as "farFullName", far.email as "farEmail"
+         FROM leads l
+         LEFT JOIN users ar ON l.assigned_rep_id = ar.id
+         LEFT JOIN users far ON l.first_assigned_rep_id = far.id
+         WHERE l.id = $1 AND l.tenant_id = $2 ${isLevel1 ? "AND l.assigned_rep_id = $3" : ""}`,
+        isLevel1 ? [id, tenantId, repId] : [id, tenantId]
+      );
+
+      if (leadRes.rows.length === 0) {
+        return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+      }
+
+      const l = leadRes.rows[0];
+
+      // Call logs
+      const callLogsRes = await client.query(
+        `SELECT c.id, c.tenant_id as "tenantId", c.lead_id as "leadId", c.rep_id as "repId",
+                c.disposition, c.duration_seconds as "durationSeconds", c.remark,
+                c.call_timestamp as "callTimestamp",
+                u.full_name as "repFullName", u.email as "repEmail"
+         FROM call_logs c
+         LEFT JOIN users u ON c.rep_id = u.id
+         WHERE c.lead_id = $1 ${isLevel1 ? "AND c.rep_id = $2" : ""}
+         ORDER BY c.call_timestamp DESC`,
+        isLevel1 ? [id, repId] : [id]
+      );
+
+      const callLogs = callLogsRes.rows.map((c) => ({
+        id: c.id,
+        tenantId: c.tenantId,
+        leadId: c.leadId,
+        repId: c.repId,
+        disposition: c.disposition,
+        durationSeconds: c.durationSeconds,
+        remark: c.remark,
+        callTimestamp: c.callTimestamp,
+        rep: { fullName: c.repFullName, email: c.repEmail },
+      }));
+
+      // Tasks
+      const tasksRes = await client.query(
+        `SELECT t.id, t.tenant_id as "tenantId", t.lead_id as "leadId", t.rep_id as "repId",
+                t.task_type as "taskType", t.scheduled_time as "scheduledTime", t.status,
+                t.meeting_link as "meetingLink", t.notes, t.created_at as "createdAt",
+                u.full_name as "repFullName"
+         FROM scheduled_tasks t
+         LEFT JOIN users u ON t.rep_id = u.id
+         WHERE t.lead_id = $1
+         ORDER BY t.scheduled_time DESC`,
+        [id]
+      );
+
+      const tasks = tasksRes.rows.map((t) => ({
+        ...t,
+        rep: { fullName: t.repFullName },
+      }));
+
+      // Deals
+      const dealsRes = await client.query(
+        `SELECT d.id, d.tenant_id as "tenantId", d.lead_id as "leadId", d.rep_id as "repId",
+                d.service_type as "serviceType", d.quantity, d.quoted_price as "quotedPrice",
+                d.expected_closing_date as "expectedClosingDate", d.stage, d.closing_notes as "closingNotes",
+                d.created_at as "createdAt", d.updated_at as "updatedAt",
+                u.full_name as "repFullName"
+         FROM deals d
+         LEFT JOIN users u ON d.rep_id = u.id
+         WHERE d.lead_id = $1
+         ORDER BY d.created_at DESC`,
+        [id]
+      );
+
+      const deals = dealsRes.rows.map((d) => ({
+        ...d,
+        rep: { fullName: d.repFullName },
+        payments: [],
+      }));
+
+      const meta = (l.customMetadata as Record<string, unknown>) || {};
+      const preferredLanguage = (meta.preferredLanguage as string) || null;
+
+      return NextResponse.json({
+        lead: {
+          id: l.id,
+          tenantId: l.tenantId,
+          assignedRepId: l.assignedRepId,
+          firstAssignedRepId: isLevel1 ? null : l.firstAssignedRepId,
+          firstAssignedAt: isLevel1 ? null : l.firstAssignedAt,
+          phoneNumber: l.phoneNumber,
+          contactName: l.contactName,
+          companyName: l.companyName,
+          websiteUrl: l.websiteUrl,
+          businessVertical: l.businessVertical,
+          serviceType: l.serviceType,
+          source: l.source,
+          status: l.status,
+          rnrCount: l.rnrCount,
+          customMetadata: l.customMetadata,
+          createdAt: l.createdAt,
+          updatedAt: l.updatedAt,
+          assignedRep: l.arId ? { id: l.arId, fullName: l.arFullName, email: l.arEmail } : null,
+          firstAssignedRep:
+            !isLevel1 && l.farId ? { id: l.farId, fullName: l.farFullName, email: l.farEmail } : null,
+          callLogs,
+          tasks,
+          deals,
+          preferredLanguage,
+        },
+      });
+    });
+  } catch (error) {
+    console.error("[LEAD GET]", error);
+    return NextResponse.json({ error: "Failed to fetch lead" }, { status: 500 });
   }
-
-  const lead = await prisma.lead.findFirst({
-    where,
-    include: {
-      assignedRep: {
-        select: { id: true, fullName: true, email: true },
-      },
-      ...(!isLevel1
-        ? {
-            firstAssignedRep: {
-              select: { id: true, fullName: true, email: true },
-            },
-          }
-        : {}),
-      callLogs: {
-        where: isLevel1 ? { repId } : undefined,
-        orderBy: { callTimestamp: "desc" },
-        include: {
-          rep: { select: { fullName: true, email: true } },
-        },
-      },
-      tasks: {
-        orderBy: { scheduledTime: "desc" },
-        include: {
-          rep: { select: { fullName: true } },
-        },
-      },
-      deals: {
-        orderBy: { createdAt: "desc" },
-        include: {
-          rep: { select: { fullName: true } },
-          payments: {
-            select: {
-              id: true,
-              finalAmount: true,
-              opsApprovalStatus: true,
-              paymentMode: true,
-              createdAt: true,
-            },
-          },
-        },
-      },
-    },
-  });
-
-  if (!lead) {
-    return NextResponse.json({ error: "Lead not found" }, { status: 404 });
-  }
-
-  const meta = (lead.customMetadata as Record<string, unknown>) || {};
-  const preferredLanguage = (meta.preferredLanguage as string) || null;
-
-  return NextResponse.json({
-    lead: {
-      ...lead,
-      firstAssignedRepId: isLevel1 ? null : lead.firstAssignedRepId,
-      firstAssignedAt: isLevel1 ? null : lead.firstAssignedAt,
-      firstAssignedRep: isLevel1 ? null : (lead as any).firstAssignedRep || null,
-      preferredLanguage,
-    },
-  });
 }
 
 export async function PATCH(
@@ -105,110 +169,127 @@ export async function PATCH(
       preferredLanguage,
     } = body;
 
-    const where: Record<string, unknown> = { id, tenantId };
-    if (isSalesRep(role)) {
-      where.assignedRepId = repId;
-    }
-
-    const existing = await prisma.lead.findFirst({ where });
-    if (!existing) {
-      return NextResponse.json({ error: "Lead not found" }, { status: 404 });
-    }
-
-    const existingMeta = (existing.customMetadata as Record<string, unknown>) || {};
-    const newMetadata = {
-      ...existingMeta,
-      ...(preferredLanguage !== undefined ? { preferredLanguage: preferredLanguage || null } : {}),
-    };
-
-    if (preferredLanguage !== undefined) {
-      await prisma.$executeRawUnsafe(
-        'UPDATE "leads" SET "preferred_language" = $1 WHERE "id" = $2::uuid',
-        preferredLanguage || null,
-        id
-      ).catch(() => {});
-    }
-
-    const updated = await prisma.lead.update({
-      where: { id },
-      data: {
-        contactName: contactName !== undefined ? contactName : existing.contactName,
-        companyName: companyName !== undefined ? companyName : existing.companyName,
-        phoneNumber: phoneNumber !== undefined ? phoneNumber : existing.phoneNumber,
-        websiteUrl: websiteUrl !== undefined ? websiteUrl : existing.websiteUrl,
-        businessVertical: businessVertical !== undefined ? businessVertical : existing.businessVertical,
-        serviceType: serviceType !== undefined ? serviceType : existing.serviceType,
-        status: status !== undefined ? status : existing.status,
-        customMetadata: newMetadata,
-        assignedRepId:
-          can(role, "leads:assign") && assignedRepId !== undefined
-            ? assignedRepId === "" || assignedRepId === "unassigned"
-              ? null
-              : assignedRepId
-            : existing.assignedRepId,
-        firstAssignedRepId:
-          existing.firstAssignedRepId ||
-          (can(role, "leads:assign") && assignedRepId && assignedRepId !== "unassigned" && assignedRepId !== ""
-            ? assignedRepId
-            : existing.firstAssignedRepId),
-        firstAssignedAt:
-          existing.firstAssignedAt ||
-          (!existing.firstAssignedRepId && can(role, "leads:assign") && assignedRepId && assignedRepId !== "unassigned" && assignedRepId !== ""
-            ? new Date()
-            : existing.firstAssignedAt),
-        updatedAt: new Date(),
-      },
-      include: {
-        assignedRep: { select: { id: true, fullName: true } },
-        firstAssignedRep: { select: { id: true, fullName: true } },
-      },
-    });
-
-    // Auto-sync deal pipeline if status changed to demo stages
-    if (status === "demo_done" || status === "demo_scheduled") {
-      const existingDeal = await prisma.deal.findFirst({
-        where: { leadId: id, tenantId },
-      });
-
-      if (existingDeal) {
-        await prisma.deal.update({
-          where: { id: existingDeal.id },
-          data: { stage: status, updatedAt: new Date() },
-        });
-      } else {
-        await prisma.deal.create({
-          data: {
-            tenantId,
-            leadId: id,
-            repId: updated.assignedRepId || repId,
-            serviceType: updated.serviceType || "WhatsApp API",
-            quantity: 10000,
-            quotedPrice: 0,
-            stage: status,
-            closingNotes: status === "demo_done" ? "Product demo completed" : "Product demo scheduled",
-          },
-        });
-      }
-
-      if (status === "demo_done") {
-        await prisma.scheduledTask.updateMany({
-          where: { leadId: id, taskType: "product_demo", status: "pending" },
-          data: { status: "completed", updatedAt: new Date() },
-        });
-      }
-    }
-
-    const updatedMeta = (updated.customMetadata as Record<string, unknown>) || {};
-    const finalLang = (updatedMeta.preferredLanguage as string) || null;
     const isLevel1 = isSalesRep(role);
-    return NextResponse.json({
-      lead: {
-        ...updated,
-        firstAssignedRepId: isLevel1 ? null : updated.firstAssignedRepId,
-        firstAssignedAt: isLevel1 ? null : updated.firstAssignedAt,
-        firstAssignedRep: isLevel1 ? null : updated.firstAssignedRep,
-        preferredLanguage: finalLang,
-      },
+
+    return await withClient(async (client) => {
+      const existingRes = await client.query(
+        `SELECT * FROM leads WHERE id = $1 AND tenant_id = $2 ${isLevel1 ? "AND assigned_rep_id = $3" : ""}`,
+        isLevel1 ? [id, tenantId, repId] : [id, tenantId]
+      );
+
+      if (existingRes.rows.length === 0) {
+        return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+      }
+
+      const existing = existingRes.rows[0];
+      const existingMeta = (existing.custom_metadata as Record<string, unknown>) || {};
+      const newMetadata = {
+        ...existingMeta,
+        ...(preferredLanguage !== undefined ? { preferredLanguage: preferredLanguage || null } : {}),
+      };
+
+      const finalAssignedRepId =
+        can(role, "leads:assign") && assignedRepId !== undefined
+          ? assignedRepId === "" || assignedRepId === "unassigned"
+            ? null
+            : assignedRepId
+          : existing.assigned_rep_id;
+
+      const finalFirstAssignedRepId =
+        existing.first_assigned_rep_id ||
+        (can(role, "leads:assign") && assignedRepId && assignedRepId !== "unassigned" && assignedRepId !== ""
+          ? assignedRepId
+          : existing.first_assigned_rep_id);
+
+      const finalFirstAssignedAt =
+        existing.first_assigned_at ||
+        (!existing.first_assigned_rep_id && can(role, "leads:assign") && assignedRepId && assignedRepId !== "unassigned" && assignedRepId !== ""
+          ? new Date()
+          : existing.first_assigned_at);
+
+      const updateRes = await client.query(
+        `UPDATE leads
+         SET contact_name = COALESCE($1, contact_name),
+             company_name = COALESCE($2, company_name),
+             phone_number = COALESCE($3, phone_number),
+             website_url = COALESCE($4, website_url),
+             business_vertical = COALESCE($5, business_vertical),
+             service_type = COALESCE($6, service_type),
+             status = COALESCE($7, status),
+             custom_metadata = $8,
+             assigned_rep_id = $9,
+             first_assigned_rep_id = $10,
+             first_assigned_at = $11,
+             updated_at = NOW()
+         WHERE id = $12
+         RETURNING id, tenant_id as "tenantId", assigned_rep_id as "assignedRepId",
+                   first_assigned_rep_id as "firstAssignedRepId", first_assigned_at as "firstAssignedAt",
+                   phone_number as "phoneNumber", contact_name as "contactName",
+                   company_name as "companyName", website_url as "websiteUrl",
+                   business_vertical as "businessVertical", service_type as "serviceType",
+                   source, status, rnr_count as "rnrCount", custom_metadata as "customMetadata",
+                   created_at as "createdAt", updated_at as "updatedAt"`,
+        [
+          contactName !== undefined ? contactName : null,
+          companyName !== undefined ? companyName : null,
+          phoneNumber !== undefined ? phoneNumber : null,
+          websiteUrl !== undefined ? websiteUrl : null,
+          businessVertical !== undefined ? businessVertical : null,
+          serviceType !== undefined ? serviceType : null,
+          status !== undefined ? status : null,
+          JSON.stringify(newMetadata),
+          finalAssignedRepId,
+          finalFirstAssignedRepId,
+          finalFirstAssignedAt,
+          id,
+        ]
+      );
+
+      const updated = updateRes.rows[0];
+
+      // Auto-sync deal pipeline if status changed to demo stages
+      if (status === "demo_done" || status === "demo_scheduled") {
+        const dealCheck = await client.query(
+          "SELECT id FROM deals WHERE lead_id = $1 AND tenant_id = $2 LIMIT 1",
+          [id, tenantId]
+        );
+
+        if (dealCheck.rows.length > 0) {
+          await client.query(
+            "UPDATE deals SET stage = $1, updated_at = NOW() WHERE id = $2",
+            [status, dealCheck.rows[0].id]
+          );
+        } else {
+          await client.query(
+            `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes)
+             VALUES ($1, $2, $3, $4, 10000, 0, $5, $6)`,
+            [
+              tenantId,
+              id,
+              updated.assignedRepId || repId,
+              updated.serviceType || "WhatsApp API",
+              status,
+              status === "demo_done" ? "Product demo completed" : "Product demo scheduled",
+            ]
+          );
+        }
+
+        if (status === "demo_done") {
+          await client.query(
+            "UPDATE scheduled_tasks SET status = 'completed', updated_at = NOW() WHERE lead_id = $1 AND task_type = 'product_demo' AND status = 'pending'",
+            [id]
+          );
+        }
+      }
+
+      return NextResponse.json({
+        lead: {
+          ...updated,
+          firstAssignedRepId: isLevel1 ? null : updated.firstAssignedRepId,
+          firstAssignedAt: isLevel1 ? null : updated.firstAssignedAt,
+          preferredLanguage: preferredLanguage || null,
+        },
+      });
     });
   } catch (error) {
     console.error("[LEAD PATCH]", error);

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { withClient } from "@/lib/db";
 import { can } from "@/lib/rbac";
 import { getSession } from "@/lib/auth";
 
@@ -15,13 +15,10 @@ interface ImportedLead {
 function cleanPhoneNumber(raw: unknown): string {
   if (raw === null || raw === undefined) return "";
   let str = String(raw).trim();
-  // Handle Excel decimals like 9876543210.0
   if (str.includes(".") && !str.toLowerCase().includes("e")) {
     str = str.split(".")[0];
   }
-  // Strip all non-digits
   const digits = str.replace(/\D/g, "");
-  // Take the last 10 digits (handles +91, 91, 0 prefixes)
   if (digits.length >= 10) return digits.slice(-10);
   return digits;
 }
@@ -29,14 +26,12 @@ function cleanPhoneNumber(raw: unknown): string {
 export async function POST(request: NextRequest) {
   const session = await getSession();
   const tenantId = request.headers.get("x-tenant-id") || session?.tenantId;
-  const repId = request.headers.get("x-user-id") || session?.sub;
   const role = request.headers.get("x-user-role") || session?.role;
 
   if (!tenantId || !role) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Only Level 2 (Manager) and Level 3 (Admin) can import leads
   if (!can(role, "leads:import")) {
     return NextResponse.json(
       { error: "Forbidden: Only managers and admins can import leads" },
@@ -60,7 +55,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No leads provided" }, { status: 400 });
     }
 
-    // Normalize phone numbers and reject invalid rows
     const processed = leads.map((l) => ({
       ...l,
       phone: cleanPhoneNumber(l.phone),
@@ -78,7 +72,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // De-duplicate within the uploaded batch itself (keep first occurrence)
     const seenInBatch = new Set<string>();
     const batchUnique: typeof validLeads = [];
     let batchDuplicatesCount = 0;
@@ -92,81 +85,86 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Check existing phone numbers in database for this tenant
-    const existing = await prisma.lead.findMany({
-      where: {
-        tenantId,
-        phoneNumber: { in: batchUnique.map((l) => l.phone) },
-      },
-      select: { phoneNumber: true },
-    });
-    const existingPhones = new Set(existing.map((e) => e.phoneNumber));
+    return await withClient(async (client) => {
+      const phones = batchUnique.map((l) => l.phone);
+      const existingRes = await client.query(
+        "SELECT phone_number FROM leads WHERE tenant_id = $1 AND phone_number = ANY($2::varchar[])",
+        [tenantId, phones]
+      );
 
-    const newLeads = batchUnique.filter((l) => !existingPhones.has(l.phone));
+      const existingPhones = new Set(existingRes.rows.map((e: any) => e.phone_number));
+      const newLeads = batchUnique.filter((l) => !existingPhones.has(l.phone));
 
-    if (newLeads.length === 0) {
-      return NextResponse.json({
-        imported: 0,
-        duplicates: batchUnique.length + batchDuplicatesCount,
-        invalid: leads.length - validLeads.length,
-        total: leads.length,
-        message: "All phone numbers in this file already exist in your CRM database",
-      });
-    }
-
-    // Determine target rep assignment
-    let roundRobinReps: string[] = [];
-    if (assignmentMode === "round_robin") {
-      const activeReps = await prisma.user.findMany({
-        where: { tenantId, role: "sales_rep", isActive: true },
-        select: { id: true },
-      });
-      roundRobinReps = activeReps.map((r) => r.id);
-    }
-
-    let defaultTargetRep: string | null = null;
-    if (assignmentMode === "specific" && assignToRepId && assignToRepId !== "unassigned") {
-      const targetUser = await prisma.user.findFirst({
-        where: { id: assignToRepId, tenantId, isActive: true },
-        select: { id: true },
-      });
-      if (targetUser) {
-        defaultTargetRep = targetUser.id;
+      if (newLeads.length === 0) {
+        return NextResponse.json({
+          imported: 0,
+          duplicates: batchUnique.length + batchDuplicatesCount,
+          invalid: leads.length - validLeads.length,
+          total: leads.length,
+          message: "All phone numbers in this file already exist in your CRM database",
+        });
       }
-    }
 
-    // Batch insert new leads (leaving optional fields blank if empty)
-    const result = await prisma.lead.createMany({
-      data: newLeads.map((l, index) => {
+      let roundRobinReps: string[] = [];
+      if (assignmentMode === "round_robin") {
+        const repsRes = await client.query(
+          "SELECT id FROM users WHERE tenant_id = $1 AND role = 'sales_rep' AND is_active = true",
+          [tenantId]
+        );
+        roundRobinReps = repsRes.rows.map((r: any) => r.id);
+      }
+
+      let defaultTargetRep: string | null = null;
+      if (assignmentMode === "specific" && assignToRepId && assignToRepId !== "unassigned") {
+        const userRes = await client.query(
+          "SELECT id FROM users WHERE id = $1 AND tenant_id = $2 AND is_active = true",
+          [assignToRepId, tenantId]
+        );
+        if (userRes.rows.length > 0) {
+          defaultTargetRep = userRes.rows[0].id;
+        }
+      }
+
+      let importedCount = 0;
+      for (let i = 0; i < newLeads.length; i++) {
+        const l = newLeads[i];
         let assignedId: string | null = null;
         if (roundRobinReps.length > 0) {
-          assignedId = roundRobinReps[index % roundRobinReps.length];
+          assignedId = roundRobinReps[i % roundRobinReps.length];
         } else {
           assignedId = defaultTargetRep;
         }
 
-        return {
-          tenantId,
-          assignedRepId: assignedId,
-          firstAssignedRepId: assignedId,
-          firstAssignedAt: assignedId ? new Date() : null,
-          phoneNumber: l.phone,
-          contactName: l.name && l.name.trim() !== "" ? l.name.trim() : null,
-          companyName: l.company && l.company.trim() !== "" ? l.company.trim() : null,
-          businessVertical: l.vertical && l.vertical.trim() !== "" ? l.vertical.trim() : null,
-          serviceType: l.service && l.service.trim() !== "" ? l.service.trim() : null,
-          source: l.source || "Vendor Cold List",
-          status: "new",
-        };
-      }),
-      skipDuplicates: true,
-    });
+        await client.query(
+          `INSERT INTO leads (
+             tenant_id, assigned_rep_id, first_assigned_rep_id, first_assigned_at,
+             phone_number, contact_name, company_name, business_vertical,
+             service_type, source, status, created_at, updated_at
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'new', NOW(), NOW())
+           ON CONFLICT DO NOTHING`,
+          [
+            tenantId,
+            assignedId,
+            assignedId,
+            assignedId ? new Date() : null,
+            l.phone,
+            l.name && l.name.trim() !== "" ? l.name.trim() : null,
+            l.company && l.company.trim() !== "" ? l.company.trim() : null,
+            l.vertical && l.vertical.trim() !== "" ? l.vertical.trim() : null,
+            l.service && l.service.trim() !== "" ? l.service.trim() : null,
+            l.source || "Vendor Cold List",
+          ]
+        );
+        importedCount++;
+      }
 
-    return NextResponse.json({
-      imported: result.count,
-      duplicates: existingPhones.size + batchDuplicatesCount,
-      invalid: leads.length - validLeads.length,
-      total: leads.length,
+      return NextResponse.json({
+        imported: importedCount,
+        duplicates: existingPhones.size + batchDuplicatesCount,
+        invalid: leads.length - validLeads.length,
+        total: leads.length,
+      });
     });
   } catch (error) {
     console.error("[IMPORT]", error);

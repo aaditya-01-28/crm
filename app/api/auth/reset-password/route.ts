@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { withClient } from "@/lib/db";
 import bcrypt from "bcryptjs";
 
 export async function POST(request: NextRequest) {
@@ -21,45 +21,39 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Locate active user with matching unexpired token
-    const user = await prisma.user.findFirst({
-      where: {
-        resetToken: token,
-        resetTokenExpiry: {
-          gt: new Date(),
-        },
-      },
-    });
-
-    if (!user) {
-      return NextResponse.json(
-        { error: "This password reset link is invalid or has expired. Please request a fresh reset link." },
-        { status: 400 }
+    return await withClient(async (client) => {
+      const userRes = await client.query(
+        "SELECT id, is_active as \"isActive\" FROM users WHERE reset_token = $1 AND reset_token_expiry > NOW() LIMIT 1",
+        [token]
       );
-    }
 
-    if (!user.isActive) {
-      return NextResponse.json(
-        { error: "This account has been deactivated or blocked by an Administrator." },
-        { status: 403 }
+      if (userRes.rows.length === 0) {
+        return NextResponse.json(
+          { error: "This password reset link is invalid or has expired. Please request a fresh reset link." },
+          { status: 400 }
+        );
+      }
+
+      const user = userRes.rows[0];
+
+      if (!user.isActive) {
+        return NextResponse.json(
+          { error: "This account has been deactivated or blocked by an Administrator." },
+          { status: 403 }
+        );
+      }
+
+      const passwordHash = await bcrypt.hash(newPassword, 12);
+
+      await client.query(
+        "UPDATE users SET password_hash = $1, reset_token = NULL, reset_token_expiry = NULL WHERE id = $2",
+        [passwordHash, user.id]
       );
-    }
 
-    // Hash new password and invalidate the reset token
-    const passwordHash = await bcrypt.hash(newPassword, 12);
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        passwordHash,
-        resetToken: null,
-        resetTokenExpiry: null,
-      },
-    });
-
-    return NextResponse.json({
-      success: true,
-      message: "Password reset successful! You may now sign in with your new credentials.",
+      return NextResponse.json({
+        success: true,
+        message: "Password reset successful! You may now sign in with your new credentials.",
+      });
     });
   } catch (error) {
     console.error("[RESET_PASSWORD_ERROR]", error);

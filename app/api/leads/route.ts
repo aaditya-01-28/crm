@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { withClient } from "@/lib/db";
 import { can, isSalesRep } from "@/lib/rbac";
 import { getSession } from "@/lib/auth";
 
@@ -10,150 +10,225 @@ export async function GET(request: NextRequest) {
   const role = request.headers.get("x-user-role") || session?.role || "";
   const { searchParams } = new URL(request.url);
 
+  if (!tenantId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const status = searchParams.get("status");
   const vertical = searchParams.get("vertical");
   const search = searchParams.get("search")?.trim();
   const filterRepId = searchParams.get("repId");
   const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
   const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "25")));
-  const queue = searchParams.get("queue") === "true"; // next dialer lead
+  const queue = searchParams.get("queue") === "true";
 
-  // Queue mode for fast calling console
-  if (queue) {
-    const queueWhere: Record<string, unknown> = {
-      tenantId,
-      assignedRepId: repId,
-      OR: [
-        { status: "new" },
-        { status: "rnr", rnrCount: { lt: 3 } },
-      ],
-    };
+  try {
+    return await withClient(async (client) => {
+      // 1. Queue mode for Dialer Console
+      if (queue) {
+        const queueRes = await client.query(
+          `SELECT l.id, l.tenant_id as "tenantId", l.assigned_rep_id as "assignedRepId",
+                  l.phone_number as "phoneNumber", l.contact_name as "contactName",
+                  l.company_name as "companyName", l.website_url as "websiteUrl",
+                  l.business_vertical as "businessVertical", l.service_type as "serviceType",
+                  l.source, l.status, l.rnr_count as "rnrCount", l.custom_metadata as "customMetadata",
+                  l.created_at as "createdAt", l.updated_at as "updatedAt",
+                  u.full_name as "assignedRepFullName",
+                  (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = l.id) as "callLogsCount"
+           FROM leads l
+           LEFT JOIN users u ON l.assigned_rep_id = u.id
+           WHERE l.tenant_id = $1 AND l.assigned_rep_id = $2
+             AND (l.status = 'new' OR (l.status = 'rnr' AND l.rnr_count < 3))
+           ORDER BY l.rnr_count ASC, l.created_at ASC
+           LIMIT 1`,
+          [tenantId, repId]
+        );
 
-    const lead = await prisma.lead.findFirst({
-      where: queueWhere,
-      orderBy: [{ rnrCount: "asc" }, { createdAt: "asc" }],
-      include: {
-        assignedRep: { select: { fullName: true } },
-        _count: { select: { callLogs: true } },
-      },
-    });
-    return NextResponse.json({ lead });
-  }
+        if (queueRes.rows.length === 0) {
+          return NextResponse.json({ lead: null });
+        }
 
-  // Base scope: sales reps see their own leads; admins/managers see all tenant leads
-  const baseWhere: Record<string, unknown> = { tenantId };
+        const q = queueRes.rows[0];
+        const lead = {
+          id: q.id,
+          tenantId: q.tenantId,
+          assignedRepId: q.assignedRepId,
+          phoneNumber: q.phoneNumber,
+          contactName: q.contactName,
+          companyName: q.companyName,
+          websiteUrl: q.websiteUrl,
+          businessVertical: q.businessVertical,
+          serviceType: q.serviceType,
+          source: q.source,
+          status: q.status,
+          rnrCount: q.rnrCount,
+          customMetadata: q.customMetadata,
+          createdAt: q.createdAt,
+          updatedAt: q.updatedAt,
+          assignedRep: q.assignedRepFullName ? { fullName: q.assignedRepFullName } : null,
+          _count: { callLogs: q.callLogsCount },
+        };
 
-  if (isSalesRep(role)) {
-    baseWhere.assignedRepId = repId;
-  } else if (filterRepId) {
-    if (filterRepId === "unassigned") {
-      baseWhere.assignedRepId = null;
-    } else {
-      baseWhere.assignedRepId = filterRepId;
-    }
-  }
+        return NextResponse.json({ lead });
+      }
 
-  // Filter criteria for list
-  const where: Record<string, unknown> = { ...baseWhere };
+      // 2. Standard Leads Directory Filter
+      const baseConditions: string[] = ["l.tenant_id = $1"];
+      const baseParams: any[] = [tenantId];
 
-  if (status && status !== "all") {
-    where.status = status;
-  }
+      if (isSalesRep(role)) {
+        baseConditions.push(`l.assigned_rep_id = $${baseParams.push(repId)}`);
+      } else if (filterRepId) {
+        if (filterRepId === "unassigned") {
+          baseConditions.push("l.assigned_rep_id IS NULL");
+        } else {
+          baseConditions.push(`l.assigned_rep_id = $${baseParams.push(filterRepId)}`);
+        }
+      }
 
-  if (vertical && vertical !== "all") {
-    where.businessVertical = vertical;
-  }
+      const conditions: string[] = [...baseConditions];
+      const params: any[] = [...baseParams];
 
-  if (search) {
-    where.OR = [
-      { companyName: { contains: search, mode: "insensitive" } },
-      { contactName: { contains: search, mode: "insensitive" } },
-      { phoneNumber: { contains: search } },
-      { businessVertical: { contains: search, mode: "insensitive" } },
-      { serviceType: { contains: search, mode: "insensitive" } },
-    ];
-  }
+      if (status && status !== "all") {
+        conditions.push(`l.status = $${params.push(status)}`);
+      }
 
-  // Fetch paginated leads, total count, status statistics, and unassigned count concurrently
-  const [leads, total, statusCounts, unassignedTotal] = await Promise.all([
-    prisma.lead.findMany({
-      where,
-      orderBy: { updatedAt: "desc" },
-      skip: (page - 1) * limit,
-      take: limit,
-      include: {
-        assignedRep: { select: { id: true, fullName: true } },
-        ...(isSalesRep(role)
-          ? {}
-          : {
-              firstAssignedRep: { select: { id: true, fullName: true } },
-            }),
-        callLogs: {
-          take: 1,
-          orderBy: { callTimestamp: "desc" },
-          select: {
-            disposition: true,
-            remark: true,
-            durationSeconds: true,
-            callTimestamp: true,
-            rep: { select: { fullName: true } },
-          },
-        },
+      if (vertical && vertical !== "all") {
+        conditions.push(`l.business_vertical = $${params.push(vertical)}`);
+      }
+
+      if (search) {
+        const searchPattern = `%${search}%`;
+        const pIdx = params.push(searchPattern);
+        conditions.push(
+          `(l.company_name ILIKE $${pIdx} OR l.contact_name ILIKE $${pIdx} OR l.phone_number ILIKE $${pIdx} OR l.business_vertical ILIKE $${pIdx} OR l.service_type ILIKE $${pIdx})`
+        );
+      }
+
+      const whereClause = conditions.join(" AND ");
+      const limitIdx = params.push(limit);
+      const offsetIdx = params.push((page - 1) * limit);
+
+      const leadsRes = await client.query(
+        `SELECT l.id, l.tenant_id as "tenantId", l.assigned_rep_id as "assignedRepId",
+                l.first_assigned_rep_id as "firstAssignedRepId", l.first_assigned_at as "firstAssignedAt",
+                l.phone_number as "phoneNumber", l.contact_name as "contactName",
+                l.company_name as "companyName", l.website_url as "websiteUrl",
+                l.business_vertical as "businessVertical", l.service_type as "serviceType",
+                l.source, l.status, l.rnr_count as "rnrCount", l.custom_metadata as "customMetadata",
+                l.created_at as "createdAt", l.updated_at as "updatedAt",
+                ar.id as "arId", ar.full_name as "arFullName",
+                far.id as "farId", far.full_name as "farFullName",
+                (SELECT json_build_object(
+                   'disposition', cl.disposition,
+                   'remark', cl.remark,
+                   'durationSeconds', cl.duration_seconds,
+                   'callTimestamp', cl.call_timestamp,
+                   'rep', json_build_object('fullName', ru.full_name)
+                 )
+                 FROM call_logs cl
+                 LEFT JOIN users ru ON cl.rep_id = ru.id
+                 WHERE cl.lead_id = l.id
+                 ORDER BY cl.call_timestamp DESC LIMIT 1
+                ) as "latestCallLog",
+                (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = l.id) as "callLogsCount",
+                (SELECT COUNT(*)::int FROM scheduled_tasks WHERE lead_id = l.id) as "tasksCount",
+                (SELECT COUNT(*)::int FROM deals WHERE lead_id = l.id) as "dealsCount"
+         FROM leads l
+         LEFT JOIN users ar ON l.assigned_rep_id = ar.id
+         LEFT JOIN users far ON l.first_assigned_rep_id = far.id
+         WHERE ${whereClause}
+         ORDER BY l.updated_at DESC
+         LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+        params
+      );
+
+      const countParams = params.slice(0, params.length - 2);
+      const countRes = await client.query(
+        `SELECT COUNT(l.id)::int as total FROM leads l WHERE ${whereClause}`,
+        countParams
+      );
+      const total = countRes.rows[0]?.total || 0;
+
+      const baseWhereClause = baseConditions.join(" AND ");
+      const statusCountsRes = await client.query(
+        `SELECT status, COUNT(id)::int as count FROM leads l WHERE ${baseWhereClause} GROUP BY status`,
+        baseParams
+      );
+
+      let unassignedTotal = 0;
+      if (role !== "sales_rep") {
+        const unassignedRes = await client.query(
+          "SELECT COUNT(id)::int as count FROM leads WHERE tenant_id = $1 AND assigned_rep_id IS NULL",
+          [tenantId]
+        );
+        unassignedTotal = unassignedRes.rows[0]?.count || 0;
+      }
+
+      const stats: Record<string, number> = {
+        all: 0,
+        new: 0,
+        rnr: 0,
+        callback: 0,
+        demo_scheduled: 0,
+        deal_created: 0,
+        won: 0,
+        lost: 0,
+        not_interested: 0,
+        invalid: 0,
+        already_using: 0,
+        unassigned: unassignedTotal,
+      };
+
+      statusCountsRes.rows.forEach((s: { status: string; count: number }) => {
+        stats[s.status] = s.count;
+        stats.all += s.count;
+      });
+
+      const mappedLeads = leadsRes.rows.map((l) => ({
+        id: l.id,
+        tenantId: l.tenantId,
+        assignedRepId: l.assignedRepId,
+        firstAssignedRepId: isSalesRep(role) ? null : l.firstAssignedRepId,
+        firstAssignedAt: isSalesRep(role) ? null : l.firstAssignedAt,
+        phoneNumber: l.phoneNumber,
+        contactName: l.contactName,
+        companyName: l.companyName,
+        websiteUrl: l.websiteUrl,
+        businessVertical: l.businessVertical,
+        serviceType: l.serviceType,
+        source: l.source,
+        status: l.status,
+        rnrCount: l.rnrCount,
+        customMetadata: l.customMetadata,
+        createdAt: l.createdAt,
+        updatedAt: l.updatedAt,
+        assignedRep: l.arId ? { id: l.arId, fullName: l.arFullName } : null,
+        firstAssignedRep:
+          !isSalesRep(role) && l.farId ? { id: l.farId, fullName: l.farFullName } : null,
+        callLogs: l.latestCallLog ? [l.latestCallLog] : [],
         _count: {
-          select: {
-            callLogs: true,
-            tasks: true,
-            deals: true,
-          },
+          callLogs: l.callLogsCount,
+          tasks: l.tasksCount,
+          deals: l.dealsCount,
         },
-      },
-    }),
-    prisma.lead.count({ where }),
-    prisma.lead.groupBy({
-      by: ["status"],
-      where: baseWhere,
-      _count: { id: true },
-    }),
-    role !== "sales_rep"
-      ? prisma.lead.count({ where: { tenantId, assignedRepId: null } })
-      : Promise.resolve(0),
-  ]);
+        preferredLanguage:
+          ((l.customMetadata as Record<string, unknown>)?.preferredLanguage as string) || null,
+      }));
 
-  // Transform status counts into a handy key-value map
-  const stats: Record<string, number> = {
-    all: 0,
-    new: 0,
-    rnr: 0,
-    callback: 0,
-    demo_scheduled: 0,
-    deal_created: 0,
-    won: 0,
-    lost: 0,
-    not_interested: 0,
-    invalid: 0,
-    already_using: 0,
-    unassigned: unassignedTotal,
-  };
-
-  statusCounts.forEach((s) => {
-    stats[s.status] = s._count.id;
-    stats.all += s._count.id;
-  });
-
-  const mappedLeads = leads.map((l) => ({
-    ...l,
-    preferredLanguage:
-      ((l.customMetadata as Record<string, unknown>)?.preferredLanguage as string) || null,
-  }));
-
-  return NextResponse.json({
-    leads: mappedLeads,
-    total,
-    page,
-    limit,
-    totalPages: Math.ceil(total / limit),
-    stats,
-  });
+      return NextResponse.json({
+        leads: mappedLeads,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+        stats,
+      });
+    });
+  } catch (error) {
+    console.error("[LEADS_GET_ERROR]", error);
+    return NextResponse.json({ error: "Failed to fetch leads" }, { status: 500 });
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -166,7 +241,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Only Level 2 (Manager) and Level 3 (Admin) can create leads
   if (!can(role, "leads:create")) {
     return NextResponse.json(
       { error: "Forbidden: Only managers and admins can create leads" },
@@ -200,45 +274,51 @@ export async function POST(request: NextRequest) {
         ? assignedRepId
         : repId;
 
-    const lead = await prisma.lead.create({
-      data: {
-        tenantId,
-        assignedRepId: initialRep,
-        firstAssignedRepId: initialRep || null,
-        firstAssignedAt: initialRep ? new Date() : null,
-        phoneNumber,
-        contactName: contactName || null,
-        companyName: companyName || null,
-        websiteUrl: websiteUrl || null,
-        businessVertical: businessVertical || null,
-        serviceType: serviceType || null,
-        source: source || "Manual Entry",
-        status: "new",
-        customMetadata: preferredLanguage ? { preferredLanguage } : {},
-      },
-      include: {
-        assignedRep: { select: { fullName: true } },
-        firstAssignedRep: { select: { fullName: true } },
-      },
-    });
+    const metadata = preferredLanguage ? { preferredLanguage } : {};
 
-    if (preferredLanguage) {
-      await prisma.$executeRawUnsafe(
-        'UPDATE "leads" SET "preferred_language" = $1 WHERE "id" = $2::uuid',
-        preferredLanguage,
-        lead.id
-      ).catch(() => {});
-    }
+    return await withClient(async (client) => {
+      const insertRes = await client.query(
+        `INSERT INTO leads (
+           tenant_id, assigned_rep_id, first_assigned_rep_id, first_assigned_at,
+           phone_number, contact_name, company_name, website_url,
+           business_vertical, service_type, source, status, custom_metadata
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'new', $12)
+         RETURNING id, tenant_id as "tenantId", assigned_rep_id as "assignedRepId",
+                   first_assigned_rep_id as "firstAssignedRepId", first_assigned_at as "firstAssignedAt",
+                   phone_number as "phoneNumber", contact_name as "contactName",
+                   company_name as "companyName", website_url as "websiteUrl",
+                   business_vertical as "businessVertical", service_type as "serviceType",
+                   source, status, rnr_count as "rnrCount", custom_metadata as "customMetadata",
+                   created_at as "createdAt", updated_at as "updatedAt"`,
+        [
+          tenantId,
+          initialRep || null,
+          initialRep || null,
+          initialRep ? new Date() : null,
+          phoneNumber,
+          contactName || null,
+          companyName || null,
+          websiteUrl || null,
+          businessVertical || null,
+          serviceType || null,
+          source || "Manual Entry",
+          JSON.stringify(metadata),
+        ]
+      );
 
-    return NextResponse.json(
-      {
-        lead: {
-          ...lead,
-          preferredLanguage: preferredLanguage || null,
+      const lead = insertRes.rows[0];
+
+      return NextResponse.json(
+        {
+          lead: {
+            ...lead,
+            preferredLanguage: preferredLanguage || null,
+          },
         },
-      },
-      { status: 201 }
-    );
+        { status: 201 }
+      );
+    });
   } catch (error) {
     console.error("[LEADS POST]", error);
     return NextResponse.json({ error: "Failed to create lead" }, { status: 500 });
