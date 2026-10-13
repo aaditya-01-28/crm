@@ -106,3 +106,76 @@ export async function sendPasswordResetEmail({
 
   return { success: true, delivered: false, resetUrl };
 }
+
+interface SendResetRequestParams {
+  adminEmail: string;
+  adminName: string;
+  requesterName: string;
+  requesterEmail: string;
+  requesterRole: string;
+}
+
+export async function sendPasswordResetRequestNotificationEmail({
+  adminEmail,
+  adminName,
+  requesterName,
+  requesterEmail,
+  requesterRole,
+}: SendResetRequestParams): Promise<{ success: boolean; delivered: boolean }> {
+  const host = process.env.SMTP_HOST;
+  const port = parseInt(process.env.SMTP_PORT || "587", 10);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  const from = process.env.SMTP_FROM || "noreply@textorasms.com";
+
+  const roleLabel =
+    requesterRole === "sales_manager"
+      ? "Level 2 • Sales Manager"
+      : requesterRole === "sales_rep"
+      ? "Level 1 • Sales Representative"
+      : requesterRole;
+
+  console.log("------------------------------------------------------------");
+  console.log(`[PASSWORD RESET REQUEST] Requester: ${requesterName} (${requesterEmail}, ${roleLabel})`);
+  console.log(`[PASSWORD RESET REQUEST] Organization Admin Notified: ${adminEmail}`);
+  console.log("------------------------------------------------------------");
+
+  if (host && user && pass) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465,
+        auth: { user, pass },
+      });
+
+      await transporter.sendMail({
+        from: `"Textora Engage Security" <${from}>`,
+        to: adminEmail,
+        subject: `🔔 Password Reset Request: ${requesterName} (${roleLabel})`,
+        html: `
+        <div style="font-family: sans-serif; padding: 20px; background: #f8fafc; color: #1e293b;">
+          <div style="max-width: 500px; margin: 0 auto; background: #fff; padding: 24px; border-radius: 12px; border: 1px solid #e2e8f0;">
+            <h2 style="color: #0f172a; margin-top: 0;">Password Reset Request</h2>
+            <p>Hello <strong>${adminName}</strong>,</p>
+            <p><strong>${requesterName}</strong> (${roleLabel}) has requested a password reset for their Textora CRM console account.</p>
+            <p>As a Level 3 Super Admin, please sign in to your Textora console, navigate to <strong>Team Management</strong>, and set a new password for this user.</p>
+            <div style="background: #f1f5f9; padding: 12px; border-radius: 8px; font-size: 13px;">
+              <div><strong>Requester:</strong> ${requesterName}</div>
+              <div><strong>Email:</strong> ${requesterEmail}</div>
+              <div><strong>Role:</strong> ${roleLabel}</div>
+            </div>
+          </div>
+        </div>
+        `,
+      });
+      return { success: true, delivered: true };
+    } catch (err) {
+      console.error("[MAIL ERROR] Failed to send admin notification:", err);
+      return { success: true, delivered: false };
+    }
+  }
+
+  return { success: true, delivered: false };
+}
+

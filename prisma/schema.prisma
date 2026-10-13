@@ -18,8 +18,9 @@ model Organization {
   deals     Deal[]
   leads     Lead[]
   payments  Payment[]
-  tasks     ScheduledTask[]
-  users     User[]
+  tasks                 ScheduledTask[]
+  users                 User[]
+  passwordResetRequests PasswordResetRequest[]
 
   @@map("organizations")
 }
@@ -43,7 +44,8 @@ model User {
   firstAssignedLeads Lead[]        @relation("FirstAssignedRep")
   approvedPayments Payment[]       @relation("PaymentApprover")
   payments         Payment[]       @relation("PaymentRep")
-  tasks            ScheduledTask[]
+  tasks                 ScheduledTask[]
+  passwordResetRequests PasswordResetRequest[]
   tenant           Organization    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("users")
@@ -166,3 +168,21 @@ model Payment {
 
   @@map("payments")
 }
+
+model PasswordResetRequest {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String       @map("tenant_id") @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  status      String       @default("pending") @db.VarChar(30)
+  requestedAt DateTime     @default(now()) @map("requested_at") @db.Timestamptz(6)
+  resolvedAt  DateTime?    @map("resolved_at") @db.Timestamptz(6)
+  resolvedBy  String?      @map("resolved_by") @db.Uuid
+  userNotes   String?      @map("user_notes")
+  adminNotes  String?      @map("admin_notes")
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant      Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status], map: "idx_pw_requests_tenant_status")
+  @@map("password_reset_requests")
+}
+

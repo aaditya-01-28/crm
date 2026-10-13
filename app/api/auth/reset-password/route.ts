@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
 
     return await withClient(async (client) => {
       const userRes = await client.query(
-        "SELECT id, is_active as \"isActive\" FROM users WHERE reset_token = $1 AND reset_token_expiry > NOW() LIMIT 1",
+        "SELECT id, role, is_active as \"isActive\" FROM users WHERE reset_token = $1 AND reset_token_expiry > NOW() LIMIT 1",
         [token]
       );
 
@@ -39,6 +39,13 @@ export async function POST(request: NextRequest) {
       if (!user.isActive) {
         return NextResponse.json(
           { error: "This account has been deactivated or blocked by an Administrator." },
+          { status: 403 }
+        );
+      }
+
+      if (user.role !== "super_admin") {
+        return NextResponse.json(
+          { error: "Self-service password reset is disabled for Level 1 and Level 2 accounts. Only a Level 3 Super Admin can reset credentials for your account." },
           { status: 403 }
         );
       }

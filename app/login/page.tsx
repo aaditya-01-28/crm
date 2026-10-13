@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Eye, EyeOff, Mail, KeyRound, X, CheckCircle2, ArrowRight } from "lucide-react";
+import { Eye, EyeOff, Mail, KeyRound, X, CheckCircle2, ArrowRight, ShieldAlert, ShieldCheck, UserCheck } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -15,8 +15,11 @@ export default function LoginPage() {
   // Forgot password modal state
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotNotes, setForgotNotes] = useState("");
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotMessage, setForgotMessage] = useState("");
+  const [isRequestRaised, setIsRequestRaised] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [devPreviewUrl, setDevPreviewUrl] = useState<string | null>(null);
 
   async function handleLogin(e: React.FormEvent) {
@@ -53,12 +56,17 @@ export default function LoginPage() {
     setForgotLoading(true);
     setForgotMessage("");
     setDevPreviewUrl(null);
+    setIsRequestRaised(false);
+    setIsSuperAdmin(false);
 
     try {
       const res = await fetch("/api/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: forgotEmail.trim() }),
+        body: JSON.stringify({
+          email: forgotEmail.trim(),
+          notes: forgotNotes.trim() || undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -66,11 +74,19 @@ export default function LoginPage() {
         return;
       }
 
-      setForgotMessage(data.message || "Password reset instructions dispatched to your email.");
-      if (data.devPreviewUrl) {
-        setDevPreviewUrl(data.devPreviewUrl);
+      setForgotMessage(data.message || "Password reset request processed.");
+      if (data.isRequestRaised) {
+        setIsRequestRaised(true);
+        toast.success("Request raised to Level 3 Super Admin! 🛡️");
+      } else if (data.isSuperAdmin) {
+        setIsSuperAdmin(true);
+        if (data.devPreviewUrl) {
+          setDevPreviewUrl(data.devPreviewUrl);
+        }
+        toast.success("Super Admin reset link dispatched! 📬");
+      } else {
+        toast.success("Request processed. Please check with your administrator.");
       }
-      toast.success("Reset link sent! Please check your email.");
     } catch {
       toast.error("Network error. Please try again.");
     } finally {
@@ -80,7 +96,10 @@ export default function LoginPage() {
 
   function openForgotModal() {
     setForgotEmail(email || "");
+    setForgotNotes("");
     setForgotMessage("");
+    setIsRequestRaised(false);
+    setIsSuperAdmin(false);
     setDevPreviewUrl(null);
     setShowForgotModal(true);
   }
@@ -196,7 +215,7 @@ export default function LoginPage() {
               <div className="flex items-center gap-2">
                 <KeyRound className="w-4 h-4 text-emerald-400" />
                 <h3 className="font-bold text-sm tracking-wide">
-                  Reset Console Password
+                  Account Password Assistance
                 </h3>
               </div>
               <button
@@ -210,44 +229,86 @@ export default function LoginPage() {
             <div className="p-6">
               {forgotMessage ? (
                 <div className="space-y-4 text-center py-2">
-                  <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
-                    <CheckCircle2 className="w-6 h-6" />
-                  </div>
-                  <h4 className="font-bold text-gray-900 text-sm">
-                    Password Reset Link Sent!
-                  </h4>
-                  <p className="text-xs text-gray-600 leading-relaxed">
-                    {forgotMessage}
-                  </p>
-                  {devPreviewUrl && (
-                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-left text-xs space-y-1">
-                      <span className="font-bold text-amber-800 block">
-                        ⚙️ Development Direct Reset Link:
-                      </span>
-                      <a
-                        href={devPreviewUrl}
-                        className="text-emerald-700 underline font-medium break-all block hover:text-emerald-800"
-                      >
-                        {devPreviewUrl}
-                      </a>
-                    </div>
+                  {isRequestRaised ? (
+                    <>
+                      <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center mx-auto shadow-xs">
+                        <ShieldAlert className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-gray-900 text-base">
+                          Request Forwarded to Super Admin
+                        </h4>
+                        <span className="inline-block mt-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200">
+                          Level 1 & Level 2 Security Protocol
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-600 leading-relaxed max-w-sm mx-auto">
+                        {forgotMessage}
+                      </p>
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-left text-xs space-y-1">
+                        <span className="font-bold text-slate-800 block flex items-center gap-1.5">
+                          <UserCheck className="w-3.5 h-3.5 text-blue-600" />
+                          Next Step:
+                        </span>
+                        <p className="text-slate-600 text-[11px]">
+                          Your organization&apos;s Level 3 Super Admin has been notified. They can set a new password for you from the <strong>Team Management</strong> console.
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-xs">
+                        <CheckCircle2 className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-gray-900 text-base">
+                          Super Admin Reset Link Sent!
+                        </h4>
+                        <span className="inline-block mt-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                          Level 3 Direct Access
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-600 leading-relaxed">
+                        {forgotMessage}
+                      </p>
+                      {devPreviewUrl && (
+                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-left text-xs space-y-1">
+                          <span className="font-bold text-amber-800 block">
+                            ⚙️ Development Direct Reset Link:
+                          </span>
+                          <a
+                            href={devPreviewUrl}
+                            className="text-emerald-700 underline font-medium break-all block hover:text-emerald-800"
+                          >
+                            {devPreviewUrl}
+                          </a>
+                        </div>
+                      )}
+                    </>
                   )}
+
                   <button
                     onClick={() => setShowForgotModal(false)}
                     className="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2.5 rounded-xl transition text-xs shadow-xs cursor-pointer mt-2"
                   >
-                    Return to Login
+                    Return to Sign In
                   </button>
                 </div>
               ) : (
                 <form onSubmit={handleForgotPassword} className="space-y-4">
-                  <p className="text-xs text-gray-600 leading-relaxed">
-                    Enter the work email address associated with your Textora CRM account. We will send a secure password reset link to your email inbox.
-                  </p>
+                  <div className="p-3 bg-emerald-50/70 border border-emerald-200/80 rounded-xl text-xs space-y-1">
+                    <span className="font-bold text-emerald-950 flex items-center gap-1">
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                      Role-Based Access Policy:
+                    </span>
+                    <p className="text-emerald-800 text-[11px] leading-relaxed">
+                      Level 1 & Level 2 team members can submit a request here to be processed by a Level 3 Super Admin. Level 3 Super Admins will receive a direct reset link.
+                    </p>
+                  </div>
 
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
-                      Work Email Address
+                      Registered Work Email
                     </label>
                     <div className="relative">
                       <Mail className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -260,6 +321,19 @@ export default function LoginPage() {
                         className="w-full pl-10 pr-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition text-sm bg-gray-50/50"
                       />
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
+                      Note to Administrator (Optional)
+                    </label>
+                    <textarea
+                      value={forgotNotes}
+                      onChange={(e) => setForgotNotes(e.target.value)}
+                      rows={2}
+                      placeholder="e.g. Need password reset for new work device..."
+                      className="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition text-xs bg-gray-50/50 resize-none text-gray-800"
+                    />
                   </div>
 
                   <div className="flex gap-2 justify-end pt-2">
@@ -278,11 +352,11 @@ export default function LoginPage() {
                       {forgotLoading ? (
                         <>
                           <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          Sending Email...
+                          Processing...
                         </>
                       ) : (
                         <>
-                          Send Reset Link
+                          Submit Request / Send Link
                           <ArrowRight className="w-3.5 h-3.5" />
                         </>
                       )}
