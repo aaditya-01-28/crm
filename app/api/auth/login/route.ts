@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { queryUserByEmail } from "@/lib/db";
 import bcrypt from "bcryptjs";
 import {
   signAccessToken,
@@ -19,10 +19,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const user = await prisma.user.findUnique({
-      where: { email },
-      include: { tenant: true },
-    });
+    const user = await queryUserByEmail(email.trim());
 
     if (!user) {
       return NextResponse.json(
