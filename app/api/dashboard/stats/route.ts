@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { withClient } from "@/lib/db";
 import { normalizeRole, isManagerOrAdmin, isSalesRep } from "@/lib/rbac";
 import { getSession } from "@/lib/auth";
 
@@ -22,9 +22,6 @@ export async function GET(request: NextRequest) {
   const period = searchParams.get("period") || "today"; // "today" | "week" | "month"
   const requestedUserId = searchParams.get("userId");
 
-  // Determine user filter
-  // Level 1 (sales_rep) is strictly locked to their own user ID
-  // Level 2 (manager) and Level 3 (admin) can filter by a specific employee or see all
   let targetUserId: string | undefined = undefined;
   if (isSalesRep(role)) {
     targetUserId = currentUserId;
@@ -34,475 +31,431 @@ export async function GET(request: NextRequest) {
 
   // Calculate Date Ranges
   const now = new Date();
-
-  // Start of today (00:00:00.000)
   const startOfToday = new Date(now);
   startOfToday.setHours(0, 0, 0, 0);
 
-  // End of today (23:59:59.999)
   const endOfToday = new Date(now);
   endOfToday.setHours(23, 59, 59, 999);
 
   let startOfPeriod = new Date(startOfToday);
   if (period === "week") {
-    // Current week starting Monday
     const day = now.getDay();
     const diff = now.getDate() - day + (day === 0 ? -6 : 1);
     startOfPeriod = new Date(now.setDate(diff));
     startOfPeriod.setHours(0, 0, 0, 0);
   } else if (period === "month") {
-    // Start of current month (1st)
     startOfPeriod = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
   }
 
   const endOfPeriod = endOfToday;
 
   try {
-    // 1. Fetch team members (for manager/admin dropdown & leaderboard)
-    const teamUsers = await prisma.user.findMany({
-      where: {
-        tenantId,
-        isActive: true,
-        role: { in: ["sales_rep", "sales_manager"] },
-      },
-      select: {
-        id: true,
-        fullName: true,
-        email: true,
-        role: true,
-        phoneNumber: true,
-      },
-      orderBy: { fullName: "asc" },
-    });
-
-    const activeRepsList = teamUsers.filter((u) => u.role === "sales_rep");
-
-    // Common WHERE condition for call logs
-    const callWhere: Record<string, unknown> = {
-      tenantId,
-      callTimestamp: { gte: startOfPeriod, lte: endOfPeriod },
-      ...(targetUserId ? { repId: targetUserId } : {}),
-    };
-
-    // 2. Fetch call activities in period
-    const [callStats, allCallLogsCount, uniqueDialsRaw] = await Promise.all([
-      prisma.callLog.groupBy({
-        by: ["disposition"],
-        where: callWhere,
-        _count: { id: true },
-        _sum: { durationSeconds: true },
-      }),
-      prisma.callLog.count({ where: callWhere }),
-      prisma.callLog.findMany({
-        where: callWhere,
-        distinct: ["leadId"],
-        select: { leadId: true },
-      }),
-    ]);
-
-    const totalCalls = allCallLogsCount;
-    const uniqueDials = uniqueDialsRaw.length;
-    let totalDurationSeconds = 0;
-    let connectedCalls = 0;
-
-    const dispositionMap: Record<string, number> = {
-      Connected: 0,
-      RNR: 0,
-      Callback: 0,
-      "Not Interested": 0,
-      "Already Using": 0,
-      Invalid: 0,
-      "Demo Scheduled": 0,
-    };
-
-    callStats.forEach((c) => {
-      const disp = c.disposition;
-      const count = c._count.id;
-      const dur = c._sum.durationSeconds || 0;
-      totalDurationSeconds += dur;
-
-      if (disp.toLowerCase().includes("connect") || disp.toLowerCase().includes("demo")) {
-        connectedCalls += count;
-      }
-
-      if (dispositionMap[disp] !== undefined) {
-        dispositionMap[disp] = count;
-      } else {
-        dispositionMap[disp] = count;
-      }
-    });
-
-    const connectRate = totalCalls > 0 ? Math.round((connectedCalls / totalCalls) * 100) : 0;
-    const talkTimeMins = Math.round(totalDurationSeconds / 60);
-
-    // 3. Scheduled Tasks (Agenda, Callbacks & Demos)
-    const taskWhereBase: Record<string, unknown> = {
-      tenantId,
-      ...(targetUserId ? { repId: targetUserId } : {}),
-    };
-
-    const [todayAgenda, overdueTasksCount, todayCallbacksCount, todayDemosCount] =
-      await Promise.all([
-        // Upcoming/today tasks
-        prisma.scheduledTask.findMany({
-          where: {
-            ...taskWhereBase,
-            status: "pending",
-            scheduledTime: { gte: startOfToday, lte: endOfToday },
-          },
-          orderBy: { scheduledTime: "asc" },
-          take: 6,
-          include: {
-            lead: {
-              select: {
-                id: true,
-                phoneNumber: true,
-                contactName: true,
-                companyName: true,
-                businessVertical: true,
-              },
-            },
-            rep: { select: { fullName: true } },
-          },
-        }),
-        // Overdue tasks
-        prisma.scheduledTask.count({
-          where: {
-            ...taskWhereBase,
-            status: "pending",
-            scheduledTime: { lt: startOfToday },
-          },
-        }),
-        // Today Callbacks
-        prisma.scheduledTask.count({
-          where: {
-            ...taskWhereBase,
-            taskType: "callback",
-            scheduledTime: { gte: startOfToday, lte: endOfToday },
-          },
-        }),
-        // Today Demos
-        prisma.scheduledTask.count({
-          where: {
-            ...taskWhereBase,
-            taskType: "product_demo",
-            scheduledTime: { gte: startOfToday, lte: endOfToday },
-          },
-        }),
-      ]);
-
-    // 4. Deals & Pipeline
-    const dealWhereBase: Record<string, unknown> = {
-      tenantId,
-      ...(targetUserId ? { repId: targetUserId } : {}),
-    };
-
-    const [activeDeals, wonDealsInPeriod, lostDealsInPeriod, allDealsByStage] =
-      await Promise.all([
-        // Active deals (not closed)
-        prisma.deal.findMany({
-          where: {
-            ...dealWhereBase,
-            stage: { notIn: ["closed_won", "closed_lost"] },
-          },
-          select: {
-            id: true,
-            quotedPrice: true,
-            stage: true,
-            serviceType: true,
-            expectedClosingDate: true,
-            lead: { select: { companyName: true, contactName: true } },
-            rep: { select: { fullName: true } },
-          },
-          orderBy: { createdAt: "desc" },
-        }),
-        // Closed Won in period
-        prisma.deal.findMany({
-          where: {
-            ...dealWhereBase,
-            stage: "closed_won",
-            updatedAt: { gte: startOfPeriod, lte: endOfPeriod },
-          },
-          select: { quotedPrice: true },
-        }),
-        // Closed Lost in period
-        prisma.deal.count({
-          where: {
-            ...dealWhereBase,
-            stage: "closed_lost",
-            updatedAt: { gte: startOfPeriod, lte: endOfPeriod },
-          },
-        }),
-        // Deals grouped by stage
-        prisma.deal.groupBy({
-          by: ["stage"],
-          where: dealWhereBase,
-          _count: { id: true },
-          _sum: { quotedPrice: true },
-        }),
-      ]);
-
-    const activeDealsCount = activeDeals.length;
-    const activePipelineValue = activeDeals.reduce(
-      (sum, d) => sum + Number(d.quotedPrice),
-      0
-    );
-
-    const wonDealsCount = wonDealsInPeriod.length;
-    const wonRevenueInPeriod = wonDealsInPeriod.reduce(
-      (sum, d) => sum + Number(d.quotedPrice),
-      0
-    );
-
-    const totalClosed = wonDealsCount + lostDealsInPeriod;
-    const winRate = totalClosed > 0 ? Math.round((wonDealsCount / totalClosed) * 100) : 0;
-
-    // 5. Verified Payments Revenue in Period
-    const paymentWhere: Record<string, unknown> = {
-      tenantId,
-      opsApprovalStatus: "approved",
-      createdAt: { gte: startOfPeriod, lte: endOfPeriod },
-      ...(targetUserId ? { repId: targetUserId } : {}),
-    };
-
-    const paymentsAgg = await prisma.payment.aggregate({
-      where: paymentWhere,
-      _sum: { finalAmount: true },
-      _count: { id: true },
-    });
-
-    const verifiedRevenue = Number(paymentsAgg._sum?.finalAmount || 0);
-
-    // 6. Lead Distribution & Queue stats
-    const leadWhereBase: Record<string, unknown> = {
-      tenantId,
-      ...(targetUserId ? { assignedRepId: targetUserId } : {}),
-    };
-
-    const [
-      totalLeadsCount,
-      unassignedLeadsCount,
-      queueRemainingCount,
-      leadsByStatus,
-      leadsByVertical,
-      leadsBySource,
-    ] = await Promise.all([
-      prisma.lead.count({ where: leadWhereBase }),
-      // Unassigned leads in pool (meaningful for tenant/manager)
-      prisma.lead.count({ where: { tenantId, assignedRepId: null } }),
-      // Rep's queue: assigned to user, new or rnr < 3
-      prisma.lead.count({
-        where: {
-          tenantId,
-          assignedRepId: targetUserId || currentUserId,
-          OR: [{ status: "new" }, { status: "rnr", rnrCount: { lt: 3 } }],
-        },
-      }),
-      prisma.lead.groupBy({
-        by: ["status"],
-        where: leadWhereBase,
-        _count: { id: true },
-      }),
-      prisma.lead.groupBy({
-        by: ["businessVertical"],
-        where: { tenantId, businessVertical: { not: null } },
-        _count: { id: true },
-        orderBy: { _count: { id: "desc" } },
-        take: 6,
-      }),
-      prisma.lead.groupBy({
-        by: ["source"],
-        where: { tenantId },
-        _count: { id: true },
-        orderBy: { _count: { id: "desc" } },
-        take: 5,
-      }),
-    ]);
-
-    // 7. Recent Activities Timeline
-    const recentCalls = await prisma.callLog.findMany({
-      where: {
-        tenantId,
-        ...(targetUserId ? { repId: targetUserId } : {}),
-      },
-      orderBy: { callTimestamp: "desc" },
-      take: 8,
-      include: {
-        lead: {
-          select: {
-            id: true,
-            phoneNumber: true,
-            contactName: true,
-            companyName: true,
-            businessVertical: true,
-          },
-        },
-        rep: { select: { fullName: true } },
-      },
-    });
-
-    // 8. Team Leaderboard (for Level 2 & Level 3 in All-Team View)
-    let leaderboard: Array<{
-      repId: string;
-      repName: string;
-      totalCalls: number;
-      connectedCalls: number;
-      connectRate: number;
-      talkTimeMins: number;
-      demosBooked: number;
-      wonDeals: number;
-      wonRevenue: number;
-    }> = [];
-
-    if (isManagerOrAdmin(role) && !targetUserId) {
-      const repIds = activeRepsList.map((r) => r.id);
-
-      const [repCalls, repTalkTime, repDemos, repWon] = await Promise.all([
-        prisma.callLog.groupBy({
-          by: ["repId"],
-          where: {
-            tenantId,
-            repId: { in: repIds },
-            callTimestamp: { gte: startOfPeriod, lte: endOfPeriod },
-          },
-          _count: { id: true },
-        }),
-        prisma.callLog.groupBy({
-          by: ["repId"],
-          where: {
-            tenantId,
-            repId: { in: repIds },
-            callTimestamp: { gte: startOfPeriod, lte: endOfPeriod },
-          },
-          _sum: { durationSeconds: true },
-        }),
-        prisma.scheduledTask.groupBy({
-          by: ["repId"],
-          where: {
-            tenantId,
-            repId: { in: repIds },
-            taskType: "product_demo",
-            createdAt: { gte: startOfPeriod, lte: endOfPeriod },
-          },
-          _count: { id: true },
-        }),
-        prisma.deal.groupBy({
-          by: ["repId"],
-          where: {
-            tenantId,
-            repId: { in: repIds },
-            stage: "closed_won",
-            updatedAt: { gte: startOfPeriod, lte: endOfPeriod },
-          },
-          _count: { id: true },
-          _sum: { quotedPrice: true },
-        }),
-      ]);
-
-      const callsMap = new Map(repCalls.map((c) => [c.repId, c._count.id]));
-      const talkMap = new Map(
-        repTalkTime.map((t) => [t.repId, Math.round((t._sum.durationSeconds || 0) / 60)])
+    return await withClient(async (client) => {
+      // 1. Fetch team members (for dropdown)
+      const teamRes = await client.query(
+        `SELECT id, full_name as "fullName", email, role, phone_number as "phoneNumber"
+         FROM users
+         WHERE tenant_id = $1 AND is_active = true AND role IN ('sales_rep', 'sales_manager')
+         ORDER BY full_name ASC`,
+        [tenantId]
       );
-      const demoMap = new Map(repDemos.map((d) => [d.repId, d._count.id]));
-      const wonCountMap = new Map(repWon.map((w) => [w.repId, w._count.id]));
-      const wonRevMap = new Map(
-        repWon.map((w) => [w.repId, Number(w._sum.quotedPrice || 0)])
+      const teamUsers = teamRes.rows;
+
+      // 2. Fetch call stats in period
+      const callWhereClause = targetUserId
+        ? "tenant_id = $1 AND call_timestamp >= $2 AND call_timestamp <= $3 AND rep_id = $4"
+        : "tenant_id = $1 AND call_timestamp >= $2 AND call_timestamp <= $3";
+      const callParams = targetUserId
+        ? [tenantId, startOfPeriod, endOfPeriod, targetUserId]
+        : [tenantId, startOfPeriod, endOfPeriod];
+
+      const callAggRes = await client.query(
+        `SELECT disposition, COUNT(id)::int as count, COALESCE(SUM(duration_seconds), 0)::int as duration
+         FROM call_logs
+         WHERE ${callWhereClause}
+         GROUP BY disposition`,
+        callParams
       );
 
-      leaderboard = activeRepsList.map((rep) => {
-        const calls = callsMap.get(rep.id) || 0;
-        const talk = talkMap.get(rep.id) || 0;
-        const demos = demoMap.get(rep.id) || 0;
-        const won = wonCountMap.get(rep.id) || 0;
-        const rev = wonRevMap.get(rep.id) || 0;
+      const callCountsRes = await client.query(
+        `SELECT COUNT(id)::int as "totalCalls", COUNT(DISTINCT lead_id)::int as "uniqueDials"
+         FROM call_logs
+         WHERE ${callWhereClause}`,
+        callParams
+      );
 
-        return {
-          repId: rep.id,
-          repName: rep.fullName,
-          totalCalls: calls,
-          connectedCalls: Math.round(calls * 0.42), // estimated pick rate
-          connectRate: calls > 0 ? 42 : 0,
-          talkTimeMins: talk,
-          demosBooked: demos,
-          wonDeals: won,
-          wonRevenue: rev,
-        };
+      const totalCalls = callCountsRes.rows[0]?.totalCalls || 0;
+      const uniqueDials = callCountsRes.rows[0]?.uniqueDials || 0;
+      let totalDurationSeconds = 0;
+      let connectedCalls = 0;
+
+      const dispositionMap: Record<string, number> = {
+        Connected: 0,
+        RNR: 0,
+        Callback: 0,
+        "Not Interested": 0,
+        "Already Using": 0,
+        Invalid: 0,
+        "Demo Scheduled": 0,
+      };
+
+      callAggRes.rows.forEach((c: { disposition: string; count: number; duration: number }) => {
+        const disp = c.disposition;
+        const count = c.count;
+        totalDurationSeconds += c.duration;
+
+        if (disp.toLowerCase().includes("connect") || disp.toLowerCase().includes("demo")) {
+          connectedCalls += count;
+        }
+
+        dispositionMap[disp] = count;
       });
 
-      // Sort by calls + won revenue descending
-      leaderboard.sort((a, b) => b.wonRevenue - a.wonRevenue || b.totalCalls - a.totalCalls);
-    }
+      const connectRate = totalCalls > 0 ? Math.round((connectedCalls / totalCalls) * 100) : 0;
+      const talkTimeMins = Math.round(totalDurationSeconds / 60);
 
-    // 9. Accounts Ops Specific Pending Queue
-    const pendingPaymentsCount = await prisma.payment.count({
-      where: { tenantId, opsApprovalStatus: "pending_verification" },
-    });
-    const pendingPaymentsSum = await prisma.payment.aggregate({
-      where: { tenantId, opsApprovalStatus: "pending_verification" },
-      _sum: { finalAmount: true },
-    });
+      // 3. Scheduled Tasks (Agenda, Callbacks, Demos)
+      const taskWhereClause = targetUserId ? "t.tenant_id = $1 AND t.rep_id = $2" : "t.tenant_id = $1";
+      const taskParams = targetUserId ? [tenantId, targetUserId] : [tenantId];
 
-    return NextResponse.json({
-      role,
-      period,
-      targetUserId: targetUserId || null,
-      teamMembers: teamUsers,
-      metrics: {
-        // Telephony
-        totalCalls,
-        uniqueDials,
-        connectedCalls,
-        connectRate,
-        talkTimeMins,
-        totalDurationSeconds,
-        dispositionMap,
-        // Queue & Agenda
-        queueRemainingCount,
-        unassignedLeadsCount,
-        todayCallbacksCount,
-        todayDemosCount,
-        overdueTasksCount,
-        todayAgenda,
-        // Pipeline & Revenue
-        activeDealsCount,
-        activePipelineValue,
-        wonDealsCount,
-        wonRevenueInPeriod,
-        verifiedRevenue,
-        winRate,
-        allDealsByStage: allDealsByStage.map((s) => ({
-          stage: s.stage,
-          count: s._count.id,
-          value: Number(s._sum.quotedPrice || 0),
-        })),
-        recentDeals: activeDeals.slice(0, 5),
-        // Leads & Verticals
-        totalLeadsCount,
-        leadsByStatus: leadsByStatus.map((s) => ({
-          status: s.status,
-          count: s._count.id,
-        })),
-        leadsByVertical: leadsByVertical.map((v) => ({
-          vertical: v.businessVertical || "Unspecified",
-          count: v._count.id,
-        })),
-        leadsBySource: leadsBySource.map((s) => ({
-          source: s.source,
-          count: s._count.id,
-        })),
-        // Team Leaderboard
-        leaderboard,
-        // Recent Activities
-        recentCalls,
-        // Accounts Ops
-        pendingPaymentsCount,
-        pendingPaymentsValue: Number(pendingPaymentsSum._sum?.finalAmount || 0),
-      },
+      const agendaRes = await client.query(
+        `SELECT t.id, t.tenant_id as "tenantId", t.lead_id as "leadId", t.rep_id as "repId",
+                t.task_type as "taskType", t.scheduled_time as "scheduledTime", t.status,
+                t.meeting_link as "meetingLink", t.notes,
+                l.id as "leadId", l.phone_number as "phoneNumber", l.contact_name as "contactName",
+                l.company_name as "companyName", l.business_vertical as "businessVertical",
+                u.full_name as "repFullName"
+         FROM scheduled_tasks t
+         JOIN leads l ON t.lead_id = l.id
+         JOIN users u ON t.rep_id = u.id
+         WHERE ${taskWhereClause} AND t.status = 'pending'
+           AND t.scheduled_time >= $${taskParams.length + 1} AND t.scheduled_time <= $${taskParams.length + 2}
+         ORDER BY t.scheduled_time ASC
+         LIMIT 6`,
+        [...taskParams, startOfToday, endOfToday]
+      );
+
+      const todayAgenda = agendaRes.rows.map((r) => ({
+        id: r.id,
+        tenantId: r.tenantId,
+        leadId: r.leadId,
+        repId: r.repId,
+        taskType: r.taskType,
+        scheduledTime: r.scheduledTime,
+        status: r.status,
+        meetingLink: r.meetingLink,
+        notes: r.notes,
+        lead: {
+          id: r.leadId,
+          phoneNumber: r.phoneNumber,
+          contactName: r.contactName,
+          companyName: r.companyName,
+          businessVertical: r.businessVertical,
+        },
+        rep: { fullName: r.repFullName },
+      }));
+
+      const taskStatsRes = await client.query(
+        `SELECT
+           COUNT(CASE WHEN status = 'pending' AND scheduled_time < $2 THEN 1 END)::int as "overdueTasksCount",
+           COUNT(CASE WHEN task_type = 'callback' AND scheduled_time >= $3 AND scheduled_time <= $4 THEN 1 END)::int as "todayCallbacksCount",
+           COUNT(CASE WHEN task_type = 'product_demo' AND scheduled_time >= $3 AND scheduled_time <= $4 THEN 1 END)::int as "todayDemosCount"
+         FROM scheduled_tasks
+         WHERE ${targetUserId ? "tenant_id = $1 AND rep_id = $5" : "tenant_id = $1"}`,
+        targetUserId
+          ? [tenantId, startOfToday, startOfToday, endOfToday, targetUserId]
+          : [tenantId, startOfToday, startOfToday, endOfToday]
+      );
+
+      const overdueTasksCount = taskStatsRes.rows[0]?.overdueTasksCount || 0;
+      const todayCallbacksCount = taskStatsRes.rows[0]?.todayCallbacksCount || 0;
+      const todayDemosCount = taskStatsRes.rows[0]?.todayDemosCount || 0;
+
+      // 4. Deals & Pipeline
+      const dealWhereClause = targetUserId ? "d.tenant_id = $1 AND d.rep_id = $2" : "d.tenant_id = $1";
+      const dealParams = targetUserId ? [tenantId, targetUserId] : [tenantId];
+
+      const activeDealsRes = await client.query(
+        `SELECT d.id, d.quoted_price as "quotedPrice", d.stage, d.service_type as "serviceType",
+                d.expected_closing_date as "expectedClosingDate",
+                l.company_name as "companyName", l.contact_name as "contactName",
+                u.full_name as "repFullName"
+         FROM deals d
+         JOIN leads l ON d.lead_id = l.id
+         JOIN users u ON d.rep_id = u.id
+         WHERE ${dealWhereClause} AND d.stage NOT IN ('closed_won', 'closed_lost')
+         ORDER BY d.created_at DESC`,
+        dealParams
+      );
+
+      const activeDeals = activeDealsRes.rows.map((d) => ({
+        id: d.id,
+        quotedPrice: d.quotedPrice,
+        stage: d.stage,
+        serviceType: d.serviceType,
+        expectedClosingDate: d.expectedClosingDate,
+        lead: { companyName: d.companyName, contactName: d.contactName },
+        rep: { fullName: d.repFullName },
+      }));
+
+      const activeDealsCount = activeDeals.length;
+      const activePipelineValue = activeDeals.reduce((sum, d) => sum + Number(d.quotedPrice || 0), 0);
+
+      const dealPeriodRes = await client.query(
+        `SELECT
+           COUNT(CASE WHEN d.stage = 'closed_won' THEN 1 END)::int as "wonDealsCount",
+           COALESCE(SUM(CASE WHEN d.stage = 'closed_won' THEN d.quoted_price ELSE 0 END), 0)::numeric as "wonRevenueInPeriod",
+           COUNT(CASE WHEN d.stage = 'closed_lost' THEN 1 END)::int as "lostDealsCount"
+         FROM deals d
+         WHERE ${dealWhereClause} AND d.updated_at >= $${dealParams.length + 1} AND d.updated_at <= $${dealParams.length + 2}`,
+        [...dealParams, startOfPeriod, endOfPeriod]
+      );
+
+      const wonDealsCount = dealPeriodRes.rows[0]?.wonDealsCount || 0;
+      const wonRevenueInPeriod = Number(dealPeriodRes.rows[0]?.wonRevenueInPeriod || 0);
+      const lostDealsInPeriod = dealPeriodRes.rows[0]?.lostDealsCount || 0;
+
+      const totalClosed = wonDealsCount + lostDealsInPeriod;
+      const winRate = totalClosed > 0 ? Math.round((wonDealsCount / totalClosed) * 100) : 0;
+
+      const dealsByStageRes = await client.query(
+        `SELECT d.stage, COUNT(d.id)::int as count, COALESCE(SUM(d.quoted_price), 0)::numeric as value
+         FROM deals d
+         WHERE ${dealWhereClause}
+         GROUP BY d.stage`,
+        dealParams
+      );
+
+      // 5. Verified Payments Revenue
+      const paymentWhereClause = targetUserId
+        ? "tenant_id = $1 AND rep_id = $2 AND ops_approval_status = 'approved' AND created_at >= $3 AND created_at <= $4"
+        : "tenant_id = $1 AND ops_approval_status = 'approved' AND created_at >= $2 AND created_at <= $3";
+      const paymentParams = targetUserId
+        ? [tenantId, targetUserId, startOfPeriod, endOfPeriod]
+        : [tenantId, startOfPeriod, endOfPeriod];
+
+      const paymentsAggRes = await client.query(
+        `SELECT COALESCE(SUM(final_amount), 0)::numeric as "verifiedRevenue"
+         FROM payments
+         WHERE ${paymentWhereClause}`,
+        paymentParams
+      );
+      const verifiedRevenue = Number(paymentsAggRes.rows[0]?.verifiedRevenue || 0);
+
+      // 6. Lead Distribution & Queue stats
+      const repFilterForQueue = targetUserId || currentUserId;
+      const leadCountsRes = await client.query(
+        `SELECT
+           COUNT(id)::int as "totalLeadsCount",
+           COUNT(CASE WHEN assigned_rep_id IS NULL THEN 1 END)::int as "unassignedLeadsCount",
+           COUNT(CASE WHEN assigned_rep_id = $2 AND (status = 'new' OR (status = 'rnr' AND rnr_count < 3)) THEN 1 END)::int as "queueRemainingCount"
+         FROM leads
+         WHERE tenant_id = $1`,
+        [tenantId, repFilterForQueue]
+      );
+
+      const totalLeadsCount = leadCountsRes.rows[0]?.totalLeadsCount || 0;
+      const unassignedLeadsCount = leadCountsRes.rows[0]?.unassignedLeadsCount || 0;
+      const queueRemainingCount = leadCountsRes.rows[0]?.queueRemainingCount || 0;
+
+      const [leadsStatusRes, leadsVerticalRes, leadsSourceRes] = await Promise.all([
+        client.query(
+          `SELECT status, COUNT(id)::int as count
+           FROM leads
+           WHERE tenant_id = $1 ${targetUserId ? "AND assigned_rep_id = $2" : ""}
+           GROUP BY status`,
+          targetUserId ? [tenantId, targetUserId] : [tenantId]
+        ),
+        client.query(
+          `SELECT business_vertical as vertical, COUNT(id)::int as count
+           FROM leads
+           WHERE tenant_id = $1 AND business_vertical IS NOT NULL
+           GROUP BY business_vertical
+           ORDER BY count DESC
+           LIMIT 6`,
+          [tenantId]
+        ),
+        client.query(
+          `SELECT source, COUNT(id)::int as count
+           FROM leads
+           WHERE tenant_id = $1
+           GROUP BY source
+           ORDER BY count DESC
+           LIMIT 5`,
+          [tenantId]
+        ),
+      ]);
+
+      // 7. Recent Activities Timeline
+      const recentCallsRes = await client.query(
+        `SELECT c.id, c.tenant_id as "tenantId", c.lead_id as "leadId", c.rep_id as "repId",
+                c.disposition, c.duration_seconds as "durationSeconds", c.remark,
+                c.call_timestamp as "callTimestamp",
+                l.id as "leadId", l.phone_number as "phoneNumber", l.contact_name as "contactName",
+                l.company_name as "companyName", l.business_vertical as "businessVertical",
+                u.full_name as "repFullName"
+         FROM call_logs c
+         JOIN leads l ON c.lead_id = l.id
+         JOIN users u ON c.rep_id = u.id
+         WHERE ${targetUserId ? "c.tenant_id = $1 AND c.call_timestamp >= $2 AND c.call_timestamp <= $3 AND c.rep_id = $4" : "c.tenant_id = $1 AND c.call_timestamp >= $2 AND c.call_timestamp <= $3"}
+         ORDER BY c.call_timestamp DESC
+         LIMIT 8`,
+        callParams
+      );
+
+      const recentCalls = recentCallsRes.rows.map((c) => ({
+        id: c.id,
+        tenantId: c.tenantId,
+        leadId: c.leadId,
+        repId: c.repId,
+        disposition: c.disposition,
+        durationSeconds: c.durationSeconds,
+        remark: c.remark,
+        callTimestamp: c.callTimestamp,
+        lead: {
+          id: c.leadId,
+          phoneNumber: c.phoneNumber,
+          contactName: c.contactName,
+          companyName: c.companyName,
+          businessVertical: c.businessVertical,
+        },
+        rep: { fullName: c.repFullName },
+      }));
+
+      // 8. Team Leaderboard (for Level 2 & Level 3 in All-Team View)
+      let leaderboard: Array<{
+        repId: string;
+        repName: string;
+        totalCalls: number;
+        connectedCalls: number;
+        connectRate: number;
+        talkTimeMins: number;
+        demosBooked: number;
+        wonDeals: number;
+        wonRevenue: number;
+      }> = [];
+
+      if (isManagerOrAdmin(role) && !targetUserId) {
+        const boardRes = await client.query(
+          `SELECT u.id as "repId", u.full_name as "repName",
+                  COALESCE(cl.total_calls, 0)::int as "totalCalls",
+                  COALESCE(cl.talk_time, 0)::int as "talkTimeMins",
+                  COALESCE(st.demos_booked, 0)::int as "demosBooked",
+                  COALESCE(dl.won_deals, 0)::int as "wonDeals",
+                  COALESCE(dl.won_revenue, 0)::numeric as "wonRevenue"
+           FROM users u
+           LEFT JOIN (
+             SELECT rep_id, COUNT(id) as total_calls, ROUND(SUM(duration_seconds) / 60) as talk_time
+             FROM call_logs
+             WHERE tenant_id = $1 AND call_timestamp >= $2 AND call_timestamp <= $3
+             GROUP BY rep_id
+           ) cl ON u.id = cl.rep_id
+           LEFT JOIN (
+             SELECT rep_id, COUNT(id) as demos_booked
+             FROM scheduled_tasks
+             WHERE tenant_id = $1 AND task_type = 'product_demo' AND created_at >= $2 AND created_at <= $3
+             GROUP BY rep_id
+           ) st ON u.id = st.rep_id
+           LEFT JOIN (
+             SELECT rep_id, COUNT(id) as won_deals, SUM(quoted_price) as won_revenue
+             FROM deals
+             WHERE tenant_id = $1 AND stage = 'closed_won' AND updated_at >= $2 AND updated_at <= $3
+             GROUP BY rep_id
+           ) dl ON u.id = dl.rep_id
+           WHERE u.tenant_id = $1 AND u.is_active = true AND u.role = 'sales_rep'
+           ORDER BY "wonRevenue" DESC, "totalCalls" DESC`,
+          [tenantId, startOfPeriod, endOfPeriod]
+        );
+
+        leaderboard = boardRes.rows.map((r) => {
+          const calls = r.totalCalls || 0;
+          return {
+            repId: r.repId,
+            repName: r.repName,
+            totalCalls: calls,
+            connectedCalls: Math.round(calls * 0.42),
+            connectRate: calls > 0 ? 42 : 0,
+            talkTimeMins: r.talkTimeMins || 0,
+            demosBooked: r.demosBooked || 0,
+            wonDeals: r.wonDeals || 0,
+            wonRevenue: Number(r.wonRevenue || 0),
+          };
+        });
+      }
+
+      // 9. Accounts Ops Specific Pending Queue
+      const pendingRes = await client.query(
+        `SELECT COUNT(id)::int as count, COALESCE(SUM(final_amount), 0)::numeric as value
+         FROM payments
+         WHERE tenant_id = $1 AND ops_approval_status = 'pending_verification'`,
+        [tenantId]
+      );
+
+      const pendingPaymentsCount = pendingRes.rows[0]?.count || 0;
+      const pendingPaymentsValue = Number(pendingRes.rows[0]?.value || 0);
+
+      return NextResponse.json({
+        role,
+        period,
+        targetUserId: targetUserId || null,
+        teamMembers: teamUsers,
+        metrics: {
+          // Telephony
+          totalCalls,
+          uniqueDials,
+          connectedCalls,
+          connectRate,
+          talkTimeMins,
+          totalDurationSeconds,
+          dispositionMap,
+          // Queue & Agenda
+          queueRemainingCount,
+          unassignedLeadsCount,
+          todayCallbacksCount,
+          todayDemosCount,
+          overdueTasksCount,
+          todayAgenda,
+          // Pipeline & Revenue
+          activeDealsCount,
+          activePipelineValue,
+          wonDealsCount,
+          wonRevenueInPeriod,
+          verifiedRevenue,
+          winRate,
+          allDealsByStage: dealsByStageRes.rows.map((s) => ({
+            stage: s.stage,
+            count: s.count,
+            value: Number(s.value || 0),
+          })),
+          recentDeals: activeDeals.slice(0, 5),
+          // Leads & Verticals
+          totalLeadsCount,
+          leadsByStatus: leadsStatusRes.rows.map((s) => ({
+            status: s.status,
+            count: s.count,
+          })),
+          leadsByVertical: leadsVerticalRes.rows.map((v) => ({
+            vertical: v.vertical || "Unspecified",
+            count: v.count,
+          })),
+          leadsBySource: leadsSourceRes.rows.map((s) => ({
+            source: s.source,
+            count: s.count,
+          })),
+          // Team Leaderboard
+          leaderboard,
+          // Recent Activities
+          recentCalls,
+          // Accounts Ops
+          pendingPaymentsCount,
+          pendingPaymentsValue,
+        },
+      });
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[DASHBOARD_STATS_ERROR]", error);
     return NextResponse.json(
-      { error: "Failed to generate dashboard statistics" },
+      { error: error?.message || "Failed to generate dashboard statistics", details: String(error), stack: error?.stack },
       { status: 500 }
     );
   }
