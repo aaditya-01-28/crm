@@ -12,9 +12,13 @@ function createPrismaClient(): PrismaClient {
     throw new Error("DATABASE_URL is not set");
   }
 
+  const isLocal = connectionString.includes("localhost") || connectionString.includes("127.0.0.1");
+  const forceSsl = connectionString.includes("sslmode=require") || connectionString.includes("ssl=true");
+  const ssl = forceSsl ? { rejectUnauthorized: false } : isLocal ? false : (process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false);
+
   const pool = new Pool({
     connectionString,
-    ssl: { rejectUnauthorized: false },
+    ssl,
   });
   const adapter = new PrismaPg(pool);
 

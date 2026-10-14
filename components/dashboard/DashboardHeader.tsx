@@ -4,6 +4,8 @@ import React from "react";
 import { Calendar, User, RefreshCw, X, Filter } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+export type DashboardPeriod = "today" | "yesterday" | "week" | "month" | "custom";
+
 interface TeamMember {
   id: string;
   fullName: string;
@@ -14,8 +16,12 @@ interface TeamMember {
 interface DashboardHeaderProps {
   userName: string;
   userRole: string;
-  period: "today" | "week" | "month";
-  onPeriodChange: (p: "today" | "week" | "month") => void;
+  period: DashboardPeriod;
+  onPeriodChange: (p: DashboardPeriod) => void;
+  customDateFrom?: string;
+  onCustomDateFromChange?: (date: string) => void;
+  customDateTo?: string;
+  onCustomDateToChange?: (date: string) => void;
   selectedUserId: string | null;
   onUserChange: (id: string | null) => void;
   teamMembers: TeamMember[];
@@ -36,6 +42,10 @@ export function DashboardHeader({
   userRole,
   period,
   onPeriodChange,
+  customDateFrom = "",
+  onCustomDateFromChange,
+  customDateTo = "",
+  onCustomDateToChange,
   selectedUserId,
   onUserChange,
   teamMembers,
@@ -76,7 +86,7 @@ export function DashboardHeader({
             <span>Viewing activity filtered for: <strong>{selectedMember.fullName}</strong></span>
             <button
               onClick={() => onUserChange(null)}
-              className="text-indigo-400 hover:text-indigo-800 ml-1 p-0.5"
+              className="text-indigo-400 hover:text-indigo-800 ml-1 p-0.5 cursor-pointer"
               title="Clear user filter"
             >
               <X className="w-3.5 h-3.5" />
@@ -85,7 +95,7 @@ export function DashboardHeader({
         )}
       </div>
 
-      {/* Right: Time Period Filter & Employee Filter (Level 2 & 3) */}
+      {/* Right: Time Period Dropdown Filter & Employee Filter (All Levels) */}
       <div className="flex items-center gap-2.5 flex-wrap">
         {/* Employee Filter Dropdown (Level 2 & 3 only) */}
         {canFilterUser && (
@@ -97,6 +107,7 @@ export function DashboardHeader({
                 onUserChange(e.target.value === "all" ? null : e.target.value)
               }
               className="bg-transparent font-semibold text-gray-700 outline-none cursor-pointer py-1 text-xs"
+              title="Filter statistics by employee"
             >
               <option value="all">All Team Members (Aggregated)</option>
               {teamMembers.map((member) => (
@@ -108,48 +119,54 @@ export function DashboardHeader({
           </div>
         )}
 
-        {/* Time Period Tabs */}
-        <div className="flex bg-gray-100/90 p-1 rounded-xl border border-gray-200/60 text-xs">
-          <button
-            onClick={() => onPeriodChange("today")}
-            className={cn(
-              "px-3 py-1.5 rounded-lg font-semibold transition",
-              period === "today"
-                ? "bg-white text-emerald-700 shadow-xs ring-1 ring-black/5"
-                : "text-gray-600 hover:text-gray-900"
-            )}
+        {/* Time Period Dropdown Filter (All Dashboard Levels) */}
+        <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1 text-xs">
+          <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+          <select
+            value={period}
+            onChange={(e) => onPeriodChange(e.target.value as DashboardPeriod)}
+            className="bg-transparent font-semibold text-gray-800 outline-none cursor-pointer py-1 text-xs"
+            title="Filter statistics by period"
           >
-            Today
-          </button>
-          <button
-            onClick={() => onPeriodChange("week")}
-            className={cn(
-              "px-3 py-1.5 rounded-lg font-semibold transition",
-              period === "week"
-                ? "bg-white text-emerald-700 shadow-xs ring-1 ring-black/5"
-                : "text-gray-600 hover:text-gray-900"
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="week">This Week (Last 7 Days)</option>
+            <option value="month">This Month (Last 30 Days)</option>
+            {period === "custom" && (
+              <option value="custom">Custom Date Range</option>
             )}
-          >
-            This Week
-          </button>
-          <button
-            onClick={() => onPeriodChange("month")}
-            className={cn(
-              "px-3 py-1.5 rounded-lg font-semibold transition",
-              period === "month"
-                ? "bg-white text-emerald-700 shadow-xs ring-1 ring-black/5"
-                : "text-gray-600 hover:text-gray-900"
-            )}
-          >
-            This Month
-          </button>
+          </select>
+        </div>
+
+        {/* Date Range Picker (Fixed here, always visible) */}
+        <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1 text-xs">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-gray-500">From:</span>
+            <input
+              type="date"
+              value={customDateFrom}
+              onChange={(e) => onCustomDateFromChange?.(e.target.value)}
+              className="bg-white border border-gray-200 rounded-lg px-2 py-0.5 text-xs text-gray-800 outline-none focus:ring-1 focus:ring-emerald-500 font-medium cursor-pointer"
+              title="Start Date"
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-gray-500">To:</span>
+            <input
+              type="date"
+              value={customDateTo}
+              onChange={(e) => onCustomDateToChange?.(e.target.value)}
+              className="bg-white border border-gray-200 rounded-lg px-2 py-0.5 text-xs text-gray-800 outline-none focus:ring-1 focus:ring-emerald-500 font-medium cursor-pointer"
+              title="End Date"
+            />
+          </div>
         </div>
 
         {/* Refresh button */}
         <button
           onClick={onRefresh}
           disabled={isRefreshing}
-          className="p-2 text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition shadow-xs disabled:opacity-50"
+          className="p-2 text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition shadow-xs disabled:opacity-50 cursor-pointer"
           title="Refresh dashboard stats"
         >
           <RefreshCw className={cn("w-4 h-4", isRefreshing && "animate-spin text-emerald-600")} />

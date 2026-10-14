@@ -6,14 +6,10 @@ import {
   User,
   Mail,
   Phone,
-  Lock,
   Globe,
   Building2,
   Shield,
   CheckCircle2,
-  KeyRound,
-  Eye,
-  EyeOff,
   Save,
   Calendar,
   Sparkles,
@@ -122,14 +118,6 @@ export default function ProfilePage() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [selectedLanguages, setSelectedLanguages] = useState<string[]>(["en"]);
 
-  // Password fields state
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [showCurrentPw, setShowCurrentPw] = useState(false);
-  const [showNewPw, setShowNewPw] = useState(false);
-  const [showConfirmPw, setShowConfirmPw] = useState(false);
-
   // Fetch profile
   const { data, isLoading, isError, refetch } = useQuery<{ user: UserProfile }>({
     queryKey: ["user-profile"],
@@ -163,8 +151,6 @@ export default function ProfilePage() {
       fullName?: string;
       phoneNumber?: string;
       language?: string;
-      currentPassword?: string;
-      newPassword?: string;
     }) => {
       const res = await fetch("/api/profile", {
         method: "PATCH",
@@ -180,12 +166,6 @@ export default function ProfilePage() {
     onSuccess: (result) => {
       toast.success(result.message || "Profile updated successfully");
       queryClient.invalidateQueries({ queryKey: ["user-profile"] });
-      // Reset password fields if updated
-      if (result.passwordUpdated) {
-        setCurrentPassword("");
-        setNewPassword("");
-        setConfirmPassword("");
-      }
     },
     onError: (err: Error) => {
       toast.error(err.message || "An error occurred while updating profile");
@@ -214,32 +194,14 @@ export default function ProfilePage() {
       toast.error("Please select at least one language you can speak");
       return;
     }
-    updateProfileMutation.mutate({
+    const payload: { fullName: string; language: string; phoneNumber?: string } = {
       fullName: fullName.trim(),
-      phoneNumber: phoneNumber.trim(),
       language: selectedLanguages.join(","),
-    });
-  };
-
-  const handleUpdatePassword = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentPassword) {
-      toast.error("Please enter your current password");
-      return;
+    };
+    if (user?.role === "super_admin") {
+      payload.phoneNumber = phoneNumber.trim();
     }
-    if (newPassword.length < 6) {
-      toast.error("New password must be at least 6 characters");
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      toast.error("New password and confirm password do not match");
-      return;
-    }
-
-    updateProfileMutation.mutate({
-      currentPassword,
-      newPassword,
-    });
+    updateProfileMutation.mutate(payload);
   };
 
   const roleMeta = ROLE_DETAILS[user?.role || ""] || {
@@ -485,21 +447,35 @@ export default function ProfilePage() {
 
               {/* Phone Number */}
               <div>
-                <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
-                  Contact Phone / Calling Line
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    Contact Phone / Calling Line
+                  </label>
+                  {user.role !== "super_admin" ? (
+                    <span className="text-[11px] text-gray-400 font-medium">Managed by Level 3 Super Admin</span>
+                  ) : (
+                    <span className="text-[11px] text-emerald-600 font-medium">Editable (Super Admin)</span>
+                  )}
+                </div>
                 <div className="relative">
                   <Phone className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="tel"
                     value={phoneNumber}
                     onChange={(e) => setPhoneNumber(e.target.value)}
-                    placeholder="+91 98765 43210"
-                    className="w-full pl-10 pr-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm bg-gray-50/40"
+                    disabled={user.role !== "super_admin"}
+                    placeholder={user.role === "super_admin" ? "+91 98765 43210" : "No phone configured by Admin"}
+                    className={`w-full pl-10 pr-3.5 py-2.5 border border-gray-200 rounded-xl text-sm ${
+                      user.role === "super_admin"
+                        ? "focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-gray-50/40"
+                        : "bg-gray-100/70 text-gray-500 cursor-not-allowed select-none"
+                    }`}
                   />
                 </div>
                 <p className="text-[11px] text-gray-400 mt-1">
-                  Used as the representative identifier for outbound telephony routing & SMS signatures.
+                  {user.role === "super_admin"
+                    ? "Used as the representative identifier for outbound telephony routing & SMS signatures."
+                    : "Phone number is provisioned and managed by your Level 3 Super Admin from the Team Management tab."}
                 </p>
               </div>
 
@@ -575,133 +551,6 @@ export default function ProfilePage() {
                     <>
                       <Save className="w-4 h-4" />
                       Save Details
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-
-          {/* Card 2: Security & Password Update */}
-          <div className="bg-white rounded-2xl border border-gray-200/90 p-6 shadow-xs">
-            <div className="border-b border-gray-100 pb-4 mb-5">
-              <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
-                <KeyRound className="w-4 h-4 text-indigo-600" />
-                Change Password & Security
-              </h2>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Ensure your CRM access is secured with a strong password. You will need to verify your current password.
-              </p>
-            </div>
-
-            <form onSubmit={handleUpdatePassword} className="space-y-4">
-              {/* Current Password */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
-                  Current Password <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <Lock className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type={showCurrentPw ? "text" : "password"}
-                    value={currentPassword}
-                    onChange={(e) => setCurrentPassword(e.target.value)}
-                    required
-                    placeholder="Enter current password"
-                    className="w-full pl-10 pr-10 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm bg-gray-50/40"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowCurrentPw(!showCurrentPw)}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  >
-                    {showCurrentPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Grid: New Password & Confirm Password */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
-                    New Password <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <Lock className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type={showNewPw ? "text" : "password"}
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      required
-                      placeholder="Minimum 6 characters"
-                      className="w-full pl-10 pr-10 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm bg-gray-50/40"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowNewPw(!showNewPw)}
-                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    >
-                      {showNewPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1.5">
-                    Confirm New Password <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <Lock className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type={showConfirmPw ? "text" : "password"}
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      required
-                      placeholder="Re-enter new password"
-                      className="w-full pl-10 pr-10 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm bg-gray-50/40"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirmPw(!showConfirmPw)}
-                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    >
-                      {showConfirmPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Password Match Status */}
-              {newPassword && confirmPassword && (
-                <div className="text-xs">
-                  {newPassword === confirmPassword ? (
-                    <span className="text-emerald-600 font-semibold flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Passwords match
-                    </span>
-                  ) : (
-                    <span className="text-red-500 font-semibold flex items-center gap-1.5">
-                      <AlertCircle className="w-3.5 h-3.5" /> Passwords do not match
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {/* Submit Button */}
-              <div className="pt-2 flex justify-end">
-                <button
-                  type="submit"
-                  disabled={updateProfileMutation.isPending || !currentPassword || !newPassword || newPassword !== confirmPassword}
-                  className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-300 text-white font-semibold px-5 py-2.5 rounded-xl transition text-sm flex items-center gap-2 shadow-xs shadow-indigo-900/10 cursor-pointer disabled:cursor-not-allowed"
-                >
-                  {updateProfileMutation.isPending ? (
-                    <>
-                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Updating password...
-                    </>
-                  ) : (
-                    <>
-                      <KeyRound className="w-4 h-4" />
-                      Update Password
                     </>
                   )}
                 </button>

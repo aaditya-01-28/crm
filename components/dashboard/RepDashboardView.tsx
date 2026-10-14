@@ -22,10 +22,11 @@ import { formatCurrency, formatDateTime, buildTelLink, buildWALink, WA_PITCH } f
 
 interface RepDashboardViewProps {
   metrics: any;
-  period: "today" | "week" | "month";
+  period: "today" | "yesterday" | "week" | "month" | "custom" | string;
+  periodLabel?: string;
 }
 
-export function RepDashboardView({ metrics, period }: RepDashboardViewProps) {
+export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardViewProps) {
   const {
     queueRemainingCount = 0,
     totalCalls = 0,
@@ -45,7 +46,17 @@ export function RepDashboardView({ metrics, period }: RepDashboardViewProps) {
     recentCalls = [],
   } = metrics || {};
 
-  const periodLabel = period === "today" ? "Today" : period === "week" ? "This Week" : "This Month";
+  const activePeriodLabel =
+    periodLabel ||
+    (period === "today"
+      ? "Today"
+      : period === "yesterday"
+      ? "Yesterday"
+      : period === "week"
+      ? "This Week"
+      : period === "month"
+      ? "This Month"
+      : "Custom Range");
 
   return (
     <div className="space-y-6">
@@ -96,7 +107,7 @@ export function RepDashboardView({ metrics, period }: RepDashboardViewProps) {
         />
 
         <KpiCard
-          label={`Calls ${periodLabel}`}
+          label={`Calls ${activePeriodLabel}`}
           value={totalCalls}
           subValue={`${connectedCalls} connected (${connectRate}% pickup)`}
           icon={Phone}
@@ -118,7 +129,7 @@ export function RepDashboardView({ metrics, period }: RepDashboardViewProps) {
         />
 
         <KpiCard
-          label={`Won Revenue (${periodLabel})`}
+          label={`Won Revenue (${activePeriodLabel})`}
           value={formatCurrency(wonRevenueInPeriod)}
           subValue={`${wonDealsCount} deal(s) closed won`}
           icon={DollarSign}
@@ -271,7 +282,7 @@ export function RepDashboardView({ metrics, period }: RepDashboardViewProps) {
           {/* My Call Dispositions Today */}
           <div className="bg-white rounded-2xl border border-gray-200/90 shadow-xs p-5">
             <h3 className="text-base font-bold text-gray-900 mb-1">
-              Call Outcomes ({periodLabel})
+              Call Outcomes ({activePeriodLabel})
             </h3>
             <p className="text-xs text-gray-500 mb-4">
               Distribution of dispositions recorded across your dials

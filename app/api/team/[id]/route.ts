@@ -27,7 +27,7 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const { isActive, role: newRole, newPassword } = body;
+    const { fullName, email, phoneNumber, isActive, role: newRole, newPassword } = body;
 
     // Guard: Prevent Super Admin from blocking or demoting their own active account
     if (id === currentUserId) {
@@ -45,7 +45,7 @@ export async function PATCH(
       }
     }
 
-    if (newPassword !== undefined) {
+    if (newPassword !== undefined && newPassword !== "") {
       if (typeof newPassword !== "string" || newPassword.length < 6) {
         return NextResponse.json(
           { error: "New password must be at least 6 characters in length." },
@@ -56,7 +56,7 @@ export async function PATCH(
 
     return await withClient(async (client) => {
       const targetRes = await client.query(
-        "SELECT id, role, is_active FROM users WHERE id = $1 AND tenant_id = $2",
+        "SELECT id, full_name, email, phone_number, role, is_active FROM users WHERE id = $1 AND tenant_id = $2",
         [id, tenantId]
       );
 
@@ -79,6 +79,48 @@ export async function PATCH(
         targetRole = newRole;
       }
 
+      let targetFullName = existing.full_name;
+      if (fullName !== undefined) {
+        const trimmed = String(fullName).trim();
+        if (!trimmed || trimmed.length < 2) {
+          return NextResponse.json(
+            { error: "Full name must be at least 2 characters in length." },
+            { status: 400 }
+          );
+        }
+        targetFullName = trimmed;
+      }
+
+      let targetEmail = existing.email;
+      if (email !== undefined) {
+        const cleanEmail = String(email).toLowerCase().trim();
+        if (!cleanEmail || !cleanEmail.includes("@")) {
+          return NextResponse.json(
+            { error: "A valid email address is required." },
+            { status: 400 }
+          );
+        }
+
+        if (cleanEmail !== existing.email.toLowerCase().trim()) {
+          const emailCheck = await client.query(
+            "SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND id != $2 LIMIT 1",
+            [cleanEmail, id]
+          );
+          if (emailCheck.rows.length > 0) {
+            return NextResponse.json(
+              { error: `The email ${cleanEmail} is already registered to another user account.` },
+              { status: 400 }
+            );
+          }
+        }
+        targetEmail = cleanEmail;
+      }
+
+      let targetPhone = existing.phone_number;
+      if (phoneNumber !== undefined) {
+        targetPhone = phoneNumber ? String(phoneNumber).trim() : null;
+      }
+
       let passwordHash: string | null = null;
       if (newPassword) {
         passwordHash = await bcrypt.hash(newPassword, 12);
@@ -88,13 +130,16 @@ export async function PATCH(
         `UPDATE users
          SET is_active = $1,
              role = $2,
-             password_hash = COALESCE($5, password_hash),
+             full_name = $3,
+             email = $4,
+             phone_number = $5,
+             password_hash = COALESCE($6, password_hash),
              reset_token = NULL,
              reset_token_expiry = NULL
-         WHERE id = $3 AND tenant_id = $4
+         WHERE id = $7 AND tenant_id = $8
          RETURNING id, full_name as "fullName", email, phone_number as "phoneNumber",
                    role, language, is_active as "isActive", created_at as "createdAt"`,
-        [targetIsActive, targetRole, id, tenantId, passwordHash]
+        [targetIsActive, targetRole, targetFullName, targetEmail, targetPhone, passwordHash, id, tenantId]
       );
 
       const updatedUser = updateRes.rows[0];

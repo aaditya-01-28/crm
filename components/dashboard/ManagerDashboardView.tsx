@@ -23,7 +23,8 @@ import { formatCurrency, formatDateTime } from "@/lib/utils";
 
 interface ManagerDashboardViewProps {
   metrics: any;
-  period: "today" | "week" | "month";
+  period: "today" | "yesterday" | "week" | "month" | "custom" | string;
+  periodLabel?: string;
   onSelectRep?: (repId: string) => void;
   selectedRepId?: string | null;
 }
@@ -31,6 +32,7 @@ interface ManagerDashboardViewProps {
 export function ManagerDashboardView({
   metrics,
   period,
+  periodLabel,
   onSelectRep,
   selectedRepId,
 }: ManagerDashboardViewProps) {
@@ -53,7 +55,17 @@ export function ManagerDashboardView({
     totalLeadsCount = 0,
   } = metrics || {};
 
-  const periodLabel = period === "today" ? "Today" : period === "week" ? "This Week" : "This Month";
+  const activePeriodLabel =
+    periodLabel ||
+    (period === "today"
+      ? "Today"
+      : period === "yesterday"
+      ? "Yesterday"
+      : period === "week"
+      ? "This Week"
+      : period === "month"
+      ? "This Month"
+      : "Custom Range");
 
   return (
     <div className="space-y-6">
@@ -111,7 +123,7 @@ export function ManagerDashboardView({
         />
 
         <KpiCard
-          label={`Team Dials (${periodLabel})`}
+          label={`Team Dials (${activePeriodLabel})`}
           value={totalCalls}
           subValue={`${connectedCalls} connected (${connectRate}% pickup)`}
           icon={Phone}
@@ -144,7 +156,7 @@ export function ManagerDashboardView({
           <div>
             <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
               <Award className="w-5 h-5 text-amber-500" />
-              Sales Team Performance Leaderboard ({periodLabel})
+              Sales Team Performance Leaderboard ({activePeriodLabel})
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">
               Live ranking of representatives by activity volume, call duration, and revenue conversion
@@ -267,7 +279,7 @@ export function ManagerDashboardView({
         {/* Call Outcomes Distribution */}
         <div className="bg-white rounded-2xl border border-gray-200/90 shadow-xs p-5">
           <h3 className="text-base font-bold text-gray-900 mb-1">
-            Team Call Outcomes ({periodLabel})
+            Team Call Outcomes ({activePeriodLabel})
           </h3>
           <p className="text-xs text-gray-500 mb-4">
             Aggregated call disposition distribution across all active representatives

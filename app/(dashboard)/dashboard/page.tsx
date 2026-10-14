@@ -5,21 +5,56 @@ import { useQuery } from "@tanstack/react-query";
 import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 import { useSession } from "@/components/layout/SessionProvider";
 import { isAdmin, isSalesManager, isSalesRep, isManagerOrAdmin } from "@/lib/rbac";
-import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
+import { DashboardHeader, type DashboardPeriod } from "@/components/dashboard/DashboardHeader";
 import { RepDashboardView } from "@/components/dashboard/RepDashboardView";
 import { ManagerDashboardView } from "@/components/dashboard/ManagerDashboardView";
 import { AdminDashboardView } from "@/components/dashboard/AdminDashboardView";
 
+const formatLocalDate = (d: Date): string => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getPresetDates = (preset: DashboardPeriod): { from: string; to: string } => {
+  const now = new Date();
+  const todayStr = formatLocalDate(now);
+  if (preset === "yesterday") {
+    const y = new Date();
+    y.setDate(y.getDate() - 1);
+    const yStr = formatLocalDate(y);
+    return { from: yStr, to: yStr };
+  }
+  if (preset === "week") {
+    const p7 = new Date();
+    p7.setDate(p7.getDate() - 6);
+    return { from: formatLocalDate(p7), to: todayStr };
+  }
+  if (preset === "month") {
+    const p30 = new Date();
+    p30.setDate(p30.getDate() - 29);
+    return { from: formatLocalDate(p30), to: todayStr };
+  }
+  return { from: todayStr, to: todayStr };
+};
+
 export default function DashboardPage() {
   const { role, userName } = useSession();
-  const [period, setPeriod] = useState<"today" | "week" | "month">("today");
+  const [period, setPeriod] = useState<DashboardPeriod>("today");
+  const [customDateFrom, setCustomDateFrom] = useState(() => getPresetDates("today").from);
+  const [customDateTo, setCustomDateTo] = useState(() => getPresetDates("today").to);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
-    queryKey: ["dashboard-stats", period, selectedUserId],
+    queryKey: ["dashboard-stats", period, customDateFrom, customDateTo, selectedUserId],
     queryFn: async () => {
       const url = new URL("/api/dashboard/stats", window.location.origin);
       url.searchParams.set("period", period);
+      if (period === "custom") {
+        if (customDateFrom) url.searchParams.set("dateFrom", customDateFrom);
+        if (customDateTo) url.searchParams.set("dateTo", customDateTo);
+      }
       if (selectedUserId) {
         url.searchParams.set("userId", selectedUserId);
       }
@@ -33,8 +68,23 @@ export default function DashboardPage() {
     staleTime: 30 * 1000, // 30 seconds
   });
 
-  const handlePeriodChange = (newPeriod: "today" | "week" | "month") => {
+  const handlePeriodChange = (newPeriod: DashboardPeriod) => {
     setPeriod(newPeriod);
+    if (newPeriod !== "custom") {
+      const dates = getPresetDates(newPeriod);
+      setCustomDateFrom(dates.from);
+      setCustomDateTo(dates.to);
+    }
+  };
+
+  const handleCustomDateFromChange = (newDate: string) => {
+    setCustomDateFrom(newDate);
+    setPeriod("custom");
+  };
+
+  const handleCustomDateToChange = (newDate: string) => {
+    setCustomDateTo(newDate);
+    setPeriod("custom");
   };
 
   const handleUserChange = (userId: string | null) => {
@@ -45,14 +95,36 @@ export default function DashboardPage() {
     setSelectedUserId(repId);
   };
 
+  // Human-readable period label for widgets and KPI cards across all views
+  const periodLabel =
+    period === "today"
+      ? "Today"
+      : period === "yesterday"
+      ? "Yesterday"
+      : period === "week"
+      ? "This Week"
+      : period === "month"
+      ? "This Month"
+      : customDateFrom && customDateTo
+      ? customDateFrom === customDateTo
+        ? customDateFrom
+        : `${customDateFrom} to ${customDateTo}`
+      : customDateFrom
+      ? `From ${customDateFrom}`
+      : "Custom Range";
+
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-12">
-      {/* Role-Adaptive Dashboard Header & Filters */}
+      {/* Role-Adaptive Dashboard Header & Filters (Dropdown for all levels) */}
       <DashboardHeader
         userName={userName || "Team Member"}
         userRole={role}
         period={period}
         onPeriodChange={handlePeriodChange}
+        customDateFrom={customDateFrom}
+        onCustomDateFromChange={handleCustomDateFromChange}
+        customDateTo={customDateTo}
+        onCustomDateToChange={handleCustomDateToChange}
         selectedUserId={selectedUserId}
         onUserChange={handleUserChange}
         teamMembers={data?.teamMembers || []}
@@ -95,7 +167,7 @@ export default function DashboardPage() {
           </p>
           <button
             onClick={() => refetch()}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-xl transition shadow-xs"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-xl transition shadow-xs cursor-pointer"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             Retry
@@ -111,6 +183,7 @@ export default function DashboardPage() {
             <AdminDashboardView
               metrics={data.metrics}
               period={period}
+              periodLabel={periodLabel}
               onSelectRep={handleSelectRep}
               selectedRepId={selectedUserId}
             />
@@ -121,6 +194,7 @@ export default function DashboardPage() {
             <ManagerDashboardView
               metrics={data.metrics}
               period={period}
+              periodLabel={periodLabel}
               onSelectRep={handleSelectRep}
               selectedRepId={selectedUserId}
             />
@@ -131,6 +205,7 @@ export default function DashboardPage() {
             <RepDashboardView
               metrics={data.metrics}
               period={period}
+              periodLabel={periodLabel}
             />
           )}
 
@@ -139,6 +214,7 @@ export default function DashboardPage() {
             <ManagerDashboardView
               metrics={data.metrics}
               period={period}
+              periodLabel={periodLabel}
               onSelectRep={handleSelectRep}
               selectedRepId={selectedUserId}
             />

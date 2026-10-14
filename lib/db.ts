@@ -6,9 +6,13 @@ export async function withClient<T>(fn: (client: Client) => Promise<T>): Promise
     throw new Error("DATABASE_URL is not set");
   }
 
+  const isLocal = connectionString.includes("localhost") || connectionString.includes("127.0.0.1");
+  const forceSsl = connectionString.includes("sslmode=require") || connectionString.includes("ssl=true");
+  const ssl = forceSsl ? { rejectUnauthorized: false } : isLocal ? false : (process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false);
+
   const client = new Client({
     connectionString,
-    ssl: { rejectUnauthorized: false },
+    ssl,
     connectionTimeoutMillis: 5000,
   });
 

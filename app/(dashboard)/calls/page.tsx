@@ -232,6 +232,10 @@ export default function CallLogsPage() {
 
   // CSV Exporter
   function handleExportCSV() {
+    if (!isManagerOrAdmin) {
+      toast.error("Export is restricted to Sales Managers and Super Admins.");
+      return;
+    }
     if (calls.length === 0) {
       toast.error("No call records to export");
       return;
@@ -317,13 +321,15 @@ export default function CallLogsPage() {
             <span>Mobile Companion Sync</span>
           </button>
 
-          <button
-            onClick={handleExportCSV}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 rounded-xl transition shadow-xs"
-          >
-            <Download className="w-4 h-4 text-gray-500" />
-            <span>Export CSV</span>
-          </button>
+          {isManagerOrAdmin && (
+            <button
+              onClick={handleExportCSV}
+              className="flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 rounded-xl transition shadow-xs cursor-pointer"
+            >
+              <Download className="w-4 h-4 text-gray-500" />
+              <span>Export CSV</span>
+            </button>
+          )}
 
           <button
             onClick={() => refetch()}

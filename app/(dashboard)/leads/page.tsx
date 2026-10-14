@@ -280,6 +280,10 @@ export default function LeadsDirectoryPage() {
   }
 
   function handleExportCSV() {
+    if (!canAssign) {
+      toast.error("Export is restricted to Sales Managers and Super Admins.");
+      return;
+    }
     if (leads.length === 0) {
       toast.error("No leads to export");
       return;
@@ -347,13 +351,15 @@ export default function LeadsDirectoryPage() {
             <RefreshCw className="w-4 h-4" />
             Refresh
           </button>
-          <button
-            onClick={handleExportCSV}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition shadow-xs"
-          >
-            <Download className="w-4 h-4" />
-            Export CSV
-          </button>
+          {canAssign && (
+            <button
+              onClick={handleExportCSV}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition shadow-xs"
+            >
+              <Download className="w-4 h-4" />
+              Export CSV
+            </button>
+          )}
           {canImport && (
             <>
               <button

@@ -24,7 +24,8 @@ import { formatCurrency, formatDateTime } from "@/lib/utils";
 
 interface AdminDashboardViewProps {
   metrics: any;
-  period: "today" | "week" | "month";
+  period: "today" | "yesterday" | "week" | "month" | "custom" | string;
+  periodLabel?: string;
   onSelectRep?: (repId: string) => void;
   selectedRepId?: string | null;
 }
@@ -32,6 +33,7 @@ interface AdminDashboardViewProps {
 export function AdminDashboardView({
   metrics,
   period,
+  periodLabel,
   onSelectRep,
   selectedRepId,
 }: AdminDashboardViewProps) {
@@ -55,14 +57,24 @@ export function AdminDashboardView({
     pendingPaymentsValue = 0,
   } = metrics || {};
 
-  const periodLabel = period === "today" ? "Today" : period === "week" ? "This Week" : "This Month";
+  const activePeriodLabel =
+    periodLabel ||
+    (period === "today"
+      ? "Today"
+      : period === "yesterday"
+      ? "Yesterday"
+      : period === "week"
+      ? "This Week"
+      : period === "month"
+      ? "This Month"
+      : "Custom Range");
 
   return (
     <div className="space-y-6">
       {/* 💳 Executive Financial & Growth KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
-          label={`Revenue Inflow (${periodLabel})`}
+          label={`Revenue Inflow (${activePeriodLabel})`}
           value={formatCurrency(verifiedRevenue > 0 ? verifiedRevenue : wonRevenueInPeriod)}
           subValue={`${wonDealsCount} closed deal(s) won`}
           icon={DollarSign}
@@ -152,7 +164,7 @@ export function AdminDashboardView({
           <div>
             <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
               <Award className="w-5 h-5 text-amber-500" />
-              Workforce Conversion & Leaderboard ({periodLabel})
+              Workforce Conversion & Leaderboard ({activePeriodLabel})
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">
               Live ranking of sales representatives by output volume, call talk time, and deal closures

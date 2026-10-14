@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { normalizeRole } from "@/lib/rbac";
+import { useQuery } from "@tanstack/react-query";
 
 const NAV_ITEMS = [
   {
@@ -89,6 +90,17 @@ export default function Sidebar({ role }: SidebarProps) {
   const pathname = usePathname();
   const normalizedRole = normalizeRole(role);
 
+  const { data: reqData } = useQuery<{ pendingCount: number }>({
+    queryKey: ["password-requests-count"],
+    queryFn: async () => {
+      const res = await fetch("/api/team/password-requests");
+      if (!res.ok) return { pendingCount: 0 };
+      return res.json();
+    },
+    enabled: normalizedRole === "super_admin",
+    refetchInterval: 20000,
+  });
+
   const visibleItems = NAV_ITEMS.filter((item) =>
     item.roles.includes(normalizedRole)
   );
@@ -115,6 +127,8 @@ export default function Sidebar({ role }: SidebarProps) {
         {visibleItems.map((item) => {
           const Icon = item.icon;
           const active = pathname.startsWith(item.href);
+          const showTeamBadge = item.href === "/team" && (reqData?.pendingCount || 0) > 0;
+
           return (
             <Link
               key={item.href}
@@ -133,6 +147,11 @@ export default function Sidebar({ role }: SidebarProps) {
                 )}
               />
               <span className="flex-1">{item.label}</span>
+              {showTeamBadge && (
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white animate-pulse">
+                  {reqData?.pendingCount}
+                </span>
+              )}
               {active && <ChevronRight className="w-3.5 h-3.5 opacity-80" />}
             </Link>
           );

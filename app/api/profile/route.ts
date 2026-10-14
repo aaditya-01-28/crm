@@ -112,7 +112,10 @@ export async function PATCH(request: NextRequest) {
 
       let updatedPhoneNumber = existingUser.phoneNumber;
       if (phoneNumber !== undefined) {
-        updatedPhoneNumber = phoneNumber ? phoneNumber.trim() : null;
+        // Only Level 3 Super Admin can update phone number; other roles must have it updated by Super Admin in Team tab
+        if (existingUser.role === "super_admin") {
+          updatedPhoneNumber = phoneNumber ? phoneNumber.trim() : null;
+        }
       }
 
       let updatedLanguage = existingUser.language || "en";
@@ -130,47 +133,21 @@ export async function PATCH(request: NextRequest) {
         }
       }
 
-      let passwordUpdated = false;
-      let newHash = existingUser.passwordHash;
       if (newPassword) {
-        if (!currentPassword) {
-          return NextResponse.json(
-            { error: "Current password is required to set a new password" },
-            { status: 400 }
-          );
-        }
-
-        if (newPassword.length < 6) {
-          return NextResponse.json(
-            { error: "New password must be at least 6 characters" },
-            { status: 400 }
-          );
-        }
-
-        const isCurrentValid = await bcrypt.compare(
-          currentPassword,
-          existingUser.passwordHash
+        return NextResponse.json(
+          { error: "Password changes from user profile are disabled. Please contact your Level 3 Super Admin to manage credentials." },
+          { status: 403 }
         );
-
-        if (!isCurrentValid) {
-          return NextResponse.json(
-            { error: "Current password does not match. Please verify and try again." },
-            { status: 400 }
-          );
-        }
-
-        newHash = await bcrypt.hash(newPassword, 10);
-        passwordUpdated = true;
       }
 
       const updateRes = await client.query(
         `UPDATE users
-         SET full_name = $1, phone_number = $2, language = $3, password_hash = $4
-         WHERE id = $5
+         SET full_name = $1, phone_number = $2, language = $3
+         WHERE id = $4
          RETURNING id, tenant_id as "tenantId", full_name as "fullName",
                    email, phone_number as "phoneNumber", role, language,
                    is_active as "isActive", created_at as "createdAt"`,
-        [updatedFullName, updatedPhoneNumber, updatedLanguage, newHash, currentUserId]
+        [updatedFullName, updatedPhoneNumber, updatedLanguage, currentUserId]
       );
 
       const r = updateRes.rows[0];
@@ -196,11 +173,8 @@ export async function PATCH(request: NextRequest) {
 
       const response = NextResponse.json({
         success: true,
-        message: passwordUpdated
-          ? "Profile & password updated successfully"
-          : "Profile updated successfully",
+        message: "Profile updated successfully",
         user: updatedUser,
-        passwordUpdated,
       });
 
       setAuthCookies(response, accessToken, refreshToken);

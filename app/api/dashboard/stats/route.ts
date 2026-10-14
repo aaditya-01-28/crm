@@ -19,7 +19,9 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const period = searchParams.get("period") || "today"; // "today" | "week" | "month"
+  const period = searchParams.get("period") || "today"; // "today" | "yesterday" | "week" | "month" | "custom"
+  const dateFromParam = searchParams.get("dateFrom");
+  const dateToParam = searchParams.get("dateTo");
   const requestedUserId = searchParams.get("userId");
 
   let targetUserId: string | undefined = undefined;
@@ -38,16 +40,50 @@ export async function GET(request: NextRequest) {
   endOfToday.setHours(23, 59, 59, 999);
 
   let startOfPeriod = new Date(startOfToday);
-  if (period === "week") {
-    const day = now.getDay();
-    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-    startOfPeriod = new Date(now.setDate(diff));
-    startOfPeriod.setHours(0, 0, 0, 0);
-  } else if (period === "month") {
-    startOfPeriod = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-  }
+  let endOfPeriod = new Date(endOfToday);
 
-  const endOfPeriod = endOfToday;
+  if (period === "yesterday") {
+    const yesterdayStart = new Date(startOfToday);
+    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+    yesterdayStart.setHours(0, 0, 0, 0);
+
+    const yesterdayEnd = new Date(startOfToday);
+    yesterdayEnd.setMilliseconds(-1);
+
+    startOfPeriod = yesterdayStart;
+    endOfPeriod = yesterdayEnd;
+  } else if (period === "week") {
+    const past7 = new Date(startOfToday);
+    past7.setDate(past7.getDate() - 6);
+    past7.setHours(0, 0, 0, 0);
+    startOfPeriod = past7;
+    endOfPeriod = new Date(endOfToday);
+  } else if (period === "month") {
+    const past30 = new Date(startOfToday);
+    past30.setDate(past30.getDate() - 29);
+    past30.setHours(0, 0, 0, 0);
+    startOfPeriod = past30;
+    endOfPeriod = new Date(endOfToday);
+  } else if (period === "custom") {
+    if (dateFromParam) {
+      const fromDate = new Date(dateFromParam);
+      if (!isNaN(fromDate.getTime())) {
+        fromDate.setHours(0, 0, 0, 0);
+        startOfPeriod = fromDate;
+      }
+    }
+    if (dateToParam) {
+      const toDate = new Date(dateToParam);
+      if (!isNaN(toDate.getTime())) {
+        toDate.setHours(23, 59, 59, 999);
+        endOfPeriod = toDate;
+      }
+    } else if (dateFromParam) {
+      const singleDayEnd = new Date(startOfPeriod);
+      singleDayEnd.setHours(23, 59, 59, 999);
+      endOfPeriod = singleDayEnd;
+    }
+  }
 
   try {
     return await withClient(async (client) => {
@@ -131,8 +167,8 @@ export async function GET(request: NextRequest) {
          WHERE ${taskWhereClause} AND t.status = 'pending'
            AND t.scheduled_time >= $${taskParams.length + 1} AND t.scheduled_time <= $${taskParams.length + 2}
          ORDER BY t.scheduled_time ASC
-         LIMIT 6`,
-        [...taskParams, startOfToday, endOfToday]
+          LIMIT 6`,
+        [...taskParams, startOfPeriod, endOfPeriod]
       );
 
       const todayAgenda = agendaRes.rows.map((r) => ({
@@ -163,8 +199,8 @@ export async function GET(request: NextRequest) {
          FROM scheduled_tasks
          WHERE ${targetUserId ? "tenant_id = $1 AND rep_id = $5" : "tenant_id = $1"}`,
         targetUserId
-          ? [tenantId, startOfToday, startOfToday, endOfToday, targetUserId]
-          : [tenantId, startOfToday, startOfToday, endOfToday]
+          ? [tenantId, now, startOfPeriod, endOfPeriod, targetUserId]
+          : [tenantId, now, startOfPeriod, endOfPeriod]
       );
 
       const overdueTasksCount = taskStatsRes.rows[0]?.overdueTasksCount || 0;
@@ -397,6 +433,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         role,
         period,
+        dateFrom: startOfPeriod.toISOString(),
+        dateTo: endOfPeriod.toISOString(),
         targetUserId: targetUserId || null,
         teamMembers: teamUsers,
         metrics: {
