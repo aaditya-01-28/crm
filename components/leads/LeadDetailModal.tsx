@@ -34,7 +34,9 @@ import {
   getLanguageMeta,
   formatLanguageLabels,
   hasLanguageMatch,
+  parseServices,
 } from "@/lib/utils";
+import { MultiServiceSelect } from "@/components/common/MultiServiceSelect";
 import { toast } from "sonner";
 import { useCanAssignLeads } from "@/components/layout/SessionProvider";
 
@@ -102,7 +104,8 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
   const [editContactName, setEditContactName] = useState("");
   const [editCompanyName, setEditCompanyName] = useState("");
   const [editVertical, setEditVertical] = useState("");
-  const [editService, setEditService] = useState("");
+  const [editAddress, setEditAddress] = useState("");
+  const [editServices, setEditServices] = useState<string[]>([]);
   const [editLanguage, setEditLanguage] = useState("");
   const [editAssignedRepId, setEditAssignedRepId] = useState("");
   const [savingInfo, setSavingInfo] = useState(false);
@@ -112,7 +115,8 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
       setEditContactName(lead.contactName || "");
       setEditCompanyName(lead.companyName || "");
       setEditVertical(lead.businessVertical || "");
-      setEditService(lead.serviceType || "");
+      setEditAddress((lead.customMetadata as any)?.address || "");
+      setEditServices(lead.serviceType ? parseServices(lead.serviceType) : []);
       setEditLanguage(lead.preferredLanguage || "");
       setEditAssignedRepId(lead.assignedRep?.id || "");
     }
@@ -149,7 +153,8 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
           contactName: editContactName.trim() || null,
           companyName: editCompanyName.trim() || null,
           businessVertical: editVertical.trim() || null,
-          serviceType: editService.trim() || null,
+          address: editAddress.trim() || null,
+          serviceType: editServices.join(", ") || null,
           preferredLanguage: editLanguage || null,
           ...(canAssign ? { assignedRepId: editAssignedRepId || null } : {}),
         }),
@@ -259,11 +264,16 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                 <span className="text-xs uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
                   {lead.businessVertical || "Unspecified Vertical"}
                 </span>
-                {lead.serviceType && (
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-                    {lead.serviceType}
-                  </span>
-                )}
+                {lead.serviceType &&
+                  parseServices(lead.serviceType).map((st) => (
+                    <span
+                      key={st}
+                      className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 flex items-center gap-1"
+                    >
+                      <Tag className="w-3 h-3 text-emerald-400" />
+                      {st}
+                    </span>
+                  ))}
                 {lead.preferredLanguage ? (
                   <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-900/60 text-indigo-200 border border-indigo-700/60 font-medium flex items-center gap-1.5">
                     <Languages className="w-3 h-3 text-indigo-400" />
@@ -399,20 +409,24 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
 
               <div>
                 <label className="text-xs font-medium text-slate-700 block mb-0.5">
-                  Service Interest
+                  Address / City
                 </label>
-                <select
-                  value={editService}
-                  onChange={(e) => setEditService(e.target.value)}
-                  className="w-full text-xs px-3 py-2 bg-white border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900 cursor-pointer"
-                >
-                  <option value="">Select Service Interest...</option>
-                  {SERVICE_INTERESTS.map((svc) => (
-                    <option key={svc} value={svc}>
-                      {svc}
-                    </option>
-                  ))}
-                </select>
+                <input
+                  type="text"
+                  value={editAddress}
+                  onChange={(e) => setEditAddress(e.target.value)}
+                  placeholder="e.g. Indiranagar, Bangalore"
+                  className="w-full text-xs px-3 py-2 bg-white border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <MultiServiceSelect
+                  selectedServices={editServices}
+                  onChange={setEditServices}
+                  label="Interested Services (Multiple Selection)"
+                  placeholder="+ Add interested service..."
+                />
               </div>
 
               <div>

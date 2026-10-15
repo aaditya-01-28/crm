@@ -3,6 +3,9 @@ import { withClient } from "@/lib/db";
 import { can, isSalesRep } from "@/lib/rbac";
 import { getSession } from "@/lib/auth";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET(request: NextRequest) {
   const session = await getSession();
   const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
@@ -21,6 +24,7 @@ export async function GET(request: NextRequest) {
   const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
   const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "25")));
   const queue = searchParams.get("queue") === "true";
+  const allIds = searchParams.get("allIds") === "true";
 
   try {
     return await withClient(async (client) => {
@@ -106,6 +110,24 @@ export async function GET(request: NextRequest) {
       }
 
       const whereClause = conditions.join(" AND ");
+
+      if (allIds) {
+        const allIdsRes = await client.query(
+          `SELECT l.id FROM leads l WHERE ${whereClause} ORDER BY l.updated_at DESC`,
+          params
+        );
+        return NextResponse.json(
+          { ids: allIdsRes.rows.map((r: any) => r.id), total: allIdsRes.rows.length },
+          {
+            headers: {
+              "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+              Pragma: "no-cache",
+              Expires: "0",
+            },
+          }
+        );
+      }
+
       const limitIdx = params.push(limit);
       const offsetIdx = params.push((page - 1) * limit);
 
@@ -217,14 +239,23 @@ export async function GET(request: NextRequest) {
           ((l.customMetadata as Record<string, unknown>)?.preferredLanguage as string) || null,
       }));
 
-      return NextResponse.json({
-        leads: mappedLeads,
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-        stats,
-      });
+      return NextResponse.json(
+        {
+          leads: mappedLeads,
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+          stats,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+            Pragma: "no-cache",
+            Expires: "0",
+          },
+        }
+      );
     });
   } catch (error) {
     console.error("[LEADS_GET_ERROR]", error);
@@ -275,7 +306,10 @@ export async function POST(request: NextRequest) {
         ? assignedRepId
         : repId;
 
-    const metadata = preferredLanguage ? { preferredLanguage } : {};
+    const metadata = {
+      ...(preferredLanguage ? { preferredLanguage } : {}),
+      ...(body.address ? { address: body.address } : {}),
+    };
 
     return await withClient(async (client) => {
       const insertRes = await client.query(

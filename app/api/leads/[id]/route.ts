@@ -186,6 +186,7 @@ export async function PATCH(
       const newMetadata = {
         ...existingMeta,
         ...(preferredLanguage !== undefined ? { preferredLanguage: preferredLanguage || null } : {}),
+        ...(body.address !== undefined ? { address: body.address || null } : {}),
       };
 
       const finalAssignedRepId =

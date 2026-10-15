@@ -16,11 +16,11 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const { stage, closingNotes, quotedPrice, expectedClosingDate } = body;
+    const { stage, closingNotes, quotedPrice, expectedClosingDate, serviceType, quantity } = body;
 
     return await withClient(async (client) => {
       const dealRes = await client.query(
-        "SELECT id, lead_id, stage, closing_notes, quoted_price, expected_closing_date FROM deals WHERE id = $1 AND tenant_id = $2",
+        "SELECT id, lead_id, stage, closing_notes, quoted_price, expected_closing_date, service_type, quantity FROM deals WHERE id = $1 AND tenant_id = $2",
         [id, tenantId]
       );
 
@@ -35,16 +35,19 @@ export async function PATCH(
       const newClosingDate = expectedClosingDate
         ? new Date(expectedClosingDate)
         : deal.expected_closing_date;
+      const newService = serviceType !== undefined ? serviceType : deal.service_type;
+      const newQuantity = quantity !== undefined ? quantity : deal.quantity;
 
       const updateRes = await client.query(
         `UPDATE deals
-         SET stage = $1, closing_notes = $2, quoted_price = $3, expected_closing_date = $4, updated_at = NOW()
-         WHERE id = $5
+         SET stage = $1, closing_notes = $2, quoted_price = $3, expected_closing_date = $4,
+             service_type = $5, quantity = $6, updated_at = NOW()
+         WHERE id = $7
          RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
                    service_type as "serviceType", quantity, quoted_price as "quotedPrice",
                    expected_closing_date as "expectedClosingDate", stage, closing_notes as "closingNotes",
                    created_at as "createdAt", updated_at as "updatedAt"`,
-        [newStage, newNotes, newPrice, newClosingDate, id]
+        [newStage, newNotes, newPrice, newClosingDate, newService, newQuantity, id]
       );
 
       const updated = updateRes.rows[0];

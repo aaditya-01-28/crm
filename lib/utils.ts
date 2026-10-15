@@ -110,10 +110,22 @@ export const SERVICE_INTERESTS = [
   "Virtual WhatsApp",
   "Bulk SMS",
   "RCS Messaging",
+  "Transactional SMS",
+  "Promotional SMS",
   "Voice SMS / OBD",
   "OTP API",
   "DLT & SMS Gateway",
+  "Combo WA+SMS",
+  "Reseller",
 ];
+
+export function parseServices(serviceStr?: string | null): string[] {
+  if (!serviceStr) return [];
+  return serviceStr
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 export const LEAD_LANGUAGES = [
   { code: "en", label: "English", flag: "🇬🇧" },

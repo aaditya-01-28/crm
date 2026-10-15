@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Contact,
   Search,
@@ -31,7 +31,9 @@ import {
   LEAD_LANGUAGES,
   getLanguageMeta,
   formatLanguageLabels,
+  parseServices,
 } from "@/lib/utils";
+import { MultiServiceSelect } from "@/components/common/MultiServiceSelect";
 import { LeadDetailModal } from "@/components/leads/LeadDetailModal";
 import { CSVImporter } from "@/components/dialer/CSVImporter";
 import { toast } from "sonner";
@@ -133,6 +135,11 @@ export default function LeadsDirectoryPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const canImport = useCanImportLeads();
   const canAssign = useCanAssignLeads();
+  const queryClient = useQueryClient();
+
+  // Refresh & bulk selection state
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+  const [isSelectingAllCategory, setIsSelectingAllCategory] = useState(false);
 
   // Bulk assignment & Rep filter state (Level 2/3 Manager/Admin feature)
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
@@ -145,7 +152,7 @@ export default function LeadsDirectoryPage() {
   const [newName, setNewName] = useState("");
   const [newCompany, setNewCompany] = useState("");
   const [newVertical, setNewVertical] = useState("");
-  const [newService, setNewService] = useState("WhatsApp API");
+  const [newServices, setNewServices] = useState<string[]>(["WhatsApp API"]);
   const [newLanguage, setNewLanguage] = useState("");
   const [savingLead, setSavingLead] = useState(false);
 
@@ -165,7 +172,7 @@ export default function LeadsDirectoryPage() {
       (u: { role: string; isActive?: boolean }) => ["sales_rep", "sales_manager"].includes(u.role) && u.isActive !== false
     );
 
-  const { data, isLoading, refetch } = useQuery<LeadsResponse>({
+  const { data, isLoading, isFetching, refetch } = useQuery<LeadsResponse>({
     queryKey: ["leads-directory", activeStatus, vertical, search, selectedRepFilter, page],
     queryFn: async () => {
       const params = new URLSearchParams({
@@ -175,8 +182,15 @@ export default function LeadsDirectoryPage() {
         ...(vertical !== "All Verticals" ? { vertical } : {}),
         ...(search ? { search } : {}),
         ...(selectedRepFilter !== "all" ? { repId: selectedRepFilter } : {}),
+        _t: Date.now().toString(),
       });
-      const res = await fetch(`/api/leads?${params.toString()}`);
+      const res = await fetch(`/api/leads?${params.toString()}`, {
+        cache: "no-store",
+        headers: {
+          Pragma: "no-cache",
+          "Cache-Control": "no-cache",
+        },
+      });
       if (!res.ok) throw new Error("Failed to fetch leads");
       return res.json();
     },
@@ -187,17 +201,61 @@ export default function LeadsDirectoryPage() {
   const total = data?.total || 0;
   const totalPages = data?.totalPages || 1;
 
-  const allCurrentPageSelected =
-    leads.length > 0 && leads.every((l) => selectedLeadIds.includes(l.id));
+  async function handleRefresh() {
+    setIsManualRefreshing(true);
+    try {
+      await queryClient.invalidateQueries({ queryKey: ["leads-directory"] });
+      await refetch();
+      toast.success("Leads refreshed directly from database! 🔄");
+    } catch {
+      toast.error("Failed to refresh leads");
+    } finally {
+      setIsManualRefreshing(false);
+    }
+  }
 
-  function toggleSelectAll() {
-    if (allCurrentPageSelected) {
-      setSelectedLeadIds((prev) =>
-        prev.filter((id) => !leads.some((l) => l.id === id))
-      );
-    } else {
-      const pageIds = leads.map((l) => l.id);
-      setSelectedLeadIds((prev) => Array.from(new Set([...prev, ...pageIds])));
+  const allCategorySelected = total > 0 && selectedLeadIds.length >= total;
+  const isPartiallySelected = selectedLeadIds.length > 0 && !allCategorySelected;
+
+  async function toggleSelectAllCategory() {
+    if (total === 0) return;
+
+    if (allCategorySelected) {
+      setSelectedLeadIds([]);
+      toast.info("Cleared selection");
+      return;
+    }
+
+    if (total <= leads.length) {
+      const allIds = leads.map((l) => l.id);
+      setSelectedLeadIds(allIds);
+      toast.success(`Selected all ${allIds.length} leads in this category! ✅`);
+      return;
+    }
+
+    setIsSelectingAllCategory(true);
+    try {
+      const params = new URLSearchParams({
+        allIds: "true",
+        status: activeStatus,
+        ...(vertical !== "All Verticals" ? { vertical } : {}),
+        ...(search ? { search } : {}),
+        ...(selectedRepFilter !== "all" ? { repId: selectedRepFilter } : {}),
+        _t: Date.now().toString(),
+      });
+      const res = await fetch(`/api/leads?${params.toString()}`, {
+        cache: "no-store",
+        headers: { Pragma: "no-cache", "Cache-Control": "no-cache" },
+      });
+      if (!res.ok) throw new Error("Failed to load lead IDs");
+      const result = await res.json();
+      const ids: string[] = result.ids || [];
+      setSelectedLeadIds(ids);
+      toast.success(`Selected all ${ids.length} leads in this category! ✅`);
+    } catch {
+      toast.error("Failed to select all leads in this category");
+    } finally {
+      setIsSelectingAllCategory(false);
     }
   }
 
@@ -261,7 +319,7 @@ export default function LeadsDirectoryPage() {
           contactName: newName || null,
           companyName: newCompany || null,
           businessVertical: newVertical || null,
-          serviceType: newService || null,
+          serviceType: newServices.join(", ") || null,
           preferredLanguage: newLanguage || null,
           source: "Manual Rep Entry",
         }),
@@ -273,6 +331,7 @@ export default function LeadsDirectoryPage() {
       setNewName("");
       setNewCompany("");
       setNewVertical("");
+      setNewServices(["WhatsApp API"]);
       setNewLanguage("");
       refetch();
     } catch {
@@ -348,11 +407,18 @@ export default function LeadsDirectoryPage() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => refetch()}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition shadow-xs"
+            onClick={handleRefresh}
+            disabled={isFetching || isManualRefreshing}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition shadow-xs font-medium cursor-pointer disabled:opacity-60"
+            title="Fetch latest leads instantly from database"
           >
-            <RefreshCw className="w-4 h-4" />
-            Refresh
+            <RefreshCw
+              className={cn(
+                "w-4 h-4 text-emerald-600",
+                (isFetching || isManualRefreshing) && "animate-spin"
+              )}
+            />
+            <span>{isFetching || isManualRefreshing ? "Refreshing..." : "Refresh"}</span>
           </button>
           {canAssign && (
             <button
@@ -395,6 +461,7 @@ export default function LeadsDirectoryPage() {
                 setActiveStatus("all");
               }
               setPage(1);
+              setSelectedLeadIds([]);
             }}
             className={cn(
               "px-3.5 py-2 rounded-xl text-xs font-semibold shrink-0 transition flex items-center gap-1.5 border",
@@ -427,6 +494,7 @@ export default function LeadsDirectoryPage() {
                 setActiveStatus(tab.key);
                 if (selectedRepFilter === "unassigned") setSelectedRepFilter("all");
                 setPage(1);
+                setSelectedLeadIds([]);
               }}
               className={cn(
                 "px-3.5 py-2 rounded-xl text-xs font-semibold shrink-0 transition flex items-center gap-1.5 border",
@@ -460,6 +528,7 @@ export default function LeadsDirectoryPage() {
             onChange={(e) => {
               setSearch(e.target.value);
               setPage(1);
+              setSelectedLeadIds([]);
             }}
             placeholder="Search leads by company, contact person, phone number..."
             className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50/50"
@@ -475,6 +544,7 @@ export default function LeadsDirectoryPage() {
               onChange={(e) => {
                 setSelectedRepFilter(e.target.value);
                 setPage(1);
+                setSelectedLeadIds([]);
               }}
               className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white"
             >
@@ -514,6 +584,7 @@ export default function LeadsDirectoryPage() {
             onChange={(e) => {
               setVertical(e.target.value);
               setPage(1);
+              setSelectedLeadIds([]);
             }}
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white"
           >
@@ -549,10 +620,20 @@ export default function LeadsDirectoryPage() {
                     <th className="w-10 px-4 py-3.5">
                       <input
                         type="checkbox"
-                        checked={allCurrentPageSelected}
-                        onChange={toggleSelectAll}
-                        className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
-                        title={allCurrentPageSelected ? "Deselect all on this page" : "Select all on this page"}
+                        ref={(el) => {
+                          if (el) {
+                            el.indeterminate = isPartiallySelected;
+                          }
+                        }}
+                        checked={allCategorySelected}
+                        onChange={toggleSelectAllCategory}
+                        disabled={total === 0 || isSelectingAllCategory}
+                        className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer disabled:opacity-40"
+                        title={
+                          allCategorySelected
+                            ? "Deselect all leads in this category"
+                            : `Select all ${total} leads in this category`
+                        }
                       />
                     </th>
                   )}
@@ -646,9 +727,16 @@ export default function LeadsDirectoryPage() {
                             <span className="text-xs text-gray-400">—</span>
                           )}
                           {lead.serviceType && (
-                            <span className="text-[11px] text-gray-500">
-                              {lead.serviceType}
-                            </span>
+                            <div className="flex flex-wrap gap-1 max-w-[200px]">
+                              {parseServices(lead.serviceType).map((st) => (
+                                <span
+                                  key={st}
+                                  className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 font-medium border border-gray-200"
+                                >
+                                  {st}
+                                </span>
+                              ))}
+                            </div>
                           )}
                           {lead.preferredLanguage && (
                             <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center gap-1">
@@ -857,37 +945,29 @@ export default function LeadsDirectoryPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-semibold text-gray-700 mb-1 block">Vertical</label>
-                  <select
-                    value={newVertical}
-                    onChange={(e) => setNewVertical(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                  >
-                    <option value="">Select Vertical...</option>
-                    {VERTICALS.filter((v) => v !== "All Verticals").map((v) => (
-                      <option key={v} value={v}>
-                        {v}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-700 mb-1 block">Vertical</label>
+                <select
+                  value={newVertical}
+                  onChange={(e) => setNewVertical(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="">Select Vertical...</option>
+                  {VERTICALS.filter((v) => v !== "All Verticals").map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-                <div>
-                  <label className="text-xs font-semibold text-gray-700 mb-1 block">Service Interest</label>
-                  <select
-                    value={newService}
-                    onChange={(e) => setNewService(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                  >
-                    {SERVICE_INTERESTS.map((svc) => (
-                      <option key={svc} value={svc}>
-                        {svc}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <div>
+                <MultiServiceSelect
+                  selectedServices={newServices}
+                  onChange={setNewServices}
+                  label="Interested Services (Multiple selection)"
+                  placeholder="+ Add service interest..."
+                />
               </div>
 
               <div>
@@ -939,8 +1019,13 @@ export default function LeadsDirectoryPage() {
             <span className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500 text-white font-bold text-xs">
               ✓
             </span>
-            <span className="text-sm font-semibold text-slate-100">
-              {selectedLeadIds.length} lead{selectedLeadIds.length > 1 ? "s" : ""} selected
+            <span className="text-sm font-semibold text-slate-100 flex items-center gap-1.5">
+              <span>{selectedLeadIds.length} lead{selectedLeadIds.length > 1 ? "s" : ""} selected</span>
+              {allCategorySelected && (
+                <span className="text-[11px] font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                  All in Category
+                </span>
+              )}
             </span>
           </div>
 

@@ -22,7 +22,9 @@ import {
   LEAD_LANGUAGES,
   getLanguageMeta,
   formatLanguageLabels,
+  parseServices,
 } from "@/lib/utils";
+import { MultiServiceSelect } from "@/components/common/MultiServiceSelect";
 import { DispositionBar } from "./DispositionBar";
 import { toast } from "sonner";
 
@@ -55,7 +57,9 @@ export function DialerCard({ lead: initialLead, onDisposed }: DialerCardProps) {
   const [editContactName, setEditContactName] = useState(lead.contactName || "");
   const [editCompanyName, setEditCompanyName] = useState(lead.companyName || "");
   const [editVertical, setEditVertical] = useState(lead.businessVertical || "");
-  const [editService, setEditService] = useState(lead.serviceType || "");
+  const [editServices, setEditServices] = useState<string[]>(
+    lead.serviceType ? parseServices(lead.serviceType) : []
+  );
   const [editLanguage, setEditLanguage] = useState(lead.preferredLanguage || "");
   const [isSavingLead, setIsSavingLead] = useState(false);
 
@@ -65,7 +69,7 @@ export function DialerCard({ lead: initialLead, onDisposed }: DialerCardProps) {
     setEditContactName(initialLead.contactName || "");
     setEditCompanyName(initialLead.companyName || "");
     setEditVertical(initialLead.businessVertical || "");
-    setEditService(initialLead.serviceType || "");
+    setEditServices(initialLead.serviceType ? parseServices(initialLead.serviceType) : []);
     setEditLanguage(initialLead.preferredLanguage || "");
     setIsEditingLead(false);
     setCallStarted(false);
@@ -91,7 +95,7 @@ export function DialerCard({ lead: initialLead, onDisposed }: DialerCardProps) {
           contactName: editContactName.trim() || null,
           companyName: editCompanyName.trim() || null,
           businessVertical: editVertical.trim() || null,
-          serviceType: editService.trim() || null,
+          serviceType: editServices.join(", ") || null,
           preferredLanguage: editLanguage || null,
         }),
       });
@@ -105,7 +109,7 @@ export function DialerCard({ lead: initialLead, onDisposed }: DialerCardProps) {
         contactName: editContactName.trim() || null,
         companyName: editCompanyName.trim() || null,
         businessVertical: editVertical.trim() || null,
-        serviceType: editService.trim() || null,
+        serviceType: editServices.join(", ") || null,
         preferredLanguage: editLanguage || null,
       }));
       setIsEditingLead(false);
@@ -291,22 +295,13 @@ export function DialerCard({ lead: initialLead, onDisposed }: DialerCardProps) {
               />
             </div>
 
-            <div>
-              <label className="text-xs font-medium text-slate-700 block mb-0.5">
-                Service Interest
-              </label>
-              <select
-                value={editService}
-                onChange={(e) => setEditService(e.target.value)}
-                className="w-full text-xs px-3 py-2 bg-white border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
-              >
-                <option value="">Select Service Interest...</option>
-                {SERVICE_INTERESTS.map((svc) => (
-                  <option key={svc} value={svc}>
-                    {svc}
-                  </option>
-                ))}
-              </select>
+            <div className="sm:col-span-2">
+              <MultiServiceSelect
+                selectedServices={editServices}
+                onChange={setEditServices}
+                label="Interested Services (Multiple selection)"
+                placeholder="+ Add service interest..."
+              />
             </div>
 
             <div>

@@ -48,10 +48,21 @@ export function DealCard({ deal, isDragging, onClick }: DealCardProps) {
             {deal.lead.businessVertical}
           </span>
         )}
-        <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-medium flex items-center gap-0.5">
-          <Tag className="w-2.5 h-2.5" />
-          {deal.serviceType}
-        </span>
+        {deal.serviceType
+          ? deal.serviceType
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
+              .map((st) => (
+                <span
+                  key={st}
+                  className="text-xs bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded font-medium flex items-center gap-0.5"
+                >
+                  <Tag className="w-2.5 h-2.5 text-gray-500" />
+                  {st}
+                </span>
+              ))
+          : null}
       </div>
 
       {/* Financials */}

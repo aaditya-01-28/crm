@@ -53,20 +53,18 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        for (let i = 0; i < leadIds.length; i++) {
-          const assignedTo = targetRepIds[i % targetRepIds.length];
-          const leadId = leadIds[i];
+        const repAssignments = leadIds.map((_, i) => targetRepIds[i % targetRepIds.length]);
 
-          await client.query(
-            `UPDATE leads
-             SET assigned_rep_id = $1,
-                 first_assigned_rep_id = COALESCE(first_assigned_rep_id, $1),
-                 first_assigned_at = COALESCE(first_assigned_at, NOW()),
-                 updated_at = NOW()
-             WHERE id = $2 AND tenant_id = $3`,
-            [assignedTo, leadId, tenantId]
-          );
-        }
+        await client.query(
+          `UPDATE leads AS l
+           SET assigned_rep_id = v.rep_id,
+               first_assigned_rep_id = COALESCE(l.first_assigned_rep_id, v.rep_id),
+               first_assigned_at = COALESCE(l.first_assigned_at, NOW()),
+               updated_at = NOW()
+           FROM unnest($1::uuid[], $2::uuid[]) AS v(lead_id, rep_id)
+           WHERE l.id = v.lead_id AND l.tenant_id = $3`,
+          [leadIds, repAssignments, tenantId]
+        );
 
         return NextResponse.json({
           success: true,
