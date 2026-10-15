@@ -294,6 +294,7 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
                 { label: "Ringing No Response (RNR)", count: dispositionMap["RNR"] || 0, color: "bg-amber-400" },
                 { label: "Callbacks Promised", count: dispositionMap["Callback"] || 0, color: "bg-blue-500" },
                 { label: "Demo Scheduled", count: dispositionMap["Demo Scheduled"] || 0, color: "bg-purple-500" },
+                { label: "Future Requirement", count: dispositionMap["Future Requirement"] || 0, color: "bg-sky-500" },
                 { label: "Not Interested", count: dispositionMap["Not Interested"] || 0, color: "bg-gray-400" },
                 { label: "Invalid Number", count: dispositionMap["Invalid"] || 0, color: "bg-rose-400" },
               ].map((item) => {

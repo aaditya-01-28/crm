@@ -131,6 +131,7 @@ export async function GET(request: NextRequest) {
         Callback: 0,
         "Not Interested": 0,
         "Already Using": 0,
+        "Future Requirement": 0,
         Invalid: 0,
         "Demo Scheduled": 0,
       };
@@ -362,6 +363,7 @@ export async function GET(request: NextRequest) {
       let leaderboard: Array<{
         repId: string;
         repName: string;
+        repRole: string;
         totalCalls: number;
         connectedCalls: number;
         connectRate: number;
@@ -373,7 +375,7 @@ export async function GET(request: NextRequest) {
 
       if (isManagerOrAdmin(role) && !targetUserId) {
         const boardRes = await client.query(
-          `SELECT u.id as "repId", u.full_name as "repName",
+          `SELECT u.id as "repId", u.full_name as "repName", u.role as "repRole",
                   COALESCE(cl.total_calls, 0)::int as "totalCalls",
                   COALESCE(cl.talk_time, 0)::int as "talkTimeMins",
                   COALESCE(st.demos_booked, 0)::int as "demosBooked",
@@ -398,7 +400,7 @@ export async function GET(request: NextRequest) {
              WHERE tenant_id = $1 AND stage = 'closed_won' AND updated_at >= $2 AND updated_at <= $3
              GROUP BY rep_id
            ) dl ON u.id = dl.rep_id
-           WHERE u.tenant_id = $1 AND u.is_active = true AND u.role = 'sales_rep'
+           WHERE u.tenant_id = $1 AND u.is_active = true AND u.role IN ('sales_rep', 'sales_manager')
            ORDER BY "wonRevenue" DESC, "totalCalls" DESC`,
           [tenantId, startOfPeriod, endOfPeriod]
         );
@@ -408,6 +410,7 @@ export async function GET(request: NextRequest) {
           return {
             repId: r.repId,
             repName: r.repName,
+            repRole: r.repRole,
             totalCalls: calls,
             connectedCalls: Math.round(calls * 0.42),
             connectRate: calls > 0 ? 42 : 0,

@@ -55,6 +55,7 @@ const STATUS_OPTIONS = [
   { value: "rnr", label: "Ringing No Response (RNR)", color: "bg-yellow-100 text-yellow-800" },
   { value: "not_interested", label: "Not Interested", color: "bg-gray-100 text-gray-700" },
   { value: "already_using", label: "Already Using", color: "bg-orange-100 text-orange-800" },
+  { value: "future_requirement", label: "Future Requirement", color: "bg-sky-100 text-sky-800" },
   { value: "invalid", label: "Invalid Number", color: "bg-rose-100 text-rose-800" },
 ];
 
@@ -671,6 +672,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                       <option value="RNR">RNR (Ringing No Response)</option>
                       <option value="Not Interested">Not Interested</option>
                       <option value="Already Using">Already Using</option>
+                      <option value="Future Requirement">Future Requirement</option>
                     </select>
                   </div>
 

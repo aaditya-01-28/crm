@@ -37,6 +37,8 @@ export function AdminDashboardView({
   onSelectRep,
   selectedRepId,
 }: AdminDashboardViewProps) {
+  const [roleFilter, setRoleFilter] = React.useState<"all" | "sales_manager" | "sales_rep">("all");
+
   const {
     verifiedRevenue = 0,
     wonRevenueInPeriod = 0,
@@ -56,6 +58,14 @@ export function AdminDashboardView({
     pendingPaymentsCount = 0,
     pendingPaymentsValue = 0,
   } = metrics || {};
+
+  const managerCount = leaderboard.filter((r: any) => r.repRole === "sales_manager").length;
+  const repCount = leaderboard.filter((r: any) => r.repRole !== "sales_manager").length;
+  const filteredLeaderboard = leaderboard.filter((r: any) => {
+    if (roleFilter === "sales_manager") return r.repRole === "sales_manager";
+    if (roleFilter === "sales_rep") return r.repRole !== "sales_manager";
+    return true;
+  });
 
   const activePeriodLabel =
     periodLabel ||
@@ -167,25 +177,66 @@ export function AdminDashboardView({
               Workforce Conversion & Leaderboard ({activePeriodLabel})
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              Live ranking of sales representatives by output volume, call talk time, and deal closures
+              Live ranking of sales representatives & managers by output volume, call talk time, and deal closures
             </p>
           </div>
 
-          {selectedRepId && onSelectRep && (
-            <button
-              onClick={() => onSelectRep("")}
-              className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-3 py-1.5 rounded-xl border border-indigo-200"
-            >
-              Reset to All Team View
-            </button>
-          )}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Role Filter Tabs (All / Level 2 Managers / Level 1 Reps) */}
+            <div className="flex items-center bg-gray-100 p-0.5 rounded-xl text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setRoleFilter("all")}
+                className={`px-2.5 py-1 rounded-lg transition ${
+                  roleFilter === "all"
+                    ? "bg-white text-gray-900 shadow-xs"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                All Team ({leaderboard.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setRoleFilter("sales_manager")}
+                className={`px-2.5 py-1 rounded-lg transition flex items-center gap-1.5 ${
+                  roleFilter === "sales_manager"
+                    ? "bg-white text-blue-800 shadow-xs"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                Level 2 Managers ({managerCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setRoleFilter("sales_rep")}
+                className={`px-2.5 py-1 rounded-lg transition flex items-center gap-1.5 ${
+                  roleFilter === "sales_rep"
+                    ? "bg-white text-emerald-800 shadow-xs"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Level 1 Reps ({repCount})
+              </button>
+            </div>
+
+            {selectedRepId && onSelectRep && (
+              <button
+                onClick={() => onSelectRep("")}
+                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-3 py-1.5 rounded-xl border border-indigo-200"
+              >
+                Reset to All Team View
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 font-semibold uppercase tracking-wider">
               <tr>
-                <th className="px-5 py-3">Representative</th>
+                <th className="px-5 py-3">Team Member / Role</th>
                 <th className="px-4 py-3">Total Calls</th>
                 <th className="px-4 py-3">Talk Time</th>
                 <th className="px-4 py-3">Demos Booked</th>
@@ -195,16 +246,17 @@ export function AdminDashboardView({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {leaderboard.length === 0 ? (
+              {filteredLeaderboard.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="text-center py-8 text-gray-400">
-                    No active sales representatives recorded yet.
+                    No team members recorded for this filter.
                   </td>
                 </tr>
               ) : (
-                leaderboard.map((rep: any, idx: number) => {
+                filteredLeaderboard.map((rep: any, idx: number) => {
                   const isTop = idx === 0 && rep.totalCalls > 0;
                   const isSelected = selectedRepId === rep.repId;
+                  const isManager = rep.repRole === "sales_manager";
 
                   return (
                     <tr
@@ -216,7 +268,7 @@ export function AdminDashboardView({
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-2.5">
                           <span
-                            className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] ${
+                            className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] shrink-0 ${
                               idx === 0
                                 ? "bg-amber-100 text-amber-800 border border-amber-300"
                                 : "bg-gray-100 text-gray-600"
@@ -224,10 +276,21 @@ export function AdminDashboardView({
                           >
                             {idx + 1}
                           </span>
-                          <span className="font-bold text-gray-900 flex items-center gap-1.5">
-                            {rep.repName}
-                            {isTop && <Flame className="w-3.5 h-3.5 text-orange-500 fill-orange-500" />}
-                          </span>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-gray-900 flex items-center gap-1.5">
+                              {rep.repName}
+                              {isTop && <Flame className="w-3.5 h-3.5 text-orange-500 fill-orange-500" />}
+                            </span>
+                            {isManager ? (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+                                Level 2 • Manager
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                Level 1 • Rep
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </td>
 
@@ -255,13 +318,15 @@ export function AdminDashboardView({
                         {onSelectRep && (
                           <button
                             onClick={() => onSelectRep(isSelected ? "" : rep.repId)}
-                            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition border ${
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition border cursor-pointer ${
                               isSelected
                                 ? "bg-indigo-600 text-white border-indigo-600"
+                                : isManager
+                                ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
                                 : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
                             }`}
                           >
-                            {isSelected ? "Clear" : "Filter Rep"}
+                            {isSelected ? "Clear" : isManager ? "Filter Manager" : "Filter Rep"}
                           </button>
                         )}
                       </td>

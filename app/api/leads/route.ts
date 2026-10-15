@@ -177,6 +177,7 @@ export async function GET(request: NextRequest) {
         not_interested: 0,
         invalid: 0,
         already_using: 0,
+        future_requirement: 0,
         unassigned: unassignedTotal,
       };
 
@@ -281,9 +282,10 @@ export async function POST(request: NextRequest) {
         `INSERT INTO leads (
            tenant_id, assigned_rep_id, first_assigned_rep_id, first_assigned_at,
            phone_number, contact_name, company_name, website_url,
-           business_vertical, service_type, source, status, custom_metadata
+           business_vertical, service_type, source, status, custom_metadata,
+           created_at, updated_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'new', $12)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'new', $12, NOW(), NOW())
          RETURNING id, tenant_id as "tenantId", assigned_rep_id as "assignedRepId",
                    first_assigned_rep_id as "firstAssignedRepId", first_assigned_at as "firstAssignedAt",
                    phone_number as "phoneNumber", contact_name as "contactName",

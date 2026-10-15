@@ -83,7 +83,12 @@ export function DashboardHeader({
         </h1>
         {selectedMember && (
           <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-2.5 py-1 inline-flex items-center gap-1.5 font-medium">
-            <span>Viewing activity filtered for: <strong>{selectedMember.fullName}</strong></span>
+            <span>
+              Viewing activity filtered for: <strong>{selectedMember.fullName}</strong>{" "}
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border bg-white text-indigo-800 border-indigo-200">
+                {selectedMember.role === "sales_manager" ? "Level 2 • Sales Manager" : "Level 1 • Sales Rep"}
+              </span>
+            </span>
             <button
               onClick={() => onUserChange(null)}
               className="text-indigo-400 hover:text-indigo-800 ml-1 p-0.5 cursor-pointer"
@@ -110,11 +115,28 @@ export function DashboardHeader({
               title="Filter statistics by employee"
             >
               <option value="all">All Team Members (Aggregated)</option>
-              {teamMembers.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.fullName} ({member.role === "sales_rep" ? "Rep" : "Manager"})
-                </option>
-              ))}
+              {teamMembers.some((m) => m.role === "sales_manager") && (
+                <optgroup label="Level 2 • Sales Managers">
+                  {teamMembers
+                    .filter((m) => m.role === "sales_manager")
+                    .map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.fullName} (Manager)
+                      </option>
+                    ))}
+                </optgroup>
+              )}
+              {teamMembers.some((m) => m.role === "sales_rep") && (
+                <optgroup label="Level 1 • Sales Representatives">
+                  {teamMembers
+                    .filter((m) => m.role === "sales_rep")
+                    .map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.fullName} (Rep)
+                      </option>
+                    ))}
+                </optgroup>
+              )}
             </select>
           </div>
         )}

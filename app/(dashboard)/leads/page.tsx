@@ -91,6 +91,8 @@ const STATUS_FILTERS = [
   { key: "lost", label: "Lost" },
   { key: "rnr", label: "RNR" },
   { key: "not_interested", label: "Not Interested" },
+  { key: "already_using", label: "Already Using" },
+  { key: "future_requirement", label: "Future Requirement" },
 ];
 
 const VERTICALS = [
@@ -117,6 +119,7 @@ const STATUS_BADGES: Record<string, { label: string; color: string }> = {
   rnr: { label: "RNR", color: "bg-yellow-100 text-yellow-800 border-yellow-200" },
   not_interested: { label: "Not Interested", color: "bg-gray-100 text-gray-600 border-gray-200" },
   already_using: { label: "Already Using", color: "bg-orange-100 text-orange-700 border-orange-200" },
+  future_requirement: { label: "Future Requirement", color: "bg-sky-100 text-sky-800 border-sky-200" },
   invalid: { label: "Invalid", color: "bg-rose-100 text-rose-700 border-rose-200" },
 };
 
@@ -159,7 +162,7 @@ export default function LeadsDirectoryPage() {
 
   const teamReps: Array<{ id: string; fullName: string; role: string; language?: string; isActive?: boolean }> =
     (teamData?.users || []).filter(
-      (u: { role: string; isActive?: boolean }) => u.role === "sales_rep" && u.isActive !== false
+      (u: { role: string; isActive?: boolean }) => ["sales_rep", "sales_manager"].includes(u.role) && u.isActive !== false
     );
 
   const { data, isLoading, refetch } = useQuery<LeadsResponse>({
@@ -477,11 +480,28 @@ export default function LeadsDirectoryPage() {
             >
               <option value="all">All Assignees</option>
               <option value="unassigned">⚠️ Unassigned Leads Only</option>
-              {teamReps.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.fullName} (Rep)
-                </option>
-              ))}
+              {teamReps.some((r) => r.role === "sales_manager") && (
+                <optgroup label="Level 2 • Sales Managers">
+                  {teamReps
+                    .filter((r) => r.role === "sales_manager")
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.fullName} (Manager)
+                      </option>
+                    ))}
+                </optgroup>
+              )}
+              {teamReps.some((r) => r.role === "sales_rep") && (
+                <optgroup label="Level 1 • Sales Representatives">
+                  {teamReps
+                    .filter((r) => r.role === "sales_rep")
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.fullName} (Rep)
+                      </option>
+                    ))}
+                </optgroup>
+              )}
             </select>
           </div>
         )}
@@ -933,15 +953,35 @@ export default function LeadsDirectoryPage() {
               onChange={(e) => setBulkTargetRepId(e.target.value)}
               className="bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-emerald-500"
             >
-              <option value="">Assign To Rep...</option>
-              {teamReps.map((rep) => {
-                const repLangMeta = getLanguageMeta(rep.language);
-                return (
-                  <option key={rep.id} value={rep.id}>
-                    {rep.fullName} {repLangMeta ? `(${repLangMeta.flag} ${repLangMeta.label})` : ""}
-                  </option>
-                );
-              })}
+              <option value="">Assign To Team Member...</option>
+              {teamReps.some((r) => r.role === "sales_manager") && (
+                <optgroup label="Level 2 • Sales Managers">
+                  {teamReps
+                    .filter((r) => r.role === "sales_manager")
+                    .map((rep) => {
+                      const repLangMeta = getLanguageMeta(rep.language);
+                      return (
+                        <option key={rep.id} value={rep.id}>
+                          {rep.fullName} (Manager) {repLangMeta ? `(${repLangMeta.flag} ${repLangMeta.label})` : ""}
+                        </option>
+                      );
+                    })}
+                </optgroup>
+              )}
+              {teamReps.some((r) => r.role === "sales_rep") && (
+                <optgroup label="Level 1 • Sales Representatives">
+                  {teamReps
+                    .filter((r) => r.role === "sales_rep")
+                    .map((rep) => {
+                      const repLangMeta = getLanguageMeta(rep.language);
+                      return (
+                        <option key={rep.id} value={rep.id}>
+                          {rep.fullName} (Rep) {repLangMeta ? `(${repLangMeta.flag} ${repLangMeta.label})` : ""}
+                        </option>
+                      );
+                    })}
+                </optgroup>
+              )}
             </select>
 
             <button

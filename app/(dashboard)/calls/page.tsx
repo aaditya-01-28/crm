@@ -118,6 +118,12 @@ const DISPOSITION_BADGES: Record<
     text: "text-orange-700",
     border: "border-orange-200",
   },
+  "Future Requirement": {
+    label: "Future Requirement",
+    bg: "bg-sky-50",
+    text: "text-sky-700",
+    border: "border-sky-200",
+  },
   Invalid: {
     label: "Invalid Number",
     bg: "bg-rose-50",
@@ -498,6 +504,7 @@ export default function CallLogsPage() {
               <option value="Demo Scheduled">Demo Scheduled</option>
               <option value="Not Interested">Not Interested</option>
               <option value="Already Using">Already Using</option>
+              <option value="Future Requirement">Future Requirement</option>
               <option value="Invalid">Invalid</option>
             </select>
           </div>
@@ -513,12 +520,29 @@ export default function CallLogsPage() {
                 }}
                 className="px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-gray-800 font-medium outline-none focus:ring-2 focus:ring-emerald-500"
               >
-                <option value="all">All Sales Representatives</option>
-                {(teamData?.users || []).map((u: any) => (
-                  <option key={u.id} value={u.id}>
-                    {u.fullName} ({u.role.replace("_", " ")})
-                  </option>
-                ))}
+                <option value="all">All Team Members (Aggregated)</option>
+                {(teamData?.users || []).some((u: any) => u.role === "sales_manager") && (
+                  <optgroup label="Level 2 • Sales Managers">
+                    {(teamData?.users || [])
+                      .filter((u: any) => u.role === "sales_manager")
+                      .map((u: any) => (
+                        <option key={u.id} value={u.id}>
+                          {u.fullName} (Manager)
+                        </option>
+                      ))}
+                  </optgroup>
+                )}
+                {(teamData?.users || []).some((u: any) => u.role === "sales_rep") && (
+                  <optgroup label="Level 1 • Sales Representatives">
+                    {(teamData?.users || [])
+                      .filter((u: any) => u.role === "sales_rep")
+                      .map((u: any) => (
+                        <option key={u.id} value={u.id}>
+                          {u.fullName} (Rep)
+                        </option>
+                      ))}
+                  </optgroup>
+                )}
               </select>
             </div>
           )}

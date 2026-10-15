@@ -71,6 +71,16 @@ export async function PATCH(
         case "Already Using":
           newStatus = "already_using";
           break;
+        case "Future Requirement":
+          newStatus = "future_requirement";
+          if (callbackDatetime) {
+            taskToCreate = {
+              taskType: "callback",
+              scheduledTime: new Date(callbackDatetime),
+              notes: remark ? `Future Requirement: ${remark}` : "Future Requirement follow-up",
+            };
+          }
+          break;
         case "Connected":
           newStatus = "callback";
           break;
@@ -118,8 +128,8 @@ export async function PATCH(
       // Create scheduled task if needed
       if (taskToCreate) {
         await client.query(
-          `INSERT INTO scheduled_tasks (tenant_id, lead_id, rep_id, task_type, scheduled_time, meeting_link, notes, status)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')`,
+          `INSERT INTO scheduled_tasks (tenant_id, lead_id, rep_id, task_type, scheduled_time, meeting_link, notes, status, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW(), NOW())`,
           [
             tenantId,
             id,
@@ -154,8 +164,8 @@ export async function PATCH(
           );
         } else {
           await client.query(
-            `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes)
-             VALUES ($1, $2, $3, $4, 10000, 0, $5, $6)`,
+            `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, 10000, 0, $5, $6, NOW(), NOW())`,
             [
               tenantId,
               id,
