@@ -83,8 +83,12 @@ export default function TopBar({ user }: { user: JWTPayload }) {
           className="flex items-center gap-2 hover:bg-gray-50 px-2 py-1 rounded-xl transition group"
           title="Manage Account & Profile"
         >
-          <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shadow-xs group-hover:scale-105 transition-transform">
-            {user.fullName.charAt(0).toUpperCase()}
+          <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shadow-xs group-hover:scale-105 transition-transform overflow-hidden shrink-0">
+            {user.avatarUrl ? (
+              <img src={user.avatarUrl} alt={user.fullName} className="w-full h-full object-cover" />
+            ) : (
+              user.fullName.charAt(0).toUpperCase()
+            )}
           </div>
           <div className="text-right hidden sm:block">
             <p className="text-sm font-semibold text-gray-800 leading-tight group-hover:text-emerald-700 transition-colors">

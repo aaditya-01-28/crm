@@ -14,9 +14,12 @@ export async function GET(request: NextRequest) {
     }
 
     return await withClient(async (client) => {
+      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;`).catch(() => {});
+
       const res = await client.query(
         `SELECT u.id, u.tenant_id as "tenantId", u.full_name as "fullName",
                 u.email, u.phone_number as "phoneNumber", u.role, u.language,
+                u.avatar_url as "avatarUrl",
                 u.is_active as "isActive", u.created_at as "createdAt",
                 o.id as "orgId", o.name as "orgName", o.plan_tier as "orgPlanTier",
                 (SELECT COUNT(*)::int FROM leads WHERE assigned_rep_id = u.id) as "assignedLeadsCount",
@@ -42,6 +45,7 @@ export async function GET(request: NextRequest) {
         phoneNumber: r.phoneNumber,
         role: r.role,
         language: r.language,
+        avatarUrl: r.avatarUrl || null,
         isActive: r.isActive,
         createdAt: r.createdAt,
         tenant: {
@@ -78,12 +82,14 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { fullName, phoneNumber, language, currentPassword, newPassword } = body;
+    const { fullName, phoneNumber, language, avatarUrl, currentPassword, newPassword } = body;
 
     return await withClient(async (client) => {
+      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;`).catch(() => {});
+
       const userRes = await client.query(
         `SELECT u.id, u.tenant_id as "tenantId", u.full_name as "fullName",
-                u.email, u.password_hash as "passwordHash", u.role,
+                u.email, u.password_hash as "passwordHash", u.role, u.avatar_url as "avatarUrl",
                 o.id as "orgId", o.name as "orgName", o.plan_tier as "orgPlanTier"
          FROM users u
          JOIN organizations o ON u.tenant_id = o.id
@@ -133,6 +139,11 @@ export async function PATCH(request: NextRequest) {
         }
       }
 
+      let updatedAvatarUrl = existingUser.avatarUrl;
+      if (avatarUrl !== undefined) {
+        updatedAvatarUrl = avatarUrl && String(avatarUrl).trim().length > 0 ? String(avatarUrl).trim() : null;
+      }
+
       if (newPassword) {
         return NextResponse.json(
           { error: "Password changes from user profile are disabled. Please contact your Level 3 Super Admin to manage credentials." },
@@ -142,12 +153,13 @@ export async function PATCH(request: NextRequest) {
 
       const updateRes = await client.query(
         `UPDATE users
-         SET full_name = $1, phone_number = $2, language = $3
-         WHERE id = $4
+         SET full_name = $1, phone_number = $2, language = $3, avatar_url = $4
+         WHERE id = $5
          RETURNING id, tenant_id as "tenantId", full_name as "fullName",
                    email, phone_number as "phoneNumber", role, language,
+                   avatar_url as "avatarUrl",
                    is_active as "isActive", created_at as "createdAt"`,
-        [updatedFullName, updatedPhoneNumber, updatedLanguage, currentUserId]
+        [updatedFullName, updatedPhoneNumber, updatedLanguage, updatedAvatarUrl, currentUserId]
       );
 
       const r = updateRes.rows[0];
@@ -166,6 +178,7 @@ export async function PATCH(request: NextRequest) {
         role: updatedUser.role,
         email: updatedUser.email,
         fullName: updatedUser.fullName,
+        avatarUrl: updatedUser.avatarUrl ?? null,
       };
 
       const accessToken = await signAccessToken(jwtPayload);

@@ -19,6 +19,7 @@ import {
   AlertCircle,
   PhoneCall,
   Flame,
+  Camera,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDateTime } from "@/lib/utils";
@@ -31,6 +32,7 @@ interface UserProfile {
   phoneNumber: string | null;
   role: string;
   language: string;
+  avatarUrl?: string | null;
   isActive: boolean;
   createdAt: string;
   tenant: {
@@ -151,6 +153,7 @@ export default function ProfilePage() {
       fullName?: string;
       phoneNumber?: string;
       language?: string;
+      avatarUrl?: string | null;
     }) => {
       const res = await fetch("/api/profile", {
         method: "PATCH",
@@ -171,6 +174,26 @@ export default function ProfilePage() {
       toast.error(err.message || "An error occurred while updating profile");
     },
   });
+
+  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("Image file is too large. Please select a photo under 2MB.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      updateProfileMutation.mutate({ avatarUrl: result });
+    };
+    reader.onerror = () => {
+      toast.error("Failed to read image file.");
+    };
+    reader.readAsDataURL(file);
+  };
 
   const toggleLanguage = (code: string) => {
     if (selectedLanguages.includes(code)) {
@@ -263,9 +286,42 @@ export default function ProfilePage() {
             <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none" />
 
             <div className="flex flex-col items-center text-center pb-6 border-b border-gray-100">
-              <div className="w-20 h-20 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center font-bold text-3xl shadow-lg shadow-emerald-700/20 mb-3 border-2 border-white ring-4 ring-emerald-50">
-                {user.fullName.charAt(0).toUpperCase()}
+              <div className="relative group mb-3">
+                {user.avatarUrl ? (
+                  <img
+                    src={user.avatarUrl}
+                    alt={user.fullName}
+                    className="w-20 h-20 rounded-2xl object-cover shadow-lg shadow-emerald-700/20 border-2 border-white ring-4 ring-emerald-50"
+                  />
+                ) : (
+                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center font-bold text-3xl shadow-lg shadow-emerald-700/20 border-2 border-white ring-4 ring-emerald-50">
+                    {user.fullName.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <label
+                  htmlFor="avatar-upload-input"
+                  className="absolute -bottom-1 -right-1 w-7 h-7 bg-emerald-600 text-white rounded-full flex items-center justify-center shadow-md cursor-pointer hover:bg-emerald-500 transition-colors border-2 border-white"
+                  title="Upload profile photo"
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  <input
+                    id="avatar-upload-input"
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleAvatarUpload}
+                  />
+                </label>
               </div>
+              {user.avatarUrl && (
+                <button
+                  type="button"
+                  onClick={() => updateProfileMutation.mutate({ avatarUrl: null })}
+                  className="text-[11px] text-gray-400 hover:text-red-500 mb-2 transition-colors cursor-pointer"
+                >
+                  Remove Photo
+                </button>
+              )}
               <h2 className="text-lg font-bold text-gray-900">{user.fullName}</h2>
               <span className={`mt-1.5 text-[11px] font-bold px-3 py-1 rounded-full border uppercase tracking-wider ${roleMeta.badge}`}>
                 {roleMeta.label}

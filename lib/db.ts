@@ -32,40 +32,45 @@ export async function query<T = any>(sql: string, params: unknown[] = []): Promi
 }
 
 export async function queryUserByEmail(email: string) {
-  const rows = await query<{
-    id: string;
-    tenantId: string;
-    fullName: string;
-    email: string;
-    passwordHash: string;
-    phoneNumber: string | null;
-    role: string;
-    isActive: boolean;
-    tenantName: string;
-  }>(
-    `SELECT u.id, u.tenant_id as "tenantId", u.full_name as "fullName",
-            u.email, u.password_hash as "passwordHash", u.phone_number as "phoneNumber",
-            u.role, u.is_active as "isActive", o.name as "tenantName"
-     FROM users u
-     JOIN organizations o ON u.tenant_id = o.id
-     WHERE LOWER(u.email) = LOWER($1) LIMIT 1`,
-    [email]
-  );
+  return withClient(async (client) => {
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;`).catch(() => {});
+    const res = await client.query<{
+      id: string;
+      tenantId: string;
+      fullName: string;
+      email: string;
+      passwordHash: string;
+      phoneNumber: string | null;
+      role: string;
+      isActive: boolean;
+      avatarUrl: string | null;
+      tenantName: string;
+    }>(
+      `SELECT u.id, u.tenant_id as "tenantId", u.full_name as "fullName",
+              u.email, u.password_hash as "passwordHash", u.phone_number as "phoneNumber",
+              u.role, u.is_active as "isActive", u.avatar_url as "avatarUrl", o.name as "tenantName"
+       FROM users u
+       JOIN organizations o ON u.tenant_id = o.id
+       WHERE LOWER(u.email) = LOWER($1) LIMIT 1`,
+      [email]
+    );
 
-  if (rows.length === 0) return null;
-  const r = rows[0];
+    if (res.rows.length === 0) return null;
+    const r = res.rows[0];
 
-  return {
-    id: r.id,
-    tenantId: r.tenantId,
-    fullName: r.fullName,
-    email: r.email,
-    passwordHash: r.passwordHash,
-    phoneNumber: r.phoneNumber,
-    role: r.role,
-    isActive: r.isActive,
-    tenant: {
-      name: r.tenantName,
-    },
-  };
+    return {
+      id: r.id,
+      tenantId: r.tenantId,
+      fullName: r.fullName,
+      email: r.email,
+      passwordHash: r.passwordHash,
+      phoneNumber: r.phoneNumber,
+      role: r.role,
+      isActive: r.isActive,
+      avatarUrl: r.avatarUrl || null,
+      tenant: {
+        name: r.tenantName,
+      },
+    };
+  });
 }

@@ -49,6 +49,7 @@ export async function POST(request: NextRequest) {
       role: user.role,
       email: user.email,
       fullName: user.fullName,
+      avatarUrl: user.avatarUrl ?? null,
     };
 
     const accessToken = await signAccessToken(jwtPayload);
@@ -61,6 +62,7 @@ export async function POST(request: NextRequest) {
         email: user.email,
         role: user.role,
         tenantName: user.tenant.name,
+        avatarUrl: user.avatarUrl ?? null,
       },
       accessToken,
       refreshToken,

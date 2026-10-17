@@ -11,6 +11,7 @@ export interface JWTPayload {
   role: string;
   email: string;
   fullName: string;
+  avatarUrl?: string | null;
 }
 
 export async function signAccessToken(payload: JWTPayload): Promise<string> {
