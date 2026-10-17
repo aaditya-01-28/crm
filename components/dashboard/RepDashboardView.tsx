@@ -1,7 +1,8 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import Link from "next/link";
+import { LeadDetailModal } from "@/components/leads/LeadDetailModal";
 import {
   PhoneCall,
   Phone,
@@ -45,6 +46,8 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
     recentDeals = [],
     recentCalls = [],
   } = metrics || {};
+
+  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
 
   const activePeriodLabel =
     periodLabel ||
@@ -176,13 +179,19 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
                   {todayAgenda.map((task: any) => {
                     const telLink = buildTelLink(task.lead?.phoneNumber || "");
                     const waLink = buildWALink(task.lead?.phoneNumber || "", WA_PITCH);
+                    const targetLeadId = task.leadId || task.lead?.id;
 
                     return (
                       <div
                         key={task.id}
-                        className="py-3.5 first:pt-0 last:pb-0 flex items-center justify-between gap-3"
+                        onClick={() => targetLeadId && setSelectedLeadId(targetLeadId)}
+                        className={`py-3 px-3 -mx-3 rounded-xl flex items-center justify-between gap-3 transition ${
+                          targetLeadId
+                            ? "hover:bg-slate-50 cursor-pointer group"
+                            : ""
+                        }`}
                       >
-                        <div className="space-y-0.5 min-w-0">
+                        <div className="space-y-0.5 min-w-0 flex-1">
                           <div className="flex items-center gap-2">
                             <span
                               className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
@@ -193,9 +202,14 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
                             >
                               {task.taskType === "product_demo" ? "Product Demo" : "Callback"}
                             </span>
-                            <span className="text-xs font-semibold text-gray-900 truncate">
+                            <span className="text-xs font-semibold text-gray-900 truncate group-hover:text-emerald-700 transition">
                               {task.lead?.companyName || task.lead?.contactName || "Lead Contact"}
                             </span>
+                            {targetLeadId && (
+                              <span className="text-[10px] text-emerald-600 font-medium opacity-0 group-hover:opacity-100 transition hidden sm:inline-flex items-center gap-0.5">
+                                Open dossier →
+                              </span>
+                            )}
                           </div>
                           <p className="text-xs text-gray-500 flex items-center gap-2">
                             <span>🕒 {formatDateTime(task.scheduledTime)}</span>
@@ -208,6 +222,7 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
                         <div className="flex items-center gap-2 shrink-0">
                           <a
                             href={telLink}
+                            onClick={(e) => e.stopPropagation()}
                             className="p-2 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-xl transition border border-emerald-200"
                             title="Call Lead"
                           >
@@ -217,6 +232,7 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
                             href={waLink}
                             target="_blank"
                             rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
                             className="p-2 text-green-700 bg-green-50 hover:bg-green-100 rounded-xl transition border border-green-200"
                             title="WhatsApp Pitch"
                           >
@@ -355,6 +371,13 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
           </div>
         </div>
       </div>
+
+      {selectedLeadId && (
+        <LeadDetailModal
+          leadId={selectedLeadId}
+          onClose={() => setSelectedLeadId(null)}
+        />
+      )}
     </div>
   );
 }

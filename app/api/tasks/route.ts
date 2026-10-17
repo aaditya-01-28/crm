@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
          FROM scheduled_tasks t
          LEFT JOIN leads l ON t.lead_id = l.id
          LEFT JOIN users u ON t.rep_id = u.id
-         WHERE t.tenant_id = $1 AND t.status = 'pending' ${isRep ? "AND t.rep_id = $2" : ""}
+         WHERE t.tenant_id = $1 AND t.status = 'pending' ${isRep ? "AND (t.rep_id = $2 OR l.assigned_rep_id = $2)" : ""}
          ORDER BY t.scheduled_time ASC NULLS LAST`,
         isRep ? [tenantId, repId] : [tenantId]
       );
@@ -48,6 +48,7 @@ export async function GET(request: NextRequest) {
         notes: r.notes,
         createdAt: r.createdAt,
         lead: {
+          id: r.leadId,
           phoneNumber: r.lead_phoneNumber,
           contactName: r.lead_contactName,
           companyName: r.lead_companyName,

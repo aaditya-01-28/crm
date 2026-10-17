@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
 import { useSession } from "@/components/layout/SessionProvider";
 import { isAdmin, isSalesManager, isSalesRep, isManagerOrAdmin } from "@/lib/rbac";
@@ -45,6 +46,7 @@ export default function DashboardPage() {
   const [customDateFrom, setCustomDateFrom] = useState(() => getPresetDates("today").from);
   const [customDateTo, setCustomDateTo] = useState(() => getPresetDates("today").to);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["dashboard-stats", period, customDateFrom, customDateTo, selectedUserId],
@@ -67,6 +69,18 @@ export default function DashboardPage() {
     },
     staleTime: 30 * 1000, // 30 seconds
   });
+
+  const handleRefresh = async () => {
+    try {
+      await refetch();
+      queryClient.invalidateQueries({ queryKey: ["agenda"] });
+      queryClient.invalidateQueries({ queryKey: ["deals"] });
+      queryClient.invalidateQueries({ queryKey: ["dialer-queue"] });
+      toast.success("Dashboard metrics refreshed");
+    } catch {
+      toast.error("Failed to refresh dashboard");
+    }
+  };
 
   const handlePeriodChange = (newPeriod: DashboardPeriod) => {
     setPeriod(newPeriod);
@@ -129,7 +143,7 @@ export default function DashboardPage() {
         onUserChange={handleUserChange}
         teamMembers={data?.teamMembers || []}
         canFilterUser={isManagerOrAdmin(role)}
-        onRefresh={() => refetch()}
+        onRefresh={handleRefresh}
         isRefreshing={isFetching}
       />
 

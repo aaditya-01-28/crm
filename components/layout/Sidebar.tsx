@@ -210,6 +210,7 @@ export default function Sidebar({ role }: SidebarProps) {
       {/* ======================================================== */}
       {/* DESKTOP SIDEBAR (screen >= md)                           */}
       {/* Collapsible between full (w-64) and icon rail (w-20)     */}
+      {/* Exactly ONE clean toggle button in the header            */}
       {/* ======================================================== */}
       <aside
         className={cn(
@@ -240,9 +241,10 @@ export default function Sidebar({ role }: SidebarProps) {
                   className="w-7 h-7 object-contain"
                 />
               </Link>
+              {/* Single expand toggle button for collapsed mode */}
               <button
                 onClick={toggleCollapse}
-                className="p-1 rounded-md text-slate-500 hover:text-emerald-400 hover:bg-slate-900 transition text-[10px]"
+                className="p-1 rounded-md text-slate-500 hover:text-emerald-400 hover:bg-slate-900 transition text-[10px] cursor-pointer"
                 title="Expand sidebar"
                 aria-label="Expand sidebar"
               >
@@ -250,7 +252,7 @@ export default function Sidebar({ role }: SidebarProps) {
               </button>
             </div>
           ) : (
-            /* Expanded Mode: Full Logo and branding */
+            /* Expanded Mode: Full Logo, branding and single collapse toggle */
             <>
               <div className="flex items-center justify-between">
                 <Link
@@ -265,9 +267,10 @@ export default function Sidebar({ role }: SidebarProps) {
                   />
                 </Link>
 
+                {/* Single collapse toggle button for expanded mode */}
                 <button
                   onClick={toggleCollapse}
-                  className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-slate-900 transition"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-900 transition cursor-pointer"
                   title="Collapse sidebar"
                   aria-label="Collapse sidebar"
                 >
@@ -357,35 +360,25 @@ export default function Sidebar({ role }: SidebarProps) {
           })}
         </nav>
 
-        {/* Footer */}
+        {/* Clean Dignified Footer (No redundant toggle buttons) */}
         <div
           className={cn(
             "border-t border-slate-900 text-slate-500 transition-all",
             isCollapsed
-              ? "p-2 flex flex-col items-center gap-2"
-              : "px-4 py-3 flex items-center justify-between text-xs"
+              ? "py-3.5 px-2 flex justify-center items-center"
+              : "px-5 py-3.5 flex items-center justify-between text-xs"
           )}
         >
           {isCollapsed ? (
-            <button
-              onClick={toggleCollapse}
-              className="w-full flex items-center justify-center p-2 rounded-lg text-slate-500 hover:text-white hover:bg-slate-900 transition"
-              title="Expand sidebar"
-            >
-              <PanelLeftOpen className="w-4 h-4" />
-            </button>
+            <span
+              className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"
+              title="System Online"
+            />
           ) : (
             <>
-              <button
-                onClick={toggleCollapse}
-                className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition"
-                title="Collapse sidebar"
-              >
-                <PanelLeftClose className="w-3.5 h-3.5" />
-                <span>Collapse</span>
-              </button>
-              <div className="flex items-center gap-1.5 text-[11px]">
-                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              <span className="font-medium text-slate-400">Textora Technologies</span>
+              <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-semibold">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                 <span>Online</span>
               </div>
             </>

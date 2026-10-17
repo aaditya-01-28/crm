@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { BarChart3, Download, RefreshCw, TrendingUp } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 
@@ -55,11 +56,20 @@ export default function ReportsPage() {
   const today = new Date().toISOString().split("T")[0];
   const [date, setDate] = useState(today);
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["eod", date],
     queryFn: () => fetchEOD(date),
     refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 min
   });
+
+  const handleRefresh = async () => {
+    try {
+      await refetch();
+      toast.success("EOD report updated");
+    } catch {
+      toast.error("Failed to refresh EOD report");
+    }
+  };
 
   async function handleExport() {
     const res = await fetch(`/api/reports/eod?date=${date}`);
@@ -127,10 +137,12 @@ export default function ReportsPage() {
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
           />
           <button
-            onClick={() => refetch()}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition"
+            onClick={handleRefresh}
+            disabled={isFetching}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition cursor-pointer disabled:opacity-60"
+            title="Refresh EOD Metrics"
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className={`w-4 h-4 ${isFetching ? "animate-spin text-emerald-600" : ""}`} />
             Refresh
           </button>
           <button

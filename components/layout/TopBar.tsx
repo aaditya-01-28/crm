@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LogOut, Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { LogOut, Menu } from "lucide-react";
 import { toast } from "sonner";
 import type { JWTPayload } from "@/lib/auth";
 import { useSidebar } from "./SidebarContext";
@@ -23,7 +23,7 @@ const ROLE_COLORS: Record<string, string> = {
 
 export default function TopBar({ user }: { user: JWTPayload }) {
   const router = useRouter();
-  const { toggleMobile, isCollapsed, toggleCollapse } = useSidebar();
+  const { toggleMobile } = useSidebar();
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -34,8 +34,8 @@ export default function TopBar({ user }: { user: JWTPayload }) {
 
   return (
     <header className="h-14 bg-white border-b border-gray-200/80 px-4 sm:px-6 flex items-center justify-between shrink-0 shadow-2xs">
-      {/* Left: Mobile hamburger + Desktop toggle + Branding badge */}
-      <div className="flex items-center gap-2.5 sm:gap-3">
+      {/* Left: Mobile menu trigger + Executive Product Branding */}
+      <div className="flex items-center gap-3">
         {/* Mobile menu trigger */}
         <button
           onClick={toggleMobile}
@@ -46,25 +46,34 @@ export default function TopBar({ user }: { user: JWTPayload }) {
           <Menu className="w-5 h-5" />
         </button>
 
-        {/* Desktop sidebar toggle button */}
-        <button
-          onClick={toggleCollapse}
-          className="hidden md:flex p-1.5 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition"
-          title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {isCollapsed ? (
-            <PanelLeftOpen className="w-4 h-4 text-emerald-600" />
-          ) : (
-            <PanelLeftClose className="w-4 h-4" />
-          )}
-        </button>
+        {/* Product Identity & Platform Branding */}
+        <div className="flex items-center gap-2.5 sm:gap-3">
+          <div className="flex items-center gap-1.5">
+            <span className="font-extrabold text-sm sm:text-base tracking-tight text-slate-900 flex items-center gap-1">
+              <span>TEXTORA</span>
+              <span className="text-emerald-600 font-bold">ENGAGE</span>
+              <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 ml-0.5">
+                PRO
+              </span>
+            </span>
+          </div>
 
-        <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/80 flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          <span className="hidden sm:inline">Textora Enterprise Network</span>
-          <span className="sm:hidden">Textora</span>
-        </span>
+          <div className="hidden lg:block h-4 w-px bg-slate-200" />
+
+          {/* Product Suite Tagline */}
+          <span className="hidden lg:inline-flex text-[11px] font-medium text-slate-500 items-center gap-1.5">
+            Cloud Telephony & Omnichannel Sales CRM
+          </span>
+
+          <div className="hidden sm:block h-4 w-px bg-slate-200" />
+
+          {/* Operational Status Pill */}
+          <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/80 flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="hidden sm:inline">Enterprise Network • Live</span>
+            <span className="sm:hidden">Live</span>
+          </span>
+        </div>
       </div>
 
       {/* Right: user info + profile + logout */}
@@ -93,7 +102,7 @@ export default function TopBar({ user }: { user: JWTPayload }) {
 
         <button
           onClick={handleLogout}
-          className="flex items-center gap-1.5 text-gray-400 hover:text-rose-600 transition text-xs font-medium px-2 py-1.5 rounded-lg hover:bg-rose-50"
+          className="flex items-center gap-1.5 text-gray-400 hover:text-rose-600 transition text-xs font-medium px-2 py-1.5 rounded-lg hover:bg-rose-50 cursor-pointer"
           title="Logout"
         >
           <LogOut className="w-4 h-4" />
