@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   X,
+  ArrowLeft,
   Phone,
   MessageCircle,
   Clock,
@@ -122,6 +123,17 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
     }
   }, [lead]);
 
+  // Handle ESC key to close drawer
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   // Direct reassign mutation for status bar
   const reassignMutation = useMutation({
     mutationFn: async (newRepId: string) => {
@@ -187,6 +199,8 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
       toast.success("Lead status updated");
       queryClient.invalidateQueries({ queryKey: ["lead-detail", leadId] });
       queryClient.invalidateQueries({ queryKey: ["leads-directory"] });
+      queryClient.invalidateQueries({ queryKey: ["deals"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
       onLeadUpdated?.();
     },
     onError: () => toast.error("Failed to update status"),
@@ -257,74 +271,91 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
     <div className="fixed inset-0 bg-black/60 z-50 flex justify-end backdrop-blur-xs transition-opacity animate-in fade-in duration-200">
       <div className="bg-white w-full max-w-2xl h-full shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-right duration-300">
         {/* Header */}
-        <div className="bg-slate-900 text-white px-6 py-5 shrink-0 border-b border-slate-800">
-          <div className="flex items-start justify-between">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-                  {lead.businessVertical || "Unspecified Vertical"}
-                </span>
-                {lead.serviceType &&
-                  parseServices(lead.serviceType).map((st) => (
-                    <span
-                      key={st}
-                      className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 flex items-center gap-1"
-                    >
-                      <Tag className="w-3 h-3 text-emerald-400" />
-                      {st}
-                    </span>
-                  ))}
-                {lead.preferredLanguage ? (
-                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-900/60 text-indigo-200 border border-indigo-700/60 font-medium flex items-center gap-1.5">
-                    <Languages className="w-3 h-3 text-indigo-400" />
-                    <span>Customer Lang:</span>
-                    <strong>{formatLanguageLabels(lead.preferredLanguage) || lead.preferredLanguage}</strong>
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setIsEditingInfo(true)}
-                    className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 hover:text-emerald-400 transition flex items-center gap-1"
+        <div className="bg-slate-900 text-white px-5 sm:px-6 py-4 shrink-0 border-b border-slate-800">
+          {/* Top Utility Bar: Close Button on LEFT */}
+          <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800/80">
+            {/* LEFT: Close Lead Button (Salesforce / HubSpot / Linear pattern) */}
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/90 hover:bg-slate-700 border border-slate-700/80 transition shadow-xs group"
+              title="Close panel (Esc)"
+              aria-label="Close lead dossier"
+            >
+              <ArrowLeft className="w-4 h-4 text-slate-400 group-hover:text-white transition-transform group-hover:-translate-x-0.5" />
+              <span>Close Lead</span>
+              <kbd className="hidden sm:inline-block text-[10px] bg-slate-950/80 text-slate-400 px-1.5 py-0.2 rounded border border-slate-700 ml-1">
+                ESC
+              </kbd>
+            </button>
+
+            {/* RIGHT: Quick action buttons */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsEditingInfo(!isEditingInfo)}
+                className="inline-flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 px-2.5 py-1.5 rounded-lg border border-slate-700/80 transition"
+                title="Edit Lead Information"
+              >
+                <Edit3 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{isEditingInfo ? "Cancel Edit" : "Edit Info"}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Lead Information */}
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                {lead.businessVertical || "Unspecified Vertical"}
+              </span>
+              {lead.serviceType &&
+                parseServices(lead.serviceType).map((st) => (
+                  <span
+                    key={st}
+                    className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 flex items-center gap-1"
                   >
-                    <Languages className="w-3 h-3" />
-                    + Set Customer Lang
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setIsEditingInfo(!isEditingInfo)}
-                  className="text-xs text-slate-400 hover:text-emerald-400 flex items-center gap-1 ml-1 transition"
-                  title="Edit Lead Information"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                  {isEditingInfo ? "Cancel Edit" : "Edit Info"}
-                </button>
-              </div>
-              <h2 className="text-2xl font-bold tracking-tight text-white">
-                {lead.companyName || "Personal Contact"}
-              </h2>
-              {lead.contactName ? (
-                <p className="text-slate-300 text-sm flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-slate-400" />
-                  {lead.contactName}
-                </p>
+                    <Tag className="w-3 h-3 text-emerald-400" />
+                    {st}
+                  </span>
+                ))}
+              {lead.preferredLanguage ? (
+                <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-900/60 text-indigo-200 border border-indigo-700/60 font-medium flex items-center gap-1.5">
+                  <Languages className="w-3 h-3 text-indigo-400" />
+                  <span>Customer Lang:</span>
+                  <strong>{formatLanguageLabels(lead.preferredLanguage) || lead.preferredLanguage}</strong>
+                </span>
               ) : (
                 <button
                   type="button"
                   onClick={() => setIsEditingInfo(true)}
-                  className="text-xs text-emerald-400 hover:underline flex items-center gap-1"
+                  className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 hover:text-emerald-400 transition flex items-center gap-1"
                 >
-                  <Plus className="w-3 h-3" />
-                  Add contact person name
+                  <Languages className="w-3 h-3" />
+                  + Set Customer Lang
                 </button>
               )}
             </div>
-            <button
-              onClick={onClose}
-              className="text-slate-400 hover:text-white rounded-lg p-1.5 hover:bg-slate-800 transition"
-            >
-              <X className="w-5 h-5" />
-            </button>
+
+            <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
+              {lead.companyName || "Personal Contact"}
+            </h2>
+
+            {lead.contactName ? (
+              <p className="text-slate-300 text-sm flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-slate-400" />
+                {lead.contactName}
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsEditingInfo(true)}
+                className="text-xs text-emerald-400 hover:underline flex items-center gap-1"
+              >
+                <Plus className="w-3 h-3" />
+                Add contact person name
+              </button>
+            )}
           </div>
 
           {/* Quick Call & WhatsApp CTA buttons */}

@@ -107,6 +107,7 @@ export function formatDuration(seconds: number): string {
 
 export const SERVICE_INTERESTS = [
   "WhatsApp API",
+  "Bulk WhatsApp",
   "Virtual WhatsApp",
   "Bulk SMS",
   "RCS Messaging",

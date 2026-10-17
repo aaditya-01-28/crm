@@ -248,8 +248,27 @@ export async function PATCH(
 
       const updated = updateRes.rows[0];
 
-      // Auto-sync deal pipeline if status changed to demo stages
-      if (status === "demo_done" || status === "demo_scheduled") {
+      // Auto-sync deal pipeline if status changed to pipeline-relevant stages
+      if (
+        status === "demo_done" ||
+        status === "demo_scheduled" ||
+        status === "won" ||
+        status === "closed_won" ||
+        status === "lost" ||
+        status === "closed_lost" ||
+        status === "deal_created"
+      ) {
+        const stageMap: Record<string, string> = {
+          demo_scheduled: "demo_scheduled",
+          demo_done: "demo_done",
+          deal_created: "quote_sent",
+          won: "closed_won",
+          closed_won: "closed_won",
+          lost: "closed_lost",
+          closed_lost: "closed_lost",
+        };
+        const targetStage = stageMap[status] || status;
+
         const dealCheck = await client.query(
           "SELECT id FROM deals WHERE lead_id = $1 AND tenant_id = $2 LIMIT 1",
           [id, tenantId]
@@ -257,8 +276,8 @@ export async function PATCH(
 
         if (dealCheck.rows.length > 0) {
           await client.query(
-            "UPDATE deals SET stage = $1, updated_at = NOW() WHERE id = $2",
-            [status, dealCheck.rows[0].id]
+            "UPDATE deals SET stage = $1, rep_id = COALESCE(rep_id, $2), updated_at = NOW() WHERE id = $3",
+            [targetStage, updated.assignedRepId || repId, dealCheck.rows[0].id]
           );
         } else {
           await client.query(
@@ -269,13 +288,19 @@ export async function PATCH(
               id,
               updated.assignedRepId || repId,
               updated.serviceType || "WhatsApp API",
-              status,
-              status === "demo_done" ? "Product demo completed" : "Product demo scheduled",
+              targetStage,
+              targetStage === "closed_won"
+                ? "Lead converted to Closed Won"
+                : targetStage === "closed_lost"
+                ? "Lead closed lost"
+                : targetStage === "demo_done"
+                ? "Product demo completed"
+                : "Product demo scheduled",
             ]
           );
         }
 
-        if (status === "demo_done") {
+        if (status === "demo_done" || status === "won" || status === "closed_won") {
           await client.query(
             "UPDATE scheduled_tasks SET status = 'completed', updated_at = NOW() WHERE lead_id = $1 AND task_type = 'product_demo' AND status = 'pending'",
             [id]

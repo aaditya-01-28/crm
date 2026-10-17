@@ -150,8 +150,21 @@ export async function PATCH(
         );
       }
 
-      // Sync Deal Pipeline for demo stages
-      if (newStatus === "demo_scheduled" || newStatus === "demo_done") {
+      // Sync Deal Pipeline for pipeline stages
+      if (
+        newStatus === "demo_scheduled" ||
+        newStatus === "demo_done" ||
+        newStatus === "won" ||
+        newStatus === "lost"
+      ) {
+        const stageMap: Record<string, string> = {
+          demo_scheduled: "demo_scheduled",
+          demo_done: "demo_done",
+          won: "closed_won",
+          lost: "closed_lost",
+        };
+        const targetStage = stageMap[newStatus] || newStatus;
+
         const dealCheck = await client.query(
           "SELECT id FROM deals WHERE lead_id = $1 AND tenant_id = $2 LIMIT 1",
           [id, tenantId]
@@ -159,8 +172,8 @@ export async function PATCH(
 
         if (dealCheck.rows.length > 0) {
           await client.query(
-            "UPDATE deals SET stage = $1, updated_at = NOW() WHERE id = $2",
-            [newStatus, dealCheck.rows[0].id]
+            "UPDATE deals SET stage = $1, rep_id = COALESCE(rep_id, $2), updated_at = NOW() WHERE id = $3",
+            [targetStage, lead.assigned_rep_id || repId, dealCheck.rows[0].id]
           );
         } else {
           await client.query(
@@ -171,8 +184,14 @@ export async function PATCH(
               id,
               lead.assigned_rep_id || repId,
               lead.service_type || "WhatsApp API",
-              newStatus,
-              newStatus === "demo_done" ? "Product demo completed" : "Product demo scheduled",
+              targetStage,
+              targetStage === "closed_won"
+                ? "Deal closed won via disposition"
+                : targetStage === "closed_lost"
+                ? "Deal marked closed lost via disposition"
+                : targetStage === "demo_done"
+                ? "Product demo completed"
+                : "Product demo scheduled",
             ]
           );
         }
