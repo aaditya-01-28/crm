@@ -313,28 +313,26 @@ export default function LoginPage() {
                       </div>
                       <div>
                         <h4 className="font-bold text-gray-900 text-base">
-                          Super Admin Reset Link Sent!
+                          Temporary Password Sent!
                         </h4>
                         <span className="inline-block mt-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
-                          Level 3 Direct Access
+                          Level 3 Super Admin Security
                         </span>
                       </div>
-                      <p className="text-xs text-gray-600 leading-relaxed">
+                      <p className="text-xs text-gray-600 leading-relaxed max-w-sm mx-auto">
                         {forgotMessage}
                       </p>
-                      {devPreviewUrl && (
-                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-left text-xs space-y-1">
-                          <span className="font-bold text-amber-800 block">
-                            ⚙️ Development Direct Reset Link:
-                          </span>
-                          <a
-                            href={devPreviewUrl}
-                            className="text-emerald-700 underline font-medium break-all block hover:text-emerald-800"
-                          >
-                            {devPreviewUrl}
-                          </a>
-                        </div>
-                      )}
+                      <div className="p-3.5 bg-emerald-50/70 border border-emerald-200/80 rounded-xl text-left text-xs space-y-1.5">
+                        <span className="font-bold text-emerald-950 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          Next Step:
+                        </span>
+                        <p className="text-emerald-800 text-[11px] leading-relaxed">
+                          1. Open your email inbox to retrieve your temporary login password.<br />
+                          2. Click <strong>&quot;Return to Sign In&quot;</strong> below and sign in using your temporary password.<br />
+                          3. You will immediately be prompted to create your new permanent password.
+                        </p>
+                      </div>
                     </>
                   )}
 
@@ -415,6 +413,104 @@ export default function LoginPage() {
                   </div>
                 </form>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Forced Set New Permanent Password Modal */}
+      {showSetNewPasswordModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-100">
+            <div className="bg-gradient-to-r from-slate-900 to-emerald-950 px-6 py-5 text-white border-b border-emerald-500/20 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto mb-2 border border-emerald-500/30">
+                <KeyRound className="w-6 h-6" />
+              </div>
+              <h3 className="font-bold text-base tracking-wide">
+                Set New Permanent Password
+              </h3>
+              <p className="text-xs text-emerald-300/80 mt-1">
+                Temporary Password Verified · Super Admin Account Security
+              </p>
+            </div>
+
+            <div className="p-6">
+              <div className="p-3 bg-amber-50/80 border border-amber-200/80 rounded-xl text-xs space-y-1 mb-5">
+                <span className="font-bold text-amber-950 flex items-center gap-1">
+                  <ShieldAlert className="w-3.5 h-3.5 text-amber-600" />
+                  Mandatory Security Step:
+                </span>
+                <p className="text-amber-800 text-[11px] leading-relaxed">
+                  You logged in with a temporary password. Before entering your console, please set a new permanent password of your choice.
+                </p>
+              </div>
+
+              <form onSubmit={handleSetNewPassword} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
+                    New Permanent Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showNewPw ? "text" : "password"}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      required
+                      minLength={6}
+                      placeholder="Minimum 6 characters"
+                      className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 transition text-sm pr-10 bg-gray-50/50"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPw(!showNewPw)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                    >
+                      {showNewPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
+                    Confirm Permanent Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showConfirmPw ? "text" : "password"}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      required
+                      minLength={6}
+                      placeholder="Re-enter new password"
+                      className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 transition text-sm pr-10 bg-gray-50/50"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPw(!showConfirmPw)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                    >
+                      {showConfirmPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={settingNewPassword}
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-300 text-white font-semibold py-2.5 rounded-xl transition text-sm flex items-center justify-center gap-2 shadow-md shadow-emerald-900/20 cursor-pointer"
+                  >
+                    {settingNewPassword ? (
+                      <>
+                        <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Saving New Password...
+                      </>
+                    ) : (
+                      "Set Password & Enter Console"
+                    )}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         </div>
