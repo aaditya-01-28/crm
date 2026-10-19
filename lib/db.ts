@@ -34,6 +34,7 @@ export async function query<T = any>(sql: string, params: unknown[] = []): Promi
 export async function queryUserByEmail(email: string) {
   return withClient(async (client) => {
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;`).catch(() => {});
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false;`).catch(() => {});
     const res = await client.query<{
       id: string;
       tenantId: string;
@@ -44,11 +45,13 @@ export async function queryUserByEmail(email: string) {
       role: string;
       isActive: boolean;
       avatarUrl: string | null;
+      mustChangePassword: boolean;
       tenantName: string;
     }>(
       `SELECT u.id, u.tenant_id as "tenantId", u.full_name as "fullName",
               u.email, u.password_hash as "passwordHash", u.phone_number as "phoneNumber",
-              u.role, u.is_active as "isActive", u.avatar_url as "avatarUrl", o.name as "tenantName"
+              u.role, u.is_active as "isActive", u.avatar_url as "avatarUrl",
+              COALESCE(u.must_change_password, false) as "mustChangePassword", o.name as "tenantName"
        FROM users u
        JOIN organizations o ON u.tenant_id = o.id
        WHERE LOWER(u.email) = LOWER($1) LIMIT 1`,
@@ -68,6 +71,7 @@ export async function queryUserByEmail(email: string) {
       role: r.role,
       isActive: r.isActive,
       avatarUrl: r.avatarUrl || null,
+      mustChangePassword: Boolean(r.mustChangePassword),
       tenant: {
         name: r.tenantName,
       },

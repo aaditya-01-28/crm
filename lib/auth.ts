@@ -12,6 +12,7 @@ export interface JWTPayload {
   email: string;
   fullName: string;
   avatarUrl?: string | null;
+  mustChangePassword?: boolean;
 }
 
 export async function signAccessToken(payload: JWTPayload): Promise<string> {

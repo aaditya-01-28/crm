@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { can, isSalesRep } from "@/lib/rbac";
+import { can, isSalesRep, isAdmin } from "@/lib/rbac";
 import { getSession } from "@/lib/auth";
 
 export async function GET(
@@ -44,7 +44,7 @@ export async function GET(
 
       const l = leadRes.rows[0];
 
-      // Call logs
+      // Call logs: Level 1 sees only their own calls; Level 2 & 3 see all calls
       const callLogsRes = await client.query(
         `SELECT c.id, c.tenant_id as "tenantId", c.lead_id as "leadId", c.rep_id as "repId",
                 c.disposition, c.duration_seconds as "durationSeconds", c.remark,
@@ -69,7 +69,7 @@ export async function GET(
         rep: { fullName: c.repFullName, email: c.repEmail },
       }));
 
-      // Tasks
+      // Tasks: Level 1 sees only their own tasks; Level 2 & 3 see all tasks
       const tasksRes = await client.query(
         `SELECT t.id, t.tenant_id as "tenantId", t.lead_id as "leadId", t.rep_id as "repId",
                 t.task_type as "taskType", t.scheduled_time as "scheduledTime", t.status,
@@ -77,9 +77,9 @@ export async function GET(
                 u.full_name as "repFullName"
          FROM scheduled_tasks t
          LEFT JOIN users u ON t.rep_id = u.id
-         WHERE t.lead_id = $1
+         WHERE t.lead_id = $1 ${isLevel1 ? "AND t.rep_id = $2" : ""}
          ORDER BY t.scheduled_time DESC`,
-        [id]
+        isLevel1 ? [id, repId] : [id]
       );
 
       const tasks = tasksRes.rows.map((t) => ({
@@ -87,7 +87,7 @@ export async function GET(
         rep: { fullName: t.repFullName },
       }));
 
-      // Deals
+      // Deals: Level 1 sees only their own deals; Level 2 & 3 see all deals
       const dealsRes = await client.query(
         `SELECT d.id, d.tenant_id as "tenantId", d.lead_id as "leadId", d.rep_id as "repId",
                 d.service_type as "serviceType", d.quantity, d.quoted_price as "quotedPrice",
@@ -96,9 +96,9 @@ export async function GET(
                 u.full_name as "repFullName"
          FROM deals d
          LEFT JOIN users u ON d.rep_id = u.id
-         WHERE d.lead_id = $1
+         WHERE d.lead_id = $1 ${isLevel1 ? "AND d.rep_id = $2" : ""}
          ORDER BY d.created_at DESC`,
-        [id]
+        isLevel1 ? [id, repId] : [id]
       );
 
       const deals = dealsRes.rows.map((d) => ({
@@ -208,6 +208,12 @@ export async function PATCH(
           ? new Date()
           : existing.first_assigned_at);
 
+      const isReassigned =
+        can(role, "leads:assign") &&
+        assignedRepId !== undefined &&
+        finalAssignedRepId !== null &&
+        finalAssignedRepId !== existing.assigned_rep_id;
+
       const updateRes = await client.query(
         `UPDATE leads
          SET contact_name = COALESCE($1, contact_name),
@@ -216,7 +222,8 @@ export async function PATCH(
              website_url = COALESCE($4, website_url),
              business_vertical = COALESCE($5, business_vertical),
              service_type = COALESCE($6, service_type),
-             status = COALESCE($7, status),
+             status = CASE WHEN $13 THEN 'new' ELSE COALESCE($7, status) END,
+             rnr_count = CASE WHEN $13 THEN 0 ELSE rnr_count END,
              custom_metadata = $8,
              assigned_rep_id = $9,
              first_assigned_rep_id = $10,
@@ -243,6 +250,7 @@ export async function PATCH(
           finalFirstAssignedRepId,
           finalFirstAssignedAt,
           id,
+          isReassigned,
         ]
       );
 
@@ -320,5 +328,54 @@ export async function PATCH(
   } catch (error) {
     console.error("[LEAD PATCH]", error);
     return NextResponse.json({ error: "Failed to update lead" }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const session = await getSession();
+  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
+  const role = request.headers.get("x-user-role") || session?.role || "";
+
+  if (!tenantId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Only Level 3 Super Admin can delete leads
+  if (!isAdmin(role)) {
+    return NextResponse.json(
+      { error: "Forbidden: Only Level 3 Super Admins can permanently delete leads." },
+      { status: 403 }
+    );
+  }
+
+  try {
+    return await withClient(async (client) => {
+      await client.query("BEGIN");
+      await client.query("DELETE FROM call_logs WHERE lead_id = $1", [id]);
+      await client.query("DELETE FROM scheduled_tasks WHERE lead_id = $1", [id]);
+      await client.query("DELETE FROM payments WHERE lead_id = $1", [id]);
+      await client.query("DELETE FROM deals WHERE lead_id = $1", [id]);
+      const res = await client.query(
+        "DELETE FROM leads WHERE id = $1 AND tenant_id = $2 RETURNING id",
+        [id, tenantId]
+      );
+      await client.query("COMMIT");
+
+      if (res.rowCount === 0) {
+        return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: "Lead permanently deleted.",
+      });
+    });
+  } catch (error) {
+    console.error("[LEAD DELETE]", error);
+    return NextResponse.json({ error: "Failed to delete lead" }, { status: 500 });
   }
 }

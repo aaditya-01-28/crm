@@ -19,7 +19,6 @@ import {
   AlertCircle,
   PhoneCall,
   Flame,
-  Camera,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDateTime } from "@/lib/utils";
@@ -175,26 +174,6 @@ export default function ProfilePage() {
     },
   });
 
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (file.size > 2 * 1024 * 1024) {
-      toast.error("Image file is too large. Please select a photo under 2MB.");
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      updateProfileMutation.mutate({ avatarUrl: result });
-    };
-    reader.onerror = () => {
-      toast.error("Failed to read image file.");
-    };
-    reader.readAsDataURL(file);
-  };
-
   const toggleLanguage = (code: string) => {
     if (selectedLanguages.includes(code)) {
       if (selectedLanguages.length === 1) {
@@ -286,7 +265,7 @@ export default function ProfilePage() {
             <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none" />
 
             <div className="flex flex-col items-center text-center pb-6 border-b border-gray-100">
-              <div className="relative group mb-3">
+              <div className="mb-3">
                 {user.avatarUrl ? (
                   <img
                     src={user.avatarUrl}
@@ -298,30 +277,7 @@ export default function ProfilePage() {
                     {user.fullName.charAt(0).toUpperCase()}
                   </div>
                 )}
-                <label
-                  htmlFor="avatar-upload-input"
-                  className="absolute -bottom-1 -right-1 w-7 h-7 bg-emerald-600 text-white rounded-full flex items-center justify-center shadow-md cursor-pointer hover:bg-emerald-500 transition-colors border-2 border-white"
-                  title="Upload profile photo"
-                >
-                  <Camera className="w-3.5 h-3.5" />
-                  <input
-                    id="avatar-upload-input"
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleAvatarUpload}
-                  />
-                </label>
               </div>
-              {user.avatarUrl && (
-                <button
-                  type="button"
-                  onClick={() => updateProfileMutation.mutate({ avatarUrl: null })}
-                  className="text-[11px] text-gray-400 hover:text-red-500 mb-2 transition-colors cursor-pointer"
-                >
-                  Remove Photo
-                </button>
-              )}
               <h2 className="text-lg font-bold text-gray-900">{user.fullName}</h2>
               <span className={`mt-1.5 text-[11px] font-bold px-3 py-1 rounded-full border uppercase tracking-wider ${roleMeta.badge}`}>
                 {roleMeta.label}
@@ -390,16 +346,6 @@ export default function ProfilePage() {
                   </span>
                   <span className="text-[10px] text-gray-400 block capitalize">
                     Plan: {user.tenant.planTier}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <Calendar className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <span className="text-gray-400 font-medium block text-[11px] uppercase tracking-wider">Member Since</span>
-                  <span className="text-gray-800 font-semibold">
-                    {formatDateTime(user.createdAt)}
                   </span>
                 </div>
               </div>

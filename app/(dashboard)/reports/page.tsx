@@ -3,8 +3,39 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { BarChart3, Download, RefreshCw, TrendingUp } from "lucide-react";
+import { BarChart3, Download, RefreshCw, TrendingUp, Calendar } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+
+type ReportPeriod = "today" | "yesterday" | "week" | "month" | "custom";
+
+const formatLocalDate = (d: Date): string => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getPresetDates = (preset: ReportPeriod): { from: string; to: string } => {
+  const now = new Date();
+  const todayStr = formatLocalDate(now);
+  if (preset === "yesterday") {
+    const y = new Date();
+    y.setDate(y.getDate() - 1);
+    const yStr = formatLocalDate(y);
+    return { from: yStr, to: yStr };
+  }
+  if (preset === "week") {
+    const p7 = new Date();
+    p7.setDate(p7.getDate() - 6);
+    return { from: formatLocalDate(p7), to: todayStr };
+  }
+  if (preset === "month") {
+    const p30 = new Date();
+    p30.setDate(p30.getDate() - 29);
+    return { from: formatLocalDate(p30), to: todayStr };
+  }
+  return { from: todayStr, to: todayStr };
+};
 
 interface RepMetrics {
   repId: string;
@@ -23,12 +54,17 @@ interface RepMetrics {
 
 interface EODData {
   date: string;
+  dateFrom?: string;
+  dateTo?: string;
   reps: RepMetrics[];
   totals: Omit<RepMetrics, "repId" | "repName">;
 }
 
-async function fetchEOD(date: string): Promise<EODData> {
-  const res = await fetch(`/api/reports/eod?date=${date}`);
+async function fetchEOD(dateFrom: string, dateTo: string): Promise<EODData> {
+  const params = new URLSearchParams();
+  if (dateFrom) params.set("dateFrom", dateFrom);
+  if (dateTo) params.set("dateTo", dateTo);
+  const res = await fetch(`/api/reports/eod?${params.toString()}`);
   if (!res.ok) throw new Error("Failed to fetch EOD report");
   return res.json();
 }
@@ -53,12 +89,13 @@ const METRICS_CONFIG: {
 ];
 
 export default function ReportsPage() {
-  const today = new Date().toISOString().split("T")[0];
-  const [date, setDate] = useState(today);
+  const [period, setPeriod] = useState<ReportPeriod>("today");
+  const [customDateFrom, setCustomDateFrom] = useState(() => getPresetDates("today").from);
+  const [customDateTo, setCustomDateTo] = useState(() => getPresetDates("today").to);
 
   const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["eod", date],
-    queryFn: () => fetchEOD(date),
+    queryKey: ["eod", period, customDateFrom, customDateTo],
+    queryFn: () => fetchEOD(customDateFrom, customDateTo),
     refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 min
   });
 
@@ -72,8 +109,11 @@ export default function ReportsPage() {
   };
 
   async function handleExport() {
-    const res = await fetch(`/api/reports/eod?date=${date}`);
-    const data = await res.json();
+    const params = new URLSearchParams();
+    if (customDateFrom) params.set("dateFrom", customDateFrom);
+    if (customDateTo) params.set("dateTo", customDateTo);
+    const res = await fetch(`/api/reports/eod?${params.toString()}`);
+    const exportData = await res.json();
 
     // Build CSV
     const headers = [
@@ -89,7 +129,7 @@ export default function ReportsPage() {
       "Payments",
       "Revenue (₹)",
     ];
-    const rows = data.reps.map((r: RepMetrics) => [
+    const rows = (exportData.reps || []).map((r: RepMetrics) => [
       r.repName,
       r.totalCalls,
       r.uniqueDialed,
@@ -108,7 +148,7 @@ export default function ReportsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `textora-eod-${date}.csv`;
+    a.download = `textora-eod-${customDateFrom}-to-${customDateTo}.csv`;
     a.click();
   }
 
@@ -118,7 +158,7 @@ export default function ReportsPage() {
   return (
     <div className="max-w-6xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
             <BarChart3 className="w-6 h-6 text-emerald-600" />
@@ -128,19 +168,70 @@ export default function ReportsPage() {
             Real-time team performance dashboard
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            max={today}
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          />
+
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Time Period Dropdown Filter (Matching Image 4) */}
+          <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1 text-xs">
+            <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+            <select
+              value={period}
+              onChange={(e) => {
+                const newPeriod = e.target.value as ReportPeriod;
+                setPeriod(newPeriod);
+                if (newPeriod !== "custom") {
+                  const dates = getPresetDates(newPeriod);
+                  setCustomDateFrom(dates.from);
+                  setCustomDateTo(dates.to);
+                }
+              }}
+              className="bg-transparent font-semibold text-gray-800 outline-none cursor-pointer py-1 text-xs"
+              title="Filter report by period"
+            >
+              <option value="today">Today</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="week">This Week (Last 7 Days)</option>
+              <option value="month">This Month (Last 30 Days)</option>
+              {period === "custom" && (
+                <option value="custom">Custom Date Range</option>
+              )}
+            </select>
+          </div>
+
+          {/* Date Range Picker (From and To) */}
+          <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1 text-xs">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-gray-500">From:</span>
+              <input
+                type="date"
+                value={customDateFrom}
+                onChange={(e) => {
+                  setCustomDateFrom(e.target.value);
+                  setPeriod("custom");
+                }}
+                className="bg-white border border-gray-200 rounded-lg px-2 py-0.5 text-xs text-gray-800 outline-none focus:ring-1 focus:ring-emerald-500 font-medium cursor-pointer"
+                title="Start Date"
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-gray-500">To:</span>
+              <input
+                type="date"
+                value={customDateTo}
+                onChange={(e) => {
+                  setCustomDateTo(e.target.value);
+                  setPeriod("custom");
+                }}
+                className="bg-white border border-gray-200 rounded-lg px-2 py-0.5 text-xs text-gray-800 outline-none focus:ring-1 focus:ring-emerald-500 font-medium cursor-pointer"
+                title="End Date"
+              />
+            </div>
+          </div>
+
           <button
             onClick={handleRefresh}
             disabled={isFetching}
             className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition cursor-pointer disabled:opacity-60"
-            title="Refresh EOD Metrics"
+            title="Refresh Report Metrics"
           >
             <RefreshCw className={`w-4 h-4 ${isFetching ? "animate-spin text-emerald-600" : ""}`} />
             Refresh
@@ -167,7 +258,7 @@ export default function ReportsPage() {
               <div className="flex items-center gap-2 mb-3">
                 <TrendingUp className="w-4 h-4 text-emerald-600" />
                 <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
-                  Team Totals — {date}
+                  Team Totals — {data?.date || (customDateFrom === customDateTo ? customDateFrom : `${customDateFrom} to ${customDateTo}`)}
                 </h2>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">

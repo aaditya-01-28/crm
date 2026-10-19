@@ -13,12 +13,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const dateStr = searchParams.get("date") || new Date().toISOString().split("T")[0];
-  const targetDate = new Date(dateStr);
-  const startOfDay = new Date(targetDate);
-  startOfDay.setHours(0, 0, 0, 0);
-  const endOfDay = new Date(targetDate);
-  endOfDay.setHours(23, 59, 59, 999);
+  const todayStr = new Date().toISOString().split("T")[0];
+  const dateFromStr = searchParams.get("dateFrom") || searchParams.get("startDate") || searchParams.get("date") || todayStr;
+  const dateToStr = searchParams.get("dateTo") || searchParams.get("endDate") || searchParams.get("date") || dateFromStr;
+
+  const startOfDay = new Date(`${dateFromStr}T00:00:00`);
+  const endOfDay = new Date(`${dateToStr}T23:59:59.999`);
 
   const repFilter = role === "sales_rep" ? repId : searchParams.get("repId") || undefined;
 
@@ -36,7 +36,9 @@ export async function GET(request: NextRequest) {
       const reps = repsRes.rows;
       if (reps.length === 0) {
         return NextResponse.json({
-          date: dateStr,
+          date: dateFromStr === dateToStr ? dateFromStr : `${dateFromStr} to ${dateToStr}`,
+          dateFrom: dateFromStr,
+          dateTo: dateToStr,
           reps: [],
           totals: {
             totalCalls: 0,
@@ -176,7 +178,13 @@ export async function GET(request: NextRequest) {
         }
       );
 
-      return NextResponse.json({ date: dateStr, reps: metrics, totals });
+      return NextResponse.json({
+        date: dateFromStr === dateToStr ? dateFromStr : `${dateFromStr} to ${dateToStr}`,
+        dateFrom: dateFromStr,
+        dateTo: dateToStr,
+        reps: metrics,
+        totals,
+      });
     });
   } catch (error) {
     console.error("[REPORTS EOD]", error);

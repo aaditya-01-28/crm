@@ -20,6 +20,7 @@ import {
   X,
   User,
   Languages,
+  Trash2,
 } from "lucide-react";
 import {
   buildTelLink,
@@ -37,7 +38,7 @@ import { MultiServiceSelect } from "@/components/common/MultiServiceSelect";
 import { LeadDetailModal } from "@/components/leads/LeadDetailModal";
 import { CSVImporter } from "@/components/dialer/CSVImporter";
 import { toast } from "sonner";
-import { useCanImportLeads, useCanAssignLeads } from "@/components/layout/SessionProvider";
+import { useCanImportLeads, useCanAssignLeads, useIsAdmin } from "@/components/layout/SessionProvider";
 
 interface LastCallLog {
   disposition: string;
@@ -135,7 +136,56 @@ export default function LeadsDirectoryPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const canImport = useCanImportLeads();
   const canAssign = useCanAssignLeads();
+  const isLevel3Admin = useIsAdmin();
   const queryClient = useQueryClient();
+
+  // Deletion state (Level 3 Super Admin only)
+  const [deletingLead, setDeletingLead] = useState<LeadRecord | null>(null);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleSingleDelete = async () => {
+    if (!deletingLead) return;
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`/api/leads/${deletingLead.id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delete lead");
+      toast.success("Lead permanently deleted ✅");
+      refetch();
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      setDeletingLead(null);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete lead");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedLeadIds.length === 0) return;
+    setIsDeleting(true);
+    try {
+      const res = await fetch("/api/leads", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadIds: selectedLeadIds }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delete leads");
+      toast.success(`Permanently deleted ${data.count || selectedLeadIds.length} leads ✅`);
+      setSelectedLeadIds([]);
+      refetch();
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      setShowBulkDeleteConfirm(false);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete leads");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   // Refresh & bulk selection state
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
@@ -835,14 +885,25 @@ export default function LeadsDirectoryPage() {
 
                       {/* Actions */}
                       <td className="px-4 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          onClick={() => setSelectedLeadId(lead.id)}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition border border-emerald-200"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>History</span>
-                          <ChevronRight className="w-3 h-3 opacity-60" />
-                        </button>
+                        <div className="inline-flex items-center gap-1.5 justify-end">
+                          <button
+                            onClick={() => setSelectedLeadId(lead.id)}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition border border-emerald-200"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>History</span>
+                            <ChevronRight className="w-3 h-3 opacity-60" />
+                          </button>
+                          {isLevel3Admin && (
+                            <button
+                              onClick={() => setDeletingLead(lead)}
+                              title="Delete Lead (Admin Only)"
+                              className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition border border-transparent hover:border-rose-200"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1099,6 +1160,22 @@ export default function LeadsDirectoryPage() {
             Unassign
           </button>
 
+          {/* Level 3 Super Admin Bulk Delete */}
+          {isLevel3Admin && (
+            <>
+              <div className="h-4 w-px bg-slate-700 hidden sm:block" />
+              <button
+                onClick={() => setShowBulkDeleteConfirm(true)}
+                disabled={isDeleting}
+                className="px-3 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-xl transition disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
+                title="Permanently delete selected leads (Admin only)"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete ({selectedLeadIds.length})</span>
+              </button>
+            </>
+          )}
+
           {/* Clear */}
           <button
             onClick={() => setSelectedLeadIds([])}
@@ -1106,6 +1183,88 @@ export default function LeadsDirectoryPage() {
           >
             Clear
           </button>
+        </div>
+      )}
+
+      {/* Single Delete Confirmation Modal (Level 3 Super Admin Only) */}
+      {deletingLead && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-gray-100 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-6">
+              <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mb-4">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-gray-900 mb-1">Delete Lead Permanently?</h3>
+              <p className="text-xs text-gray-600 mb-4 leading-relaxed">
+                Are you sure you want to delete{" "}
+                <strong className="text-gray-900">
+                  {deletingLead.companyName || deletingLead.contactName || deletingLead.phoneNumber}
+                </strong>
+                ? This will permanently delete the lead record along with all associated call logs, scheduled tasks,
+                deals, and payments. This action <strong>cannot</strong> be undone.
+              </p>
+
+              <div className="flex gap-2.5 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setDeletingLead(null)}
+                  disabled={isDeleting}
+                  className="px-4 py-2 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-xl transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSingleDelete}
+                  disabled={isDeleting}
+                  className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl transition disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {isDeleting ? "Deleting..." : "Permanently Delete"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete Confirmation Modal (Level 3 Super Admin Only) */}
+      {showBulkDeleteConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-gray-100 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-6">
+              <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mb-4">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-base font-bold text-gray-900 mb-1">
+                Delete {selectedLeadIds.length} Selected Leads?
+              </h3>
+              <p className="text-xs text-gray-600 mb-4 leading-relaxed">
+                You are about to permanently delete{" "}
+                <strong className="text-rose-600">{selectedLeadIds.length}</strong> selected leads and all their
+                associated call logs, scheduled tasks, deals, and records. This action{" "}
+                <strong>cannot be reversed</strong>.
+              </p>
+
+              <div className="flex gap-2.5 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowBulkDeleteConfirm(false)}
+                  disabled={isDeleting}
+                  className="px-4 py-2 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-xl transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleBulkDelete}
+                  disabled={isDeleting}
+                  className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl transition disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {isDeleting ? "Deleting..." : `Delete ${selectedLeadIds.length} Leads`}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

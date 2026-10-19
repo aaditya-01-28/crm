@@ -178,7 +178,7 @@ export async function PATCH(request: NextRequest) {
         role: updatedUser.role,
         email: updatedUser.email,
         fullName: updatedUser.fullName,
-        avatarUrl: updatedUser.avatarUrl ?? null,
+        avatarUrl: updatedUser.avatarUrl && updatedUser.avatarUrl.length < 500 ? updatedUser.avatarUrl : null,
       };
 
       const accessToken = await signAccessToken(jwtPayload);

@@ -179,3 +179,127 @@ export async function sendPasswordResetRequestNotificationEmail({
   return { success: true, delivered: false };
 }
 
+interface SendTempPasswordParams {
+  to: string;
+  fullName: string;
+  tempPassword: string;
+  loginUrl: string;
+}
+
+export async function sendTemporaryPasswordEmail({
+  to,
+  fullName,
+  tempPassword,
+  loginUrl,
+}: SendTempPasswordParams): Promise<{ success: boolean; delivered: boolean }> {
+  const host = process.env.SMTP_HOST;
+  const port = parseInt(process.env.SMTP_PORT || "587", 10);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  const from = process.env.SMTP_FROM || "noreply@textorasms.com";
+
+  const emailHtml = `
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your Temporary Textora CRM Password</title>
+  </head>
+  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b;">
+    <div style="max-width: 560px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+      <div style="background-color: #0f172a; padding: 24px 32px; border-bottom: 3px solid #10b981; text-align: center;">
+        <h1 style="color: #ffffff; margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.025em;">
+          Textora Engage CRM
+        </h1>
+        <p style="color: #34d399; margin: 4px 0 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">
+          Super Admin Security System
+        </p>
+      </div>
+      <div style="padding: 32px;">
+        <h2 style="font-size: 18px; font-weight: 700; color: #0f172a; margin: 0 0 16px;">
+          Temporary Login Password
+        </h2>
+        <p style="font-size: 14px; line-height: 1.6; color: #475569; margin: 0 0 16px;">
+          Hello <strong>${fullName}</strong>,
+        </p>
+        <p style="font-size: 14px; line-height: 1.6; color: #475569; margin: 0 0 20px;">
+          A password reset was requested for your Level 3 Super Admin account. Use the temporary password below to sign in:
+        </p>
+
+        <div style="background-color: #f0fdf4; border: 2px dashed #10b981; padding: 20px; border-radius: 12px; text-align: center; margin: 24px 0;">
+          <span style="font-size: 11px; text-transform: uppercase; font-weight: 700; color: #065f46; display: block; margin-bottom: 8px; letter-spacing: 0.05em;">
+            Your Temporary Password
+          </span>
+          <div style="font-size: 24px; font-weight: 800; color: #047857; letter-spacing: 2px; font-family: Monaco, Menlo, Consolas, monospace; background: #ffffff; display: inline-block; padding: 8px 24px; border-radius: 8px; border: 1px solid #a7f3d0;">
+            ${tempPassword}
+          </div>
+        </div>
+
+        <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; margin: 24px 0;">
+          <h4 style="margin: 0 0 8px; font-size: 13px; color: #0f172a; font-weight: 700;">
+            Next Steps to Complete Login:
+          </h4>
+          <ol style="margin: 0; padding-left: 20px; font-size: 13px; color: #475569; line-height: 1.6;">
+            <li>Go to the sign-in page at <a href="${loginUrl}" style="color: #059669; font-weight: 600; text-decoration: none;">${loginUrl}</a>.</li>
+            <li>Enter your registered email and the temporary password above.</li>
+            <li>You will immediately be prompted to create your new permanent password before accessing the console.</li>
+          </ol>
+        </div>
+
+        <div style="text-align: center; margin: 28px 0 12px;">
+          <a href="${loginUrl}" style="display: inline-block; background-color: #059669; color: #ffffff; font-weight: 600; font-size: 14px; padding: 12px 36px; border-radius: 10px; text-decoration: none; box-shadow: 0 2px 4px rgba(5, 150, 105, 0.3);">
+            Proceed to Sign In
+          </a>
+        </div>
+
+        <div style="margin-top: 28px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
+          <p style="font-size: 12px; color: #94a3b8; line-height: 1.5; margin: 0;">
+            🔒 If you did not request this password reset, please contact your systems team immediately.
+          </p>
+        </div>
+      </div>
+      <div style="background-color: #f8fafc; padding: 16px 32px; text-align: center; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8;">
+        © Textora Technologies Pvt Ltd · Enterprise Communication & CRM Infrastructure
+      </div>
+    </div>
+  </body>
+  </html>
+  `;
+
+  if (host && user && pass) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465,
+        auth: { user, pass },
+      });
+
+      await transporter.sendMail({
+        from: `"Textora Engage Security" <${from}>`,
+        to,
+        subject: "🔐 Your Temporary Login Password — Textora Engage CRM",
+        html: emailHtml,
+        text: `Hello ${fullName},\n\nYour temporary password for Textora CRM is: ${tempPassword}\n\nSign in at: ${loginUrl}\nUpon login, you will be prompted to set your new permanent password.`,
+      });
+
+      console.log(`[MAIL] Temporary password email dispatched to ${to}`);
+      return { success: true, delivered: true };
+    } catch (error) {
+      console.error("[MAIL ERROR] Failed to send temp password via SMTP:", error);
+      console.log(`[MAIL DEV FALLBACK] Temp Password for ${to}: ${tempPassword}`);
+      return { success: true, delivered: false };
+    }
+  }
+
+  console.log("------------------------------------------------------------");
+  console.log(`[MAIL DEV MODE] Temporary Password for: ${to} (${fullName})`);
+  console.log(`[MAIL DEV MODE] Temp Password: ${tempPassword}`);
+  console.log(`[MAIL DEV MODE] Sign In URL: ${loginUrl}`);
+  console.log("------------------------------------------------------------");
+
+  return { success: true, delivered: false };
+}
+
+

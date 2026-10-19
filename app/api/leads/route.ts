@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { can, isSalesRep } from "@/lib/rbac";
+import { can, isSalesRep, isAdmin } from "@/lib/rbac";
 import { getSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
                   l.source, l.status, l.rnr_count as "rnrCount", l.custom_metadata as "customMetadata",
                   l.created_at as "createdAt", l.updated_at as "updatedAt",
                   u.full_name as "assignedRepFullName",
-                  (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = l.id) as "callLogsCount"
+                  (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = l.id AND rep_id = $2) as "callLogsCount"
            FROM leads l
            LEFT JOIN users u ON l.assigned_rep_id = u.id
            WHERE l.tenant_id = $1 AND l.assigned_rep_id = $2
@@ -150,12 +150,12 @@ export async function GET(request: NextRequest) {
                  )
                  FROM call_logs cl
                  LEFT JOIN users ru ON cl.rep_id = ru.id
-                 WHERE cl.lead_id = l.id
+                 WHERE cl.lead_id = l.id ${isSalesRep(role) ? `AND cl.rep_id = '${repId}'` : ""}
                  ORDER BY cl.call_timestamp DESC LIMIT 1
                 ) as "latestCallLog",
-                (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = l.id) as "callLogsCount",
-                (SELECT COUNT(*)::int FROM scheduled_tasks WHERE lead_id = l.id) as "tasksCount",
-                (SELECT COUNT(*)::int FROM deals WHERE lead_id = l.id) as "dealsCount"
+                (SELECT COUNT(*)::int FROM call_logs cl WHERE cl.lead_id = l.id ${isSalesRep(role) ? `AND cl.rep_id = '${repId}'` : ""}) as "callLogsCount",
+                (SELECT COUNT(*)::int FROM scheduled_tasks st WHERE st.lead_id = l.id ${isSalesRep(role) ? `AND st.rep_id = '${repId}'` : ""}) as "tasksCount",
+                (SELECT COUNT(*)::int FROM deals d WHERE d.lead_id = l.id ${isSalesRep(role) ? `AND d.rep_id = '${repId}'` : ""}) as "dealsCount"
          FROM leads l
          LEFT JOIN users ar ON l.assigned_rep_id = ar.id
          LEFT JOIN users far ON l.first_assigned_rep_id = far.id
@@ -358,5 +358,60 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("[LEADS POST]", error);
     return NextResponse.json({ error: "Failed to create lead" }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  const session = await getSession();
+  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
+  const role = request.headers.get("x-user-role") || session?.role || "";
+
+  if (!tenantId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Only Level 3 Super Admin can delete leads
+  if (!isAdmin(role)) {
+    return NextResponse.json(
+      { error: "Forbidden: Only Level 3 Super Admins can permanently delete leads." },
+      { status: 403 }
+    );
+  }
+
+  try {
+    const body = await request.json();
+    const { leadIds } = body;
+
+    if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+      return NextResponse.json(
+        { error: "No lead IDs provided for deletion" },
+        { status: 400 }
+      );
+    }
+
+    return await withClient(async (client) => {
+      await client.query("BEGIN");
+      await client.query("DELETE FROM call_logs WHERE lead_id = ANY($1::uuid[])", [leadIds]);
+      await client.query("DELETE FROM scheduled_tasks WHERE lead_id = ANY($1::uuid[])", [leadIds]);
+      await client.query("DELETE FROM payments WHERE lead_id = ANY($1::uuid[])", [leadIds]);
+      await client.query("DELETE FROM deals WHERE lead_id = ANY($1::uuid[])", [leadIds]);
+      const res = await client.query(
+        "DELETE FROM leads WHERE id = ANY($1::uuid[]) AND tenant_id = $2 RETURNING id",
+        [leadIds, tenantId]
+      );
+      await client.query("COMMIT");
+
+      return NextResponse.json({
+        success: true,
+        count: res.rowCount || 0,
+        message: `Permanently deleted ${res.rowCount || 0} leads.`,
+      });
+    });
+  } catch (error) {
+    console.error("[LEADS_BULK_DELETE]", error);
+    return NextResponse.json(
+      { error: "Failed to delete leads" },
+      { status: 500 }
+    );
   }
 }

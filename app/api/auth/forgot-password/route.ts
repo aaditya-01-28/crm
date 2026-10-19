@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { sendPasswordResetEmail, sendPasswordResetRequestNotificationEmail } from "@/lib/mail";
+import { sendTemporaryPasswordEmail, sendPasswordResetRequestNotificationEmail } from "@/lib/mail";
 import crypto from "crypto";
+import bcrypt from "bcryptjs";
 
 export async function POST(request: NextRequest) {
   try {
@@ -43,14 +44,26 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Role check: Only Level 3 Super Admin can perform self-service password reset
+      // Role check: Level 3 Super Admin receives a temporary password on their email
       if (user.role === "super_admin") {
-        const resetToken = crypto.randomBytes(32).toString("hex");
-        const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+        // Generate secure temporary password, e.g. Txt#4k9M2x8Q
+        const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+        let randomChars = "";
+        const bytes = crypto.randomBytes(8);
+        for (let i = 0; i < 8; i++) {
+          randomChars += chars[bytes[i] % chars.length];
+        }
+        const tempPassword = `Txt#${randomChars}`;
+        const passwordHash = await bcrypt.hash(tempPassword, 12);
 
         await client.query(
-          "UPDATE users SET reset_token = $1, reset_token_expiry = $2 WHERE id = $3",
-          [resetToken, resetTokenExpiry, user.id]
+          `UPDATE users
+           SET password_hash = $1,
+               must_change_password = true,
+               reset_token = NULL,
+               reset_token_expiry = NULL
+           WHERE id = $2`,
+          [passwordHash, user.id]
         );
 
         const origin =
@@ -58,20 +71,20 @@ export async function POST(request: NextRequest) {
           process.env.NEXT_PUBLIC_APP_URL ||
           "http://localhost:3000";
 
-        const resetUrl = `${origin}/reset-password?token=${resetToken}`;
+        const loginUrl = `${origin}/login`;
 
-        const mailResult = await sendPasswordResetEmail({
+        const mailResult = await sendTemporaryPasswordEmail({
           to: user.email,
           fullName: user.fullName,
-          resetUrl,
+          tempPassword,
+          loginUrl,
         });
 
         return NextResponse.json({
           success: true,
           isSuperAdmin: true,
-          message: `Super Admin password reset link has been dispatched to ${user.email}. Please check your inbox.`,
+          message: `A temporary login password has been sent to ${user.email}. Please check your inbox, sign in using your temporary password, and you will be prompted to set your new permanent password.`,
           delivered: mailResult.delivered,
-          ...(!mailResult.delivered ? { devPreviewUrl: resetUrl } : {}),
         });
       }
 

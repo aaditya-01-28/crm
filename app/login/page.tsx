@@ -20,7 +20,15 @@ export default function LoginPage() {
   const [forgotMessage, setForgotMessage] = useState("");
   const [isRequestRaised, setIsRequestRaised] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  const [devPreviewUrl, setDevPreviewUrl] = useState<string | null>(null);
+
+  // Forced new permanent password modal state (when logging in with a temporary password)
+  const [showSetNewPasswordModal, setShowSetNewPasswordModal] = useState(false);
+  const [tempCreds, setTempCreds] = useState<{ email: string; password: string } | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showNewPw, setShowNewPw] = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
+  const [settingNewPassword, setSettingNewPassword] = useState(false);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -36,6 +44,15 @@ export default function LoginPage() {
         toast.error(data.error || "Login failed");
         return;
       }
+
+      // Check if user is logging in with a temporary password and must set a new permanent password
+      if (data.mustChangePassword) {
+        setTempCreds({ email: email.trim(), password });
+        setShowSetNewPasswordModal(true);
+        toast.info("Temporary password verified. Please set your new permanent password.");
+        return;
+      }
+
       toast.success(`Welcome back, ${data.user.fullName}!`);
       router.push("/dashboard");
       router.refresh();
@@ -43,6 +60,45 @@ export default function LoginPage() {
       toast.error("Network error. Please try again.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleSetNewPassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newPassword || newPassword.length < 6) {
+      toast.error("New password must be at least 6 characters in length");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error("Passwords do not match");
+      return;
+    }
+
+    setSettingNewPassword(true);
+    try {
+      const res = await fetch("/api/auth/update-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          newPassword,
+          email: tempCreds?.email,
+          temporaryPassword: tempCreds?.password,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Failed to update password");
+        return;
+      }
+
+      toast.success("Permanent password created successfully! Welcome to Textora Engage.");
+      setShowSetNewPasswordModal(false);
+      router.push("/dashboard");
+      router.refresh();
+    } catch {
+      toast.error("Network error while setting new password. Please try again.");
+    } finally {
+      setSettingNewPassword(false);
     }
   }
 
@@ -55,7 +111,6 @@ export default function LoginPage() {
 
     setForgotLoading(true);
     setForgotMessage("");
-    setDevPreviewUrl(null);
     setIsRequestRaised(false);
     setIsSuperAdmin(false);
 
@@ -80,10 +135,7 @@ export default function LoginPage() {
         toast.success("Request raised to Level 3 Super Admin! 🛡️");
       } else if (data.isSuperAdmin) {
         setIsSuperAdmin(true);
-        if (data.devPreviewUrl) {
-          setDevPreviewUrl(data.devPreviewUrl);
-        }
-        toast.success("Super Admin reset link dispatched! 📬");
+        toast.success("Temporary password dispatched to your email! 📬");
       } else {
         toast.success("Request processed. Please check with your administrator.");
       }
@@ -100,7 +152,6 @@ export default function LoginPage() {
     setForgotMessage("");
     setIsRequestRaised(false);
     setIsSuperAdmin(false);
-    setDevPreviewUrl(null);
     setShowForgotModal(true);
   }
 

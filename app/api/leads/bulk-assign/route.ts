@@ -60,6 +60,8 @@ export async function POST(request: NextRequest) {
            SET assigned_rep_id = v.rep_id,
                first_assigned_rep_id = COALESCE(l.first_assigned_rep_id, v.rep_id),
                first_assigned_at = COALESCE(l.first_assigned_at, NOW()),
+               status = CASE WHEN l.assigned_rep_id IS DISTINCT FROM v.rep_id THEN 'new' ELSE l.status END,
+               rnr_count = CASE WHEN l.assigned_rep_id IS DISTINCT FROM v.rep_id THEN 0 ELSE l.rnr_count END,
                updated_at = NOW()
            FROM unnest($1::uuid[], $2::uuid[]) AS v(lead_id, rep_id)
            WHERE l.id = v.lead_id AND l.tenant_id = $3`,
@@ -108,6 +110,8 @@ export async function POST(request: NextRequest) {
            SET assigned_rep_id = $1,
                first_assigned_rep_id = COALESCE(first_assigned_rep_id, $1),
                first_assigned_at = COALESCE(first_assigned_at, NOW()),
+               status = CASE WHEN assigned_rep_id IS DISTINCT FROM $1 THEN 'new' ELSE status END,
+               rnr_count = CASE WHEN assigned_rep_id IS DISTINCT FROM $1 THEN 0 ELSE rnr_count END,
                updated_at = NOW()
            WHERE id = ANY($2::uuid[]) AND tenant_id = $3
            RETURNING id`,

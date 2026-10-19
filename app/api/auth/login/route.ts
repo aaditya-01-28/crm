@@ -43,13 +43,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const mustChangePassword = Boolean(user.mustChangePassword);
+
     const jwtPayload = {
       sub: user.id,
       tenantId: user.tenantId,
       role: user.role,
       email: user.email,
       fullName: user.fullName,
-      avatarUrl: user.avatarUrl ?? null,
+      avatarUrl: user.avatarUrl && user.avatarUrl.length < 500 ? user.avatarUrl : null,
+      mustChangePassword,
     };
 
     const accessToken = await signAccessToken(jwtPayload);
@@ -63,7 +66,9 @@ export async function POST(request: NextRequest) {
         role: user.role,
         tenantName: user.tenant.name,
         avatarUrl: user.avatarUrl ?? null,
+        mustChangePassword,
       },
+      mustChangePassword,
       accessToken,
       refreshToken,
     });

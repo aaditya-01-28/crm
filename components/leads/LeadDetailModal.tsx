@@ -22,6 +22,7 @@ import {
   Check,
   Languages,
   UserCheck,
+  Trash2,
 } from "lucide-react";
 import {
   buildTelLink,
@@ -39,7 +40,7 @@ import {
 } from "@/lib/utils";
 import { MultiServiceSelect } from "@/components/common/MultiServiceSelect";
 import { toast } from "sonner";
-import { useCanAssignLeads } from "@/components/layout/SessionProvider";
+import { useCanAssignLeads, useIsAdmin } from "@/components/layout/SessionProvider";
 
 interface LeadDetailModalProps {
   leadId: string;
@@ -74,6 +75,34 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
   const [meetingLink, setMeetingLink] = useState("");
   const [submittingLog, setSubmittingLog] = useState(false);
   const canAssign = useCanAssignLeads();
+  const isLevel3Admin = useIsAdmin();
+
+  // Delete lead state (Level 3 Super Admin only)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteLead = async () => {
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`/api/leads/${leadId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to delete lead");
+      }
+      toast.success("Lead permanently deleted ✅");
+      queryClient.invalidateQueries({ queryKey: ["leads-directory"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      onLeadUpdated?.();
+      onClose();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete lead");
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  };
 
   const { data, isLoading } = useQuery({
     queryKey: ["lead-detail", leadId],
@@ -291,6 +320,17 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
 
             {/* RIGHT: Quick action buttons */}
             <div className="flex items-center gap-2">
+              {isLevel3Admin && (
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="inline-flex items-center gap-1.5 text-xs text-rose-300 hover:text-white bg-rose-950/40 hover:bg-rose-700/80 px-2.5 py-1.5 rounded-lg border border-rose-800/80 transition cursor-pointer"
+                  title="Permanently Delete Lead (Level 3 Super Admin only)"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Delete Lead</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setIsEditingInfo(!isEditingInfo)}
@@ -1046,6 +1086,48 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
           )}
         </div>
       </div>
+
+      {/* Delete Confirmation Modal (Level 3 Super Admin Only) */}
+      {showDeleteConfirm && lead && (
+        <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center p-4 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-100 space-y-4">
+            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-lg font-bold text-gray-900">Permanently Delete Lead?</h3>
+              <p className="text-xs text-gray-500">
+                You are about to permanently delete{" "}
+                <strong className="text-gray-900 font-semibold">
+                  {lead.companyName || lead.contactName || lead.phoneNumber}
+                </strong>
+                . All associated call logs, scheduled tasks, payments, and pipeline deals will be erased.
+              </p>
+            </div>
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-[11px] font-medium">
+              ⚠️ This action cannot be undone. Only Level 3 Super Admins possess lead deletion authority.
+            </div>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={isDeleting}
+                className="px-4 py-2 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-xl transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteLead}
+                disabled={isDeleting}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition shadow-xs disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+              >
+                {isDeleting ? "Deleting..." : "Yes, Delete Lead"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
