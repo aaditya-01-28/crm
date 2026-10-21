@@ -10,7 +10,7 @@ type DispositionType =
   | "Demo Scheduled"
   | "Demo Done"
   | "Not Interested"
-  | "Already Using"
+  | "Already Using Our Service"
   | "Already Purchased or Using Other Company Service"
   | "Future Requirement"
   | "Invalid";
@@ -38,6 +38,7 @@ const DISPOSITIONS: { label: string; type: DispositionType; color: string }[] =
     { label: "Demo Scheduled", type: "Demo Scheduled", color: "bg-purple-100 text-purple-800 hover:bg-purple-200 border-purple-200" },
     { label: "Demo Done", type: "Demo Done", color: "bg-teal-100 text-teal-800 hover:bg-teal-200 border-teal-200" },
     { label: "Not Interested", type: "Not Interested", color: "bg-red-100 text-red-800 hover:bg-red-200 border-red-200" },
+    { label: "Already Using Our Service", type: "Already Using Our Service", color: "bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border-emerald-200" },
     { label: "Already Purchased / Other Company", type: "Already Purchased or Using Other Company Service", color: "bg-orange-100 text-orange-800 hover:bg-orange-200 border-orange-200" },
     { label: "Future Requirement", type: "Future Requirement", color: "bg-sky-100 text-sky-800 hover:bg-sky-200 border-sky-200" },
     { label: "Invalid", type: "Invalid", color: "bg-gray-100 text-gray-600 hover:bg-gray-200 border-gray-200" },

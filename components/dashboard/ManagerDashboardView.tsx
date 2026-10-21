@@ -304,10 +304,15 @@ export function ManagerDashboardView({
               { label: "Demo Scheduled", count: dispositionMap["Demo Scheduled"] || 0, color: "bg-purple-500" },
               { label: "Future Requirement", count: dispositionMap["Future Requirement"] || 0, color: "bg-sky-500" },
               {
-                label: "Already Purchased / Other Company",
+                label: "Already Using Our Service",
                 count:
-                  (dispositionMap["Already Purchased or Using Other Company Service"] || 0) +
+                  (dispositionMap["Already Using Our Service"] || 0) +
                   (dispositionMap["Already Using"] || 0),
+                color: "bg-teal-500",
+              },
+              {
+                label: "Already Purchased / Other Company",
+                count: dispositionMap["Already Purchased or Using Other Company Service"] || 0,
                 color: "bg-orange-500",
               },
               { label: "Not Interested", count: dispositionMap["Not Interested"] || 0, color: "bg-gray-400" },

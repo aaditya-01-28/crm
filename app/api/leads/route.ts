@@ -94,11 +94,7 @@ export async function GET(request: NextRequest) {
       const params: any[] = [...baseParams];
 
       if (status && status !== "all") {
-        if (status === "already_using" || status === "already_purchased") {
-          conditions.push(`(l.status = 'already_using' OR l.status = 'already_purchased')`);
-        } else {
-          conditions.push(`l.status = $${params.push(status)}`);
-        }
+        conditions.push(`l.status = $${params.push(status)}`);
       }
 
       if (vertical && vertical !== "all") {
@@ -203,16 +199,13 @@ export async function GET(request: NextRequest) {
         not_interested: 0,
         invalid: 0,
         already_using: 0,
+        already_purchased: 0,
         future_requirement: 0,
         unassigned: unassignedTotal,
       };
 
       statusCountsRes.rows.forEach((s: { status: string; count: number }) => {
-        if (s.status === "already_purchased") {
-          stats.already_using = (stats.already_using || 0) + s.count;
-        } else {
-          stats[s.status] = s.count;
-        }
+        stats[s.status] = s.count;
         stats.all += s.count;
       });
 

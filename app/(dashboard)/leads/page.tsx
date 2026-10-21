@@ -94,7 +94,8 @@ const STATUS_FILTERS = [
   { key: "lost", label: "Lost" },
   { key: "rnr", label: "RNR" },
   { key: "not_interested", label: "Not Interested" },
-  { key: "already_using", label: "Already Purchased / Other" },
+  { key: "already_using", label: "Already Using Our Service" },
+  { key: "already_purchased", label: "Already Purchased / Other" },
   { key: "future_requirement", label: "Future Requirement" },
 ];
 
@@ -121,8 +122,8 @@ const STATUS_BADGES: Record<string, { label: string; color: string }> = {
   lost: { label: "Closed Lost", color: "bg-red-100 text-red-700 border-red-200" },
   rnr: { label: "RNR", color: "bg-yellow-100 text-yellow-800 border-yellow-200" },
   not_interested: { label: "Not Interested", color: "bg-gray-100 text-gray-600 border-gray-200" },
-  already_using: { label: "Already Purchased or Using Other Service", color: "bg-orange-100 text-orange-700 border-orange-200" },
-  already_purchased: { label: "Already Purchased or Using Other Service", color: "bg-orange-100 text-orange-700 border-orange-200" },
+  already_using: { label: "Already Using Our Service", color: "bg-emerald-100 text-emerald-700 border-emerald-200" },
+  already_purchased: { label: "Already Purchased / Other Company", color: "bg-orange-100 text-orange-700 border-orange-200" },
   future_requirement: { label: "Future Requirement", color: "bg-sky-100 text-sky-800 border-sky-200" },
   invalid: { label: "Invalid", color: "bg-rose-100 text-rose-700 border-rose-200" },
 };
