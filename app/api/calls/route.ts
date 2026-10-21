@@ -39,7 +39,14 @@ export async function GET(request: NextRequest) {
       }
 
       if (disposition && disposition !== "all") {
-        conditions.push(`c.disposition = $${params.push(disposition)}`);
+        if (
+          disposition === "Already Purchased or Using Other Company Service" ||
+          disposition === "Already Using"
+        ) {
+          conditions.push(`(c.disposition = 'Already Purchased or Using Other Company Service' OR c.disposition = 'Already Using')`);
+        } else {
+          conditions.push(`c.disposition = $${params.push(disposition)}`);
+        }
       }
 
       if (dateFrom) {

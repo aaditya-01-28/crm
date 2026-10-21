@@ -131,6 +131,7 @@ export async function GET(request: NextRequest) {
         Callback: 0,
         "Not Interested": 0,
         "Already Using": 0,
+        "Already Purchased or Using Other Company Service": 0,
         "Future Requirement": 0,
         Invalid: 0,
         "Demo Scheduled": 0,

@@ -113,7 +113,13 @@ const DISPOSITION_BADGES: Record<
     border: "border-gray-200",
   },
   "Already Using": {
-    label: "Already Using",
+    label: "Already Purchased or Using Other Company Service",
+    bg: "bg-orange-50",
+    text: "text-orange-700",
+    border: "border-orange-200",
+  },
+  "Already Purchased or Using Other Company Service": {
+    label: "Already Purchased or Using Other Company Service",
     bg: "bg-orange-50",
     text: "text-orange-700",
     border: "border-orange-200",
@@ -503,6 +509,7 @@ export default function CallLogsPage() {
               <option value="Callback">Callback</option>
               <option value="Demo Scheduled">Demo Scheduled</option>
               <option value="Not Interested">Not Interested</option>
+              <option value="Already Purchased or Using Other Company Service">Already Purchased or Using Other Company Service</option>
               <option value="Already Using">Already Using</option>
               <option value="Future Requirement">Future Requirement</option>
               <option value="Invalid">Invalid</option>

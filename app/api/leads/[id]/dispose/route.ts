@@ -69,6 +69,10 @@ export async function PATCH(
           newStatus = "invalid";
           break;
         case "Already Using":
+        case "Already Purchased":
+        case "Already Purchased or Using Other Company Service":
+        case "Already Purchased / Using Other Company Service":
+        case "Already Purchased / Other Company":
           newStatus = "already_using";
           break;
         case "Future Requirement":
