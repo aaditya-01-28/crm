@@ -125,45 +125,74 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      const startTime = Date.now();
+      const BATCH_SIZE = 250;
       let importedCount = 0;
-      for (let i = 0; i < newLeads.length; i++) {
-        const l = newLeads[i];
-        let assignedId: string | null = null;
-        if (roundRobinReps.length > 0) {
-          assignedId = roundRobinReps[i % roundRobinReps.length];
-        } else {
-          assignedId = defaultTargetRep;
+
+      await client.query("BEGIN");
+      try {
+        for (let b = 0; b < newLeads.length; b += BATCH_SIZE) {
+          const chunk = newLeads.slice(b, b + BATCH_SIZE);
+          const valueClauses: string[] = [];
+          const params: any[] = [tenantId];
+          let paramIdx = 2;
+
+          for (let i = 0; i < chunk.length; i++) {
+            const globalIdx = b + i;
+            const l = chunk[i];
+            let assignedId: string | null = null;
+            if (roundRobinReps.length > 0) {
+              assignedId = roundRobinReps[globalIdx % roundRobinReps.length];
+            } else {
+              assignedId = defaultTargetRep;
+            }
+
+            valueClauses.push(
+              `($1, $${paramIdx}, $${paramIdx + 1}, $${paramIdx + 2}, $${paramIdx + 3}, $${paramIdx + 4}, $${paramIdx + 5}, $${paramIdx + 6}, $${paramIdx + 7}, $${paramIdx + 8}, 'new', NOW(), NOW())`
+            );
+
+            params.push(
+              assignedId,
+              assignedId,
+              assignedId ? new Date() : null,
+              l.phone,
+              l.name && l.name.trim() !== "" ? l.name.trim() : null,
+              l.company && l.company.trim() !== "" ? l.company.trim() : null,
+              l.vertical && l.vertical.trim() !== "" ? l.vertical.trim() : null,
+              l.service && l.service.trim() !== "" ? l.service.trim() : null,
+              l.source || "Vendor Cold List"
+            );
+            paramIdx += 9;
+          }
+
+          const insertSql = `
+            INSERT INTO leads (
+              tenant_id, assigned_rep_id, first_assigned_rep_id, first_assigned_at,
+              phone_number, contact_name, company_name, business_vertical,
+              service_type, source, status, created_at, updated_at
+            )
+            VALUES ${valueClauses.join(", ")}
+            ON CONFLICT DO NOTHING
+          `;
+
+          const res = await client.query(insertSql, params);
+          importedCount += res.rowCount || chunk.length;
         }
 
-        await client.query(
-          `INSERT INTO leads (
-             tenant_id, assigned_rep_id, first_assigned_rep_id, first_assigned_at,
-             phone_number, contact_name, company_name, business_vertical,
-             service_type, source, status, created_at, updated_at
-           )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'new', NOW(), NOW())
-           ON CONFLICT DO NOTHING`,
-          [
-            tenantId,
-            assignedId,
-            assignedId,
-            assignedId ? new Date() : null,
-            l.phone,
-            l.name && l.name.trim() !== "" ? l.name.trim() : null,
-            l.company && l.company.trim() !== "" ? l.company.trim() : null,
-            l.vertical && l.vertical.trim() !== "" ? l.vertical.trim() : null,
-            l.service && l.service.trim() !== "" ? l.service.trim() : null,
-            l.source || "Vendor Cold List",
-          ]
-        );
-        importedCount++;
+        await client.query("COMMIT");
+      } catch (insertErr) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw insertErr;
       }
+
+      const durationMs = Date.now() - startTime;
 
       return NextResponse.json({
         imported: importedCount,
         duplicates: existingPhones.size + batchDuplicatesCount,
         invalid: leads.length - validLeads.length,
         total: leads.length,
+        durationMs,
       });
     });
   } catch (error) {
