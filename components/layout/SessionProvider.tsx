@@ -61,3 +61,9 @@ export function useCanAssignLeads(): boolean {
   const { role } = useSession();
   return isManagerOrAdmin(role);
 }
+
+/** Returns true if the current user is Level 2 (Manager) or Level 3 (Admin) */
+export function useIsManagerOrAdmin(): boolean {
+  const { role } = useSession();
+  return isManagerOrAdmin(role);
+}

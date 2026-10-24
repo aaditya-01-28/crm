@@ -231,28 +231,58 @@ export async function POST(request: NextRequest) {
 
       let primaryDeal = null;
       for (const item of commercials) {
-        const itemRes = await client.query(
-          `INSERT INTO deals (
-             tenant_id, lead_id, rep_id, service_type, quantity, quoted_price,
-             expected_closing_date, stage, closing_notes, created_at, updated_at
-           )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
-           RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
-                     service_type as "serviceType", quantity, quoted_price as "quotedPrice",
-                     expected_closing_date as "expectedClosingDate", stage, closing_notes as "closingNotes",
-                     created_at as "createdAt", updated_at as "updatedAt"`,
-          [
-            tenantId,
-            leadId,
-            repId,
-            item.serviceType,
-            parseInt(item.quantity) || 0,
-            parseFloat(item.quotedPrice) || 0,
-            item.expectedClosingDate ? new Date(item.expectedClosingDate) : null,
-            item.stage || "quote_sent",
-            item.closingNotes || null,
-          ]
+        // Check if an unpriced or placeholder deal already exists for this lead to prevent duplicate cards
+        const existingZeroDeal = await client.query(
+          `SELECT id FROM deals WHERE lead_id = $1 AND tenant_id = $2 AND quoted_price = 0 LIMIT 1`,
+          [leadId, tenantId]
         );
+
+        let itemRes;
+        if (existingZeroDeal.rows.length > 0) {
+          itemRes = await client.query(
+            `UPDATE deals
+             SET rep_id = $1, service_type = $2, quantity = $3, quoted_price = $4,
+                 expected_closing_date = $5, stage = $6, closing_notes = $7, updated_at = NOW()
+             WHERE id = $8
+             RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
+                       service_type as "serviceType", quantity, quoted_price as "quotedPrice",
+                       expected_closing_date as "expectedClosingDate", stage, closing_notes as "closingNotes",
+                       created_at as "createdAt", updated_at as "updatedAt"`,
+            [
+              repId,
+              item.serviceType,
+              parseInt(item.quantity) || 0,
+              parseFloat(item.quotedPrice) || 0,
+              item.expectedClosingDate ? new Date(item.expectedClosingDate) : null,
+              item.stage || "quote_sent",
+              item.closingNotes || null,
+              existingZeroDeal.rows[0].id,
+            ]
+          );
+        } else {
+          itemRes = await client.query(
+            `INSERT INTO deals (
+               tenant_id, lead_id, rep_id, service_type, quantity, quoted_price,
+               expected_closing_date, stage, closing_notes, created_at, updated_at
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+             RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
+                       service_type as "serviceType", quantity, quoted_price as "quotedPrice",
+                       expected_closing_date as "expectedClosingDate", stage, closing_notes as "closingNotes",
+                       created_at as "createdAt", updated_at as "updatedAt"`,
+            [
+              tenantId,
+              leadId,
+              repId,
+              item.serviceType,
+              parseInt(item.quantity) || 0,
+              parseFloat(item.quotedPrice) || 0,
+              item.expectedClosingDate ? new Date(item.expectedClosingDate) : null,
+              item.stage || "quote_sent",
+              item.closingNotes || null,
+            ]
+          );
+        }
         if (!primaryDeal) {
           primaryDeal = itemRes.rows[0];
         }

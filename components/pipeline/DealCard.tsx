@@ -1,7 +1,7 @@
 "use client";
 
 import { formatCurrency, cn } from "@/lib/utils";
-import { Calendar, Tag, User } from "lucide-react";
+import { Calendar, Tag, User, Trash2, Edit3 } from "lucide-react";
 
 interface DealCardProps {
   deal: {
@@ -19,10 +19,20 @@ interface DealCardProps {
     rep?: { fullName: string } | null;
   };
   isDragging?: boolean;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  onDelete?: (dealId: string) => void;
   onClick: () => void;
 }
 
-export function DealCard({ deal, isDragging, onClick }: DealCardProps) {
+export function DealCard({
+  deal,
+  isDragging,
+  canEdit,
+  canDelete,
+  onDelete,
+  onClick,
+}: DealCardProps) {
   const companyTitle =
     deal.lead?.companyName ||
     deal.lead?.contactName ||
@@ -33,20 +43,47 @@ export function DealCard({ deal, isDragging, onClick }: DealCardProps) {
     <div
       onClick={onClick}
       className={cn(
-        "bg-white rounded-xl border border-slate-200/90 p-3.5 cursor-pointer hover:border-slate-300 hover:shadow-xs transition-all select-none space-y-2.5",
+        "group relative bg-white rounded-xl border border-slate-200/90 p-3.5 cursor-pointer hover:border-slate-300 hover:shadow-xs transition-all select-none space-y-2.5",
         isDragging && "shadow-xl rotate-1 border-emerald-400 bg-white ring-2 ring-emerald-500/20"
       )}
     >
-      {/* Company / Contact Header */}
-      <div>
-        <p className="font-semibold text-sm text-slate-800 leading-snug truncate">
-          {companyTitle}
-        </p>
-        {deal.lead?.contactName && deal.lead?.companyName && (
-          <p className="text-xs text-slate-500 mt-0.5 truncate">
-            {deal.lead.contactName}
+      {/* Top action row: Company title & Level 2/3 quick actions */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-sm text-slate-800 leading-snug truncate">
+            {companyTitle}
           </p>
-        )}
+          {deal.lead?.contactName && deal.lead?.companyName && (
+            <p className="text-xs text-slate-500 mt-0.5 truncate">
+              {deal.lead.contactName}
+            </p>
+          )}
+        </div>
+
+        {/* Level 2 & Level 3 Quick Actions on hover */}
+        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          {canEdit && (
+            <span
+              className="p-1 rounded text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 transition"
+              title="Edit Deal (Level 2/3)"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+            </span>
+          )}
+          {canDelete && onDelete && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(deal.id);
+              }}
+              className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+              title="Delete Deal (Level 2/3)"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Service Tags & Vertical */}

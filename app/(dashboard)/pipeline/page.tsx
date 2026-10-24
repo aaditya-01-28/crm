@@ -8,11 +8,12 @@ import {
   Draggable,
   type DropResult,
 } from "@hello-pangea/dnd";
-import { KanbanSquare, Plus, RefreshCw, Trophy, XCircle } from "lucide-react";
+import { KanbanSquare, Plus, RefreshCw, Trophy, XCircle, Trash2 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { DealCard } from "@/components/pipeline/DealCard";
 import { DealModal } from "@/components/pipeline/DealModal";
 import { PaymentModal } from "@/components/payments/PaymentModal";
+import { useIsManagerOrAdmin } from "@/components/layout/SessionProvider";
 import { toast } from "sonner";
 
 const COLUMNS = [
@@ -92,13 +93,36 @@ async function fetchDeals(): Promise<{ deals: Deal[] }> {
 
 export default function PipelinePage() {
   const queryClient = useQueryClient();
+  const canManageDeals = useIsManagerOrAdmin();
   const [showDealModal, setShowDealModal] = useState(false);
   const [editingDeal, setEditingDeal] = useState<Deal | null>(null);
   const [paymentDeal, setPaymentDeal] = useState<Deal | null>(null);
+  const [dealToDelete, setDealToDelete] = useState<Deal | null>(null);
 
   const { data, isLoading, isRefetching, refetch } = useQuery({
     queryKey: ["deals"],
     queryFn: fetchDeals,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (dealId: string) => {
+      const res = await fetch(`/api/deals/${dealId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delete deal");
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["deals"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["leads-directory"] });
+      toast.success("Deal deleted from pipeline ✅");
+      setDealToDelete(null);
+    },
+    onError: (err: any) => {
+      toast.error(err.message || "Failed to delete deal");
+    },
   });
 
   const stageMutation = useMutation({
@@ -318,6 +342,9 @@ export default function PipelinePage() {
                                 <DealCard
                                   deal={deal}
                                   isDragging={snapshot.isDragging}
+                                  canEdit={canManageDeals}
+                                  canDelete={canManageDeals}
+                                  onDelete={() => setDealToDelete(deal)}
                                   onClick={() => {
                                     setEditingDeal(deal);
                                     setShowDealModal(true);
@@ -348,6 +375,8 @@ export default function PipelinePage() {
       {showDealModal && (
         <DealModal
           deal={editingDeal}
+          canEdit={canManageDeals}
+          canDelete={canManageDeals}
           onClose={() => setShowDealModal(false)}
           onSaved={() => {
             setShowDealModal(false);
@@ -356,6 +385,63 @@ export default function PipelinePage() {
             queryClient.invalidateQueries({ queryKey: ["leads-directory"] });
           }}
         />
+      )}
+
+      {/* Quick Delete Confirmation Dialog from Card */}
+      {dealToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-2xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-xl shadow-2xl max-w-sm w-full p-5 border border-slate-200 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-slate-900">
+                  Delete Deal from Pipeline?
+                </h4>
+                <p className="text-xs text-slate-500 mt-1">
+                  Are you sure you want to delete the deal for{" "}
+                  <strong>
+                    {dealToDelete.lead?.companyName ||
+                      dealToDelete.lead?.contactName ||
+                      "this customer"}
+                  </strong>{" "}
+                  ({formatCurrency(Number(dealToDelete.quotedPrice || 0))})?
+                  This action is permanent and will remove it from the pipeline metrics.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setDealToDelete(null)}
+                disabled={deleteMutation.isPending}
+                className="px-3.5 py-1.5 text-xs text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 font-medium transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => deleteMutation.mutate(dealToDelete.id)}
+                disabled={deleteMutation.isPending}
+                className="px-4 py-1.5 text-xs bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-semibold flex items-center gap-1.5 shadow-xs transition"
+              >
+                {deleteMutation.isPending ? (
+                  <>
+                    <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Yes, Delete Deal
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Payment Modal (triggered when deal moves to closed_won or payment_pending) */}

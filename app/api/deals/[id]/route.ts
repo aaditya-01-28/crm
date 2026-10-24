@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { isManagerOrAdmin } from "@/lib/rbac";
 
 export async function PATCH(
   request: NextRequest,
@@ -10,6 +11,7 @@ export async function PATCH(
   const session = await getSession();
   const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
   const repId = request.headers.get("x-user-id") || session?.sub || "";
+  const role = request.headers.get("x-user-role") || session?.role || "";
 
   if (!tenantId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -18,6 +20,21 @@ export async function PATCH(
   try {
     const body = await request.json();
     const { stage, closingNotes, quotedPrice, expectedClosingDate, serviceType, quantity } = body;
+
+    // Commercial and financial detail modifications are restricted to Level 2 (Manager) and Level 3 (Admin)
+    const isCommercialEdit =
+      quotedPrice !== undefined ||
+      quantity !== undefined ||
+      serviceType !== undefined ||
+      body.contactName !== undefined ||
+      body.companyName !== undefined;
+
+    if (isCommercialEdit && !isManagerOrAdmin(role)) {
+      return NextResponse.json(
+        { error: "Forbidden: Only Level 2 (Sales Manager) and Level 3 (Super Admin) can edit deal commercial details" },
+        { status: 403 }
+      );
+    }
 
     return await withClient(async (client) => {
       const dealRes = await client.query(
@@ -52,6 +69,34 @@ export async function PATCH(
       );
 
       const updated = updateRes.rows[0];
+
+      // Update lead metadata/contact/company if edited by manager/admin
+      if (body.contactName || body.companyName || body.serviceType || body.address) {
+        const leadRes = await client.query(
+          "SELECT id, custom_metadata FROM leads WHERE id = $1 AND tenant_id = $2",
+          [deal.lead_id, tenantId]
+        );
+        if (leadRes.rows.length > 0) {
+          const oldMeta = (leadRes.rows[0].custom_metadata as Record<string, any>) || {};
+          const updatedMeta = { ...oldMeta, ...(body.address ? { address: body.address } : {}) };
+          await client.query(
+            `UPDATE leads
+             SET contact_name = COALESCE($1, contact_name),
+                 company_name = COALESCE($2, company_name),
+                 service_type = COALESCE($3, service_type),
+                 custom_metadata = $4,
+                 updated_at = NOW()
+             WHERE id = $5`,
+            [
+              body.contactName || null,
+              body.companyName || null,
+              body.serviceType || null,
+              JSON.stringify(updatedMeta),
+              deal.lead_id,
+            ]
+          );
+        }
+      }
 
       // Update lead status according to deal stage
       if (stage === "closed_won") {
@@ -109,32 +154,59 @@ export async function PATCH(
 
       const wonDetails = body.wonDetails || body;
 
-      // Closed Won payment dossier record
+      // Closed Won payment dossier record (upsert payment to keep in sync)
       if (newStage === "closed_won" && (wonDetails.userId || wonDetails.panelUserId)) {
-        await client.query(
-          `INSERT INTO payments (
-             tenant_id, deal_id, lead_id, rep_id, user_type, panel_user_id,
-             credits_to_add, original_amount, tax_amount, tds_amount, final_amount,
-             payment_mode, gstin, screenshot_url, ops_approval_status, credits_provisioned, created_at
-           )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending_verification', false, NOW())`,
-          [
-            tenantId,
-            id,
-            deal.lead_id,
-            session?.sub || repId,
-            wonDetails.userType || "new_user",
-            wonDetails.userId || wonDetails.panelUserId || "PORTAL_USER",
-            parseInt(wonDetails.creditsToAdd || newQuantity) || 0,
-            parseFloat(wonDetails.originalAmount || newPrice) || 0,
-            parseFloat(wonDetails.taxAmount || 0) || 0,
-            parseFloat(wonDetails.tds || 0) || 0,
-            parseFloat(wonDetails.finalAmount || newPrice) || 0,
-            wonDetails.paymentMode || "Bank Transfer",
-            wonDetails.gstinNumber || null,
-            wonDetails.paymentScreenshotUrl || "https://placeholder-payment-ref",
-          ]
+        const existingPay = await client.query(
+          "SELECT id FROM payments WHERE deal_id = $1 AND tenant_id = $2 LIMIT 1",
+          [id, tenantId]
         );
+        if (existingPay.rows.length > 0) {
+          await client.query(
+            `UPDATE payments
+             SET user_type = $1, panel_user_id = $2, credits_to_add = $3,
+                 original_amount = $4, tax_amount = $5, tds_amount = $6, final_amount = $7,
+                 payment_mode = $8, gstin = $9, screenshot_url = $10, updated_at = NOW()
+             WHERE id = $11`,
+            [
+              wonDetails.userType || "new_user",
+              wonDetails.userId || wonDetails.panelUserId || "PORTAL_USER",
+              parseInt(wonDetails.creditsToAdd || newQuantity) || 0,
+              parseFloat(wonDetails.originalAmount || newPrice) || 0,
+              parseFloat(wonDetails.taxAmount || 0) || 0,
+              parseFloat(wonDetails.tds || 0) || 0,
+              parseFloat(wonDetails.finalAmount || newPrice) || 0,
+              wonDetails.paymentMode || "Bank Transfer",
+              wonDetails.gstinNumber || null,
+              wonDetails.paymentScreenshotUrl || "https://placeholder-payment-ref",
+              existingPay.rows[0].id,
+            ]
+          );
+        } else {
+          await client.query(
+            `INSERT INTO payments (
+               tenant_id, deal_id, lead_id, rep_id, user_type, panel_user_id,
+               credits_to_add, original_amount, tax_amount, tds_amount, final_amount,
+               payment_mode, gstin, screenshot_url, ops_approval_status, credits_provisioned, created_at
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending_verification', false, NOW())`,
+            [
+              tenantId,
+              id,
+              deal.lead_id,
+              session?.sub || repId,
+              wonDetails.userType || "new_user",
+              wonDetails.userId || wonDetails.panelUserId || "PORTAL_USER",
+              parseInt(wonDetails.creditsToAdd || newQuantity) || 0,
+              parseFloat(wonDetails.originalAmount || newPrice) || 0,
+              parseFloat(wonDetails.taxAmount || 0) || 0,
+              parseFloat(wonDetails.tds || 0) || 0,
+              parseFloat(wonDetails.finalAmount || newPrice) || 0,
+              wonDetails.paymentMode || "Bank Transfer",
+              wonDetails.gstinNumber || null,
+              wonDetails.paymentScreenshotUrl || "https://placeholder-payment-ref",
+            ]
+          );
+        }
       }
 
       // Demo Scheduled calendar task
@@ -212,22 +284,44 @@ export async function DELETE(
   const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
   const role = request.headers.get("x-user-role") || session?.role || "";
 
-  if (!["super_admin", "sales_manager"].includes(role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!isManagerOrAdmin(role)) {
+    return NextResponse.json(
+      { error: "Forbidden: Only Level 2 (Sales Manager) and Level 3 (Super Admin) can delete deals from the pipeline" },
+      { status: 403 }
+    );
   }
 
   try {
     return await withClient(async (client) => {
       const dealRes = await client.query(
-        "SELECT id FROM deals WHERE id = $1 AND tenant_id = $2",
+        "SELECT id, lead_id, stage FROM deals WHERE id = $1 AND tenant_id = $2",
         [id, tenantId]
       );
       if (dealRes.rows.length === 0) {
         return NextResponse.json({ error: "Deal not found" }, { status: 404 });
       }
 
+      const deal = dealRes.rows[0];
+
+      // Delete payments and scheduled tasks referencing this deal
+      await client.query("DELETE FROM payments WHERE deal_id = $1", [id]);
       await client.query("DELETE FROM deals WHERE id = $1", [id]);
-      return NextResponse.json({ success: true });
+
+      // Check if any deals remain for this lead
+      const remainingDealsRes = await client.query(
+        "SELECT id FROM deals WHERE lead_id = $1 AND tenant_id = $2",
+        [deal.lead_id, tenantId]
+      );
+
+      // If no deals remain for this lead, reset the lead status so it doesn't resurrect deals or remain 'won'
+      if (remainingDealsRes.rows.length === 0) {
+        await client.query(
+          "UPDATE leads SET status = 'contact_in_future', updated_at = NOW() WHERE id = $1 AND status IN ('won', 'closed_won', 'lost', 'closed_lost', 'deal_created')",
+          [deal.lead_id]
+        );
+      }
+
+      return NextResponse.json({ success: true, message: "Deal deleted successfully" });
     });
   } catch (error) {
     console.error("[DEALS DELETE]", error);
