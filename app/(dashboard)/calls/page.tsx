@@ -36,6 +36,7 @@ import {
 } from "@/lib/utils";
 import { useSession } from "@/components/layout/SessionProvider";
 import { LeadDetailModal } from "@/components/leads/LeadDetailModal";
+import { AudioRecordingPlayer } from "@/components/calls/AudioRecordingPlayer";
 import { toast } from "sonner";
 
 interface CallLogItem {
@@ -45,6 +46,7 @@ interface CallLogItem {
   disposition: string;
   durationSeconds: number;
   remark: string | null;
+  recordingUrl?: string | null;
   callTimestamp: string;
   lead: {
     id: string;
@@ -156,6 +158,7 @@ export default function CallLogsPage() {
   const [selectedDisposition, setSelectedDisposition] = useState("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [recordedOnly, setRecordedOnly] = useState(false);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [showAndroidModal, setShowAndroidModal] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
@@ -239,6 +242,7 @@ export default function CallLogsPage() {
   });
 
   const calls = data?.calls || [];
+  const displayedCalls = recordedOnly ? calls.filter((c) => Boolean(c.recordingUrl)) : calls;
   const summary = data?.summary || {
     totalCalls: 0,
     connectedCalls: 0,
@@ -560,6 +564,29 @@ export default function CallLogsPage() {
             </div>
           )}
 
+          <button
+            type="button"
+            onClick={() => setRecordedOnly(!recordedOnly)}
+            className={cn(
+              "px-2.5 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer",
+              recordedOnly
+                ? "bg-emerald-600 text-white border-emerald-600 shadow-2xs"
+                : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+            )}
+          >
+            <span>🎙️ With Call Recording</span>
+            {calls.filter((c) => Boolean(c.recordingUrl)).length > 0 && (
+              <span
+                className={cn(
+                  "px-1.5 py-0.2 rounded-full text-[10px] font-bold",
+                  recordedOnly ? "bg-emerald-800 text-white" : "bg-emerald-100 text-emerald-800"
+                )}
+              >
+                {calls.filter((c) => Boolean(c.recordingUrl)).length}
+              </span>
+            )}
+          </button>
+
           <div className="ml-auto text-gray-400 font-medium">
             Showing {calls.length} of {pagination.total} calls
           </div>
@@ -594,12 +621,13 @@ export default function CallLogsPage() {
                   <th className="py-3.5 px-4">Representative</th>
                   <th className="py-3.5 px-4 text-center">Status / Outcome</th>
                   <th className="py-3.5 px-4 text-center">Talk Duration</th>
+                  <th className="py-3.5 px-4">Call Audio / QA Audit</th>
                   <th className="py-3.5 px-4">Notes & Remarks</th>
                   <th className="py-3.5 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-gray-700">
-                {calls.map((call) => {
+                {displayedCalls.map((call) => {
                   const badge = DISPOSITION_BADGES[call.disposition] || {
                     label: call.disposition,
                     bg: "bg-gray-50",
@@ -691,6 +719,21 @@ export default function CallLogsPage() {
                           </div>
                         ) : (
                           <span className="text-gray-400 font-mono">0s</span>
+                        )}
+                      </td>
+
+                      {/* Call Audio / QA Audit */}
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        {call.recordingUrl ? (
+                          <AudioRecordingPlayer
+                            recordingUrl={call.recordingUrl}
+                            durationSeconds={call.durationSeconds}
+                          />
+                        ) : (
+                          <span className="text-[11px] text-gray-400 italic flex items-center gap-1">
+                            <PhoneOff className="w-3 h-3 text-gray-300" />
+                            No recording
+                          </span>
                         )}
                       </td>
 

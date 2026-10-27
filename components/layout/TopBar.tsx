@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LogOut, Menu } from "lucide-react";
+import { LogOut, Menu, Smartphone } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import type { JWTPayload } from "@/lib/auth";
 import { useSidebar } from "./SidebarContext";
 
@@ -24,6 +26,7 @@ const ROLE_COLORS: Record<string, string> = {
 export default function TopBar({ user }: { user: JWTPayload }) {
   const router = useRouter();
   const { toggleMobile } = useSidebar();
+  const [repStatus, setRepStatus] = useState<"available" | "in_call" | "break" | "wrapup">("available");
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -76,8 +79,37 @@ export default function TopBar({ user }: { user: JWTPayload }) {
         </div>
       </div>
 
-      {/* Right: user info + profile + logout */}
+      {/* Right: rep status + user info + profile + logout */}
       <div className="flex items-center gap-2 sm:gap-3">
+        {/* Representative Calling Availability Dropdown */}
+        <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 shadow-2xs">
+          <span
+            className={cn(
+              "w-2 h-2 rounded-full",
+              repStatus === "available"
+                ? "bg-emerald-500 animate-pulse"
+                : repStatus === "in_call"
+                ? "bg-blue-500 animate-pulse"
+                : repStatus === "break"
+                ? "bg-amber-500"
+                : "bg-purple-500"
+            )}
+          />
+          <select
+            value={repStatus}
+            onChange={(e) => {
+              const newStatus = e.target.value as any;
+              setRepStatus(newStatus);
+              toast.info(`Status updated to: ${newStatus.toUpperCase()}`);
+            }}
+            className="bg-transparent outline-none cursor-pointer text-xs font-semibold text-slate-800"
+          >
+            <option value="available">Ready to Call</option>
+            <option value="in_call">In Live Call</option>
+            <option value="wrapup">Call Wrap-up</option>
+            <option value="break">Short Break</option>
+          </select>
+        </div>
         <Link
           href="/profile"
           className="flex items-center gap-2 hover:bg-gray-50 px-2 py-1 rounded-xl transition group"

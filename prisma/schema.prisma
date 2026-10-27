@@ -93,6 +93,7 @@ model CallLog {
   disposition     String       @db.VarChar(50)
   durationSeconds Int          @default(0) @map("duration_seconds")
   remark          String?
+  recordingUrl    String?      @map("recording_url")
   callTimestamp   DateTime     @default(now()) @map("call_timestamp") @db.Timestamptz(6)
   lead            Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
   rep             User         @relation(fields: [repId], references: [id])

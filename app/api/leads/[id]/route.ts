@@ -48,6 +48,7 @@ export async function GET(
       const callLogsRes = await client.query(
         `SELECT c.id, c.tenant_id as "tenantId", c.lead_id as "leadId", c.rep_id as "repId",
                 c.disposition, c.duration_seconds as "durationSeconds", c.remark,
+                c.recording_url as "recordingUrl",
                 c.call_timestamp as "callTimestamp",
                 u.full_name as "repFullName", u.email as "repEmail"
          FROM call_logs c
@@ -65,6 +66,7 @@ export async function GET(
         disposition: c.disposition,
         durationSeconds: c.durationSeconds,
         remark: c.remark,
+        recordingUrl: c.recordingUrl || null,
         callTimestamp: c.callTimestamp,
         rep: { fullName: c.repFullName, email: c.repEmail },
       }));

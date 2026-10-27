@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
 
   try {
     return await withClient(async (client) => {
+      await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
       const conditions: string[] = ["c.tenant_id = $1"];
       const params: any[] = [tenantId];
 
@@ -76,7 +77,7 @@ export async function GET(request: NextRequest) {
 
       const callsRes = await client.query(
         `SELECT c.id, c.tenant_id as "tenantId", c.lead_id as "leadId", c.rep_id as "repId",
-                c.disposition, c.duration_seconds as "durationSeconds", c.remark,
+                c.disposition, c.duration_seconds as "durationSeconds", c.remark, c.recording_url as "recordingUrl",
                 c.call_timestamp as "callTimestamp",
                 l.id as "lead_id", l.phone_number as "lead_phoneNumber", l.contact_name as "lead_contactName",
                 l.company_name as "lead_companyName", l.business_vertical as "lead_businessVertical",
@@ -115,6 +116,7 @@ export async function GET(request: NextRequest) {
         disposition: r.disposition,
         durationSeconds: r.durationSeconds,
         remark: r.remark,
+        recordingUrl: r.recordingUrl || null,
         callTimestamp: r.callTimestamp,
         lead: r.lead_id
           ? {
@@ -172,6 +174,7 @@ export async function POST(request: NextRequest) {
     const items = Array.isArray(body.calls) ? body.calls : [body];
 
     return await withClient(async (client) => {
+      await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
       const createdLogs = [];
 
       for (const item of items) {
@@ -181,6 +184,7 @@ export async function POST(request: NextRequest) {
           typeof item.durationSeconds === "number" ? Math.max(0, item.durationSeconds) : 0;
         const disposition = item.disposition || (durationSeconds > 0 ? "Connected" : "RNR");
         const remark = item.remark || null;
+        const recordingUrl = item.recordingUrl || item.recording_url || null;
         const callTimestamp = item.callTimestamp ? new Date(item.callTimestamp) : new Date();
 
         if (!targetLeadId && phoneNumber) {
@@ -210,11 +214,12 @@ export async function POST(request: NextRequest) {
         }
 
         const logRes = await client.query(
-          `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, call_timestamp)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
+          `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, call_timestamp)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
-                     disposition, duration_seconds as "durationSeconds", remark, call_timestamp as "callTimestamp"`,
-          [tenantId, targetLeadId, repId, disposition, durationSeconds, remark, callTimestamp]
+                     disposition, duration_seconds as "durationSeconds", remark,
+                     recording_url as "recordingUrl", call_timestamp as "callTimestamp"`,
+          [tenantId, targetLeadId, repId, disposition, durationSeconds, remark, recordingUrl, callTimestamp]
         );
 
         if (disposition === "RNR") {

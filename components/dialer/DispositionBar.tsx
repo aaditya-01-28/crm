@@ -1,7 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { X, Clock, Video, FileText } from "lucide-react";
+import {
+  Clock,
+  Video,
+  FileText,
+  X,
+  CheckCircle,
+  CalendarPlus,
+  PhoneOff,
+  Sparkles,
+  Check,
+  Calendar,
+  AlertCircle,
+} from "lucide-react";
 
 type DispositionType =
   | "RNR"
@@ -28,23 +40,15 @@ interface DispositionBarProps {
   ) => void;
   disabled?: boolean;
   leadId: string;
+  quickNote?: string;
 }
 
-const DISPOSITIONS: { label: string; type: DispositionType; color: string }[] =
-  [
-    { label: "RNR", type: "RNR", color: "bg-yellow-100 text-yellow-800 hover:bg-yellow-200 border-yellow-200" },
-    { label: "Connected", type: "Connected", color: "bg-blue-100 text-blue-800 hover:bg-blue-200 border-blue-200" },
-    { label: "Callback", type: "Callback", color: "bg-indigo-100 text-indigo-800 hover:bg-indigo-200 border-indigo-200" },
-    { label: "Demo Scheduled", type: "Demo Scheduled", color: "bg-purple-100 text-purple-800 hover:bg-purple-200 border-purple-200" },
-    { label: "Demo Done", type: "Demo Done", color: "bg-teal-100 text-teal-800 hover:bg-teal-200 border-teal-200" },
-    { label: "Not Interested", type: "Not Interested", color: "bg-red-100 text-red-800 hover:bg-red-200 border-red-200" },
-    { label: "Already Using Our Service", type: "Already Using Our Service", color: "bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border-emerald-200" },
-    { label: "Already Purchased / Other Company", type: "Already Purchased or Using Other Company Service", color: "bg-orange-100 text-orange-800 hover:bg-orange-200 border-orange-200" },
-    { label: "Future Requirement", type: "Future Requirement", color: "bg-sky-100 text-sky-800 hover:bg-sky-200 border-sky-200" },
-    { label: "Invalid", type: "Invalid", color: "bg-gray-100 text-gray-600 hover:bg-gray-200 border-gray-200" },
-  ];
-
-export function DispositionBar({ onDispose, disabled }: DispositionBarProps) {
+export function DispositionBar({
+  onDispose,
+  disabled,
+  leadId,
+  quickNote = "",
+}: DispositionBarProps) {
   const [modal, setModal] = useState<"callback" | "demo" | null>(null);
   const [remark, setRemark] = useState("");
   const [callbackDatetime, setCallbackDatetime] = useState("");
@@ -54,17 +58,20 @@ export function DispositionBar({ onDispose, disabled }: DispositionBarProps) {
 
   function handleClick(type: DispositionType) {
     if (type === "Callback") {
+      setRemark(quickNote);
       setModal("callback");
     } else if (type === "Demo Scheduled") {
+      setRemark(quickNote);
       setModal("demo");
     } else {
-      onDispose(type);
+      const extra = quickNote.trim() ? { remark: quickNote.trim() } : undefined;
+      onDispose(type, extra);
     }
   }
 
   function submitCallback() {
     onDispose("Callback", {
-      remark,
+      remark: [quickNote.trim(), remark.trim()].filter(Boolean).join(" • ") || undefined,
       callbackDatetime: callbackDatetime || undefined,
     });
     closeModal();
@@ -72,7 +79,7 @@ export function DispositionBar({ onDispose, disabled }: DispositionBarProps) {
 
   function submitDemo() {
     onDispose("Demo Scheduled", {
-      remark,
+      remark: [quickNote.trim(), remark.trim()].filter(Boolean).join(" • ") || undefined,
       demoDatetime: demoDatetime || undefined,
       decisionMakerName: decisionMakerName || undefined,
       meetingLink: meetingLink || undefined,
@@ -89,185 +96,340 @@ export function DispositionBar({ onDispose, disabled }: DispositionBarProps) {
     setMeetingLink("");
   }
 
+  function setPresetTime(hoursFromNow: number) {
+    const d = new Date();
+    d.setHours(d.getHours() + hoursFromNow);
+    d.setMinutes(0, 0, 0);
+    const isoLocal = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+      .toISOString()
+      .slice(0, 16);
+    if (modal === "callback") setCallbackDatetime(isoLocal);
+    if (modal === "demo") setDemoDatetime(isoLocal);
+  }
+
+  function setTomorrowTime(hour: number) {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    d.setHours(hour, 0, 0, 0);
+    const isoLocal = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+      .toISOString()
+      .slice(0, 16);
+    if (modal === "callback") setCallbackDatetime(isoLocal);
+    if (modal === "demo") setDemoDatetime(isoLocal);
+  }
+
   return (
-    <>
-      {/* Disposition Buttons */}
-      <div>
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-          Log Disposition
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {DISPOSITIONS.map((d) => (
-            <button
-              key={d.type}
-              onClick={() => handleClick(d.type)}
-              disabled={disabled}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition disabled:opacity-50 disabled:cursor-not-allowed ${d.color}`}
-            >
-              {d.label}
-            </button>
-          ))}
+    <div className="space-y-3.5">
+      <div className="flex items-center justify-between">
+        <div className="text-[11px] font-bold uppercase tracking-wider text-gray-500 flex items-center gap-1.5">
+          <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+          <span>Record Call Disposition</span>
         </div>
+        <span className="text-[11px] text-gray-400">Clicking logs outcome & auto-advances</span>
       </div>
 
-      {/* Callback Modal */}
-      {modal === "callback" && (
-        <Modal title="Schedule Callback" onClose={closeModal}>
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-gray-700 flex items-center justify-between mb-1">
-                <span className="flex items-center gap-1.5">
-                  <Clock className="w-4 h-4 text-indigo-600" />
-                  Callback Date & Time
-                </span>
-                <span className="text-xs text-slate-400 font-normal">
-                  (Optional if unconfirmed)
-                </span>
-              </label>
-              <input
-                type="datetime-local"
-                value={callbackDatetime}
-                onChange={(e) => setCallbackDatetime(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Leave blank if client hasn't fixed time; it will still appear in your Follow-Up agenda so you don't miss it.
-              </p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5 mb-1">
-                <FileText className="w-4 h-4" />
-                Remark / Discussion Notes
-              </label>
-              <textarea
-                value={remark}
-                onChange={(e) => setRemark(e.target.value)}
-                placeholder="What was discussed? Next steps..."
-                rows={3}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-              />
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={closeModal}
-                className="px-4 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={submitCallback}
-                className="px-4 py-2 text-sm bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition"
-              >
-                Schedule Callback
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
+      {/* Group 1: Connected & Positive Outcomes */}
+      <div>
+        <div className="text-[10px] font-bold uppercase tracking-wider text-blue-600 mb-1.5">
+          Connected & Positive Outcomes
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => handleClick("Connected")}
+            disabled={disabled}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 transition-all flex items-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer"
+          >
+            <Check className="w-3.5 h-3.5" />
+            <span>Connected</span>
+          </button>
 
-      {/* Demo Modal */}
-      {modal === "demo" && (
-        <Modal title="Schedule Product Demo" onClose={closeModal}>
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-gray-700 flex items-center justify-between mb-1">
-                <span className="flex items-center gap-1.5">
-                  <Clock className="w-4 h-4 text-purple-600" />
-                  Demo Date & Time
-                </span>
-                <span className="text-xs text-slate-400 font-normal">
-                  (Optional if unconfirmed)
-                </span>
-              </label>
-              <input
-                type="datetime-local"
-                value={demoDatetime}
-                onChange={(e) => setDemoDatetime(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Leave blank if client hasn't confirmed time; it will still appear in your Demo reminders.
-              </p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-1 flex items-center justify-between">
-                <span>Decision Maker Name</span>
-                <span className="text-xs text-slate-400 font-normal">(Optional)</span>
-              </label>
-              <input
-                type="text"
-                value={decisionMakerName}
-                onChange={(e) => setDecisionMakerName(e.target.value)}
-                placeholder="e.g. Rajesh Kumar"
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5 mb-1">
-                <Video className="w-4 h-4" />
-                Meeting Link
-              </label>
-              <input
-                type="url"
-                value={meetingLink}
-                onChange={(e) => setMeetingLink(e.target.value)}
-                placeholder="https://meet.google.com/..."
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-1 block">
-                Notes
-              </label>
-              <textarea
-                value={remark}
-                onChange={(e) => setRemark(e.target.value)}
-                placeholder="Agenda, product interest..."
-                rows={2}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
-              />
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={closeModal}
-                className="px-4 py-2 text-sm text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={submitDemo}
-                className="px-4 py-2 text-sm bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 transition"
-              >
-                Schedule Demo
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-    </>
-  );
-}
+          <button
+            type="button"
+            onClick={() => handleClick("Demo Scheduled")}
+            disabled={disabled}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 transition-all flex items-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+            <span>Demo Scheduled ✨</span>
+          </button>
 
-function Modal({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h3 className="font-semibold text-gray-800">{title}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <X className="w-5 h-5" />
+          <button
+            type="button"
+            onClick={() => handleClick("Demo Done")}
+            disabled={disabled}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-all flex items-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer"
+          >
+            <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Demo Done</span>
           </button>
         </div>
-        <div className="p-6">{children}</div>
       </div>
+
+      {/* Group 2: Follow-Up & Pipeline Progression */}
+      <div>
+        <div className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 mb-1.5">
+          Follow-Up & Pipeline Progression
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => handleClick("Callback")}
+            disabled={disabled}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-all flex items-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer"
+          >
+            <CalendarPlus className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Callback (Schedule)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleClick("Future Requirement")}
+            disabled={disabled}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 transition-all flex items-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer"
+          >
+            <Clock className="w-3.5 h-3.5 text-sky-600" />
+            <span>Future Requirement</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Group 3: Unanswered / Disqualified */}
+      <div>
+        <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">
+          Unanswered / Disqualified
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => handleClick("RNR")}
+            disabled={disabled}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition-all flex items-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer"
+          >
+            <PhoneOff className="w-3.5 h-3.5 text-amber-600" />
+            <span>RNR (No Answer)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleClick("Not Interested")}
+            disabled={disabled}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 transition-all flex items-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5 text-rose-600" />
+            <span>Not Interested</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleClick("Already Using Our Service")}
+            disabled={disabled}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-all disabled:opacity-50 cursor-pointer"
+          >
+            Already Using
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleClick("Already Purchased or Using Other Company Service")}
+            disabled={disabled}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-orange-50 hover:bg-orange-100 text-orange-800 border border-orange-200 transition-all disabled:opacity-50 cursor-pointer"
+          >
+            Already with Competitor
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleClick("Invalid")}
+            disabled={disabled}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200 transition-all disabled:opacity-50 cursor-pointer"
+          >
+            Invalid / Wrong
+          </button>
+        </div>
+      </div>
+
+      {/* Callback Scheduling Modal */}
+      {modal === "callback" && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full border border-gray-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 bg-indigo-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CalendarPlus className="w-5 h-5 text-indigo-100" />
+                <h3 className="font-bold text-sm">Schedule Prospect Callback</h3>
+              </div>
+              <button
+                type="button"
+                onClick={closeModal}
+                className="text-white/80 hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs">
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">
+                  Callback Date & Time
+                </label>
+                <input
+                  type="datetime-local"
+                  value={callbackDatetime}
+                  onChange={(e) => setCallbackDatetime(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+
+                {/* Quick Presets */}
+                <div className="flex items-center gap-1.5 mt-2">
+                  <span className="text-[10px] text-gray-400">Quick:</span>
+                  <button
+                    type="button"
+                    onClick={() => setPresetTime(2)}
+                    className="px-2 py-0.5 rounded bg-gray-100 hover:bg-indigo-50 text-[10px] font-semibold text-gray-700 hover:text-indigo-700 border border-gray-200 transition cursor-pointer"
+                  >
+                    +2 Hours
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTomorrowTime(11)}
+                    className="px-2 py-0.5 rounded bg-gray-100 hover:bg-indigo-50 text-[10px] font-semibold text-gray-700 hover:text-indigo-700 border border-gray-200 transition cursor-pointer"
+                  >
+                    Tomorrow 11 AM
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTomorrowTime(16)}
+                    className="px-2 py-0.5 rounded bg-gray-100 hover:bg-indigo-50 text-[10px] font-semibold text-gray-700 hover:text-indigo-700 border border-gray-200 transition cursor-pointer"
+                  >
+                    Tomorrow 4 PM
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">
+                  Follow-up Notes / Reason
+                </label>
+                <textarea
+                  value={remark}
+                  onChange={(e) => setRemark(e.target.value)}
+                  rows={3}
+                  placeholder="e.g. Client requested callback after checking with decision maker..."
+                  className="w-full p-3 bg-gray-50 border border-gray-300 rounded-xl text-xs text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="px-3.5 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={submitCallback}
+                  className="px-4 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-sm transition cursor-pointer"
+                >
+                  Save Callback & Advance
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Demo Scheduling Modal */}
+      {modal === "demo" && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full border border-gray-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 bg-purple-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-purple-100" />
+                <h3 className="font-bold text-sm">Schedule Product Demo</h3>
+              </div>
+              <button
+                type="button"
+                onClick={closeModal}
+                className="text-white/80 hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs">
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">
+                  Demo Date & Time
+                </label>
+                <input
+                  type="datetime-local"
+                  value={demoDatetime}
+                  onChange={(e) => setDemoDatetime(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">
+                  Decision Maker Name & Title
+                </label>
+                <input
+                  type="text"
+                  value={decisionMakerName}
+                  onChange={(e) => setDecisionMakerName(e.target.value)}
+                  placeholder="e.g. Mr. Sharma (Managing Director)"
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">
+                  Meeting Link (Google Meet / Zoom)
+                </label>
+                <input
+                  type="url"
+                  value={meetingLink}
+                  onChange={(e) => setMeetingLink(e.target.value)}
+                  placeholder="https://meet.google.com/..."
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">
+                  Demo Discussion Points
+                </label>
+                <textarea
+                  value={remark}
+                  onChange={(e) => setRemark(e.target.value)}
+                  rows={2}
+                  placeholder="e.g. Needs WhatsApp Green Tick walkthrough & Shopify webhook demo..."
+                  className="w-full p-3 bg-gray-50 border border-gray-300 rounded-xl text-xs text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="px-3.5 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={submitDemo}
+                  className="px-4 py-2 text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-xl shadow-sm transition cursor-pointer"
+                >
+                  Schedule Demo & Advance
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

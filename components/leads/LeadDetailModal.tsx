@@ -39,6 +39,7 @@ import {
   parseServices,
 } from "@/lib/utils";
 import { MultiServiceSelect } from "@/components/common/MultiServiceSelect";
+import { AudioRecordingPlayer } from "@/components/calls/AudioRecordingPlayer";
 import { toast } from "sonner";
 import { useCanAssignLeads, useIsAdmin } from "@/components/layout/SessionProvider";
 
@@ -928,6 +929,14 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                           </p>
                         ) : (
                           <p className="text-xs text-gray-400 italic">No remark entered</p>
+                        )}
+                        {log.recordingUrl && (
+                          <div className="pt-1">
+                            <AudioRecordingPlayer
+                              recordingUrl={log.recordingUrl}
+                              durationSeconds={log.durationSeconds}
+                            />
+                          </div>
                         )}
                         <div className="flex items-center justify-between text-[11px] text-gray-500 pt-1">
                           <span>Logged by: {log.rep?.fullName || "System"}</span>

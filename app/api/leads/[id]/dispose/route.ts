@@ -25,6 +25,7 @@ export async function PATCH(
       decisionMakerName,
       meetingLink,
       durationSeconds = 0,
+      recordingUrl,
     } = body;
 
     if (!disposition) {
@@ -126,10 +127,11 @@ export async function PATCH(
       );
 
       // Create call log
+      await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
       await client.query(
-        `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, call_timestamp)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
-        [tenantId, id, repId, disposition, durationSeconds, remark || null]
+        `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, call_timestamp)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+        [tenantId, id, repId, disposition, durationSeconds, remark || null, recordingUrl || null]
       );
 
       // Create scheduled task if needed
