@@ -435,6 +435,58 @@ export async function GET(request: NextRequest) {
       const pendingPaymentsCount = pendingRes.rows[0]?.count || 0;
       const pendingPaymentsValue = Number(pendingRes.rows[0]?.value || 0);
 
+      const metrics = {
+        // Telephony
+        totalCalls,
+        uniqueDials,
+        connectedCalls,
+        connectRate,
+        talkTimeMins,
+        totalDurationSeconds,
+        dispositionMap,
+        // Queue & Agenda
+        queueRemainingCount,
+        unassignedLeadsCount,
+        todayCallbacksCount,
+        todayDemosCount,
+        overdueTasksCount,
+        todayAgenda,
+        // Pipeline & Revenue
+        activeDealsCount,
+        activePipelineValue,
+        wonDealsCount,
+        wonRevenueInPeriod,
+        verifiedRevenue,
+        winRate,
+        allDealsByStage: dealsByStageRes.rows.map((s) => ({
+          stage: s.stage,
+          count: s.count,
+          value: Number(s.value || 0),
+        })),
+        recentDeals: activeDeals.slice(0, 5),
+        // Leads & Verticals
+        totalLeadsCount,
+        leadsByStatus: leadsStatusRes.rows.map((s) => ({
+          status: s.status,
+          count: s.count,
+        })),
+        leadsByVertical: leadsVerticalRes.rows.map((v) => ({
+          vertical: v.vertical || "Unspecified",
+          count: v.count,
+        })),
+        leadsBySource: leadsSourceRes.rows.map((s) => ({
+          source: s.source,
+          count: s.count,
+        })),
+        // Team Leaderboard
+        leaderboard,
+        // Recent Activities
+        recentCalls,
+        // Accounts Ops
+        pendingPaymentsCount,
+        pendingPaymentsValue,
+      };
+
       return NextResponse.json({
         role,
         period,
@@ -442,57 +494,8 @@ export async function GET(request: NextRequest) {
         dateTo: endOfPeriod.toISOString(),
         targetUserId: targetUserId || null,
         teamMembers: teamUsers,
-        metrics: {
-          // Telephony
-          totalCalls,
-          uniqueDials,
-          connectedCalls,
-          connectRate,
-          talkTimeMins,
-          totalDurationSeconds,
-          dispositionMap,
-          // Queue & Agenda
-          queueRemainingCount,
-          unassignedLeadsCount,
-          todayCallbacksCount,
-          todayDemosCount,
-          overdueTasksCount,
-          todayAgenda,
-          // Pipeline & Revenue
-          activeDealsCount,
-          activePipelineValue,
-          wonDealsCount,
-          wonRevenueInPeriod,
-          verifiedRevenue,
-          winRate,
-          allDealsByStage: dealsByStageRes.rows.map((s) => ({
-            stage: s.stage,
-            count: s.count,
-            value: Number(s.value || 0),
-          })),
-          recentDeals: activeDeals.slice(0, 5),
-          // Leads & Verticals
-          totalLeadsCount,
-          leadsByStatus: leadsStatusRes.rows.map((s) => ({
-            status: s.status,
-            count: s.count,
-          })),
-          leadsByVertical: leadsVerticalRes.rows.map((v) => ({
-            vertical: v.vertical || "Unspecified",
-            count: v.count,
-          })),
-          leadsBySource: leadsSourceRes.rows.map((s) => ({
-            source: s.source,
-            count: s.count,
-          })),
-          // Team Leaderboard
-          leaderboard,
-          // Recent Activities
-          recentCalls,
-          // Accounts Ops
-          pendingPaymentsCount,
-          pendingPaymentsValue,
-        },
+        metrics,
+        stats: metrics,
       });
     });
   } catch (error: any) {

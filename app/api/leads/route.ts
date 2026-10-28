@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   const search = searchParams.get("search")?.trim();
   const filterRepId = searchParams.get("repId");
   const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
-  const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "25")));
+  const limit = Math.min(1000, Math.max(1, parseInt(searchParams.get("limit") || "25")));
   const queue = searchParams.get("queue") === "true";
   const allIds = searchParams.get("allIds") === "true";
 

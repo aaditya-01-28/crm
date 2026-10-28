@@ -20,7 +20,7 @@ export async function signAccessToken(payload: JWTPayload): Promise<string> {
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime(process.env.JWT_EXPIRY || "15m")
+    .setExpirationTime(process.env.JWT_EXPIRY || "365d")
     .sign(JWT_SECRET);
 }
 
@@ -28,7 +28,7 @@ export async function signRefreshToken(payload: JWTPayload): Promise<string> {
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime(process.env.JWT_REFRESH_EXPIRY || "7d")
+    .setExpirationTime(process.env.JWT_REFRESH_EXPIRY || "365d")
     .sign(JWT_SECRET);
 }
 
@@ -71,11 +71,11 @@ export function setAuthCookies(
 ) {
   response.headers.append(
     "Set-Cookie",
-    `access_token=${accessToken}; HttpOnly; Path=/; Max-Age=900; SameSite=Lax`
+    `access_token=${accessToken}; HttpOnly; Path=/; Max-Age=31536000; SameSite=Lax`
   );
   response.headers.append(
     "Set-Cookie",
-    `refresh_token=${refreshToken}; HttpOnly; Path=/; Max-Age=604800; SameSite=Lax`
+    `refresh_token=${refreshToken}; HttpOnly; Path=/; Max-Age=31536000; SameSite=Lax`
   );
 }
 
