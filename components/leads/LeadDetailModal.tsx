@@ -23,6 +23,7 @@ import {
   Languages,
   UserCheck,
   Trash2,
+  Smartphone,
 } from "lucide-react";
 import {
   buildTelLink,
@@ -141,6 +142,35 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
   const [editLanguage, setEditLanguage] = useState("");
   const [editAssignedRepId, setEditAssignedRepId] = useState("");
   const [savingInfo, setSavingInfo] = useState(false);
+  const [isDialing, setIsDialing] = useState(false);
+
+  async function handlePushToDial() {
+    if (!lead) return;
+    setIsDialing(true);
+    try {
+      const res = await fetch("/api/telephony/push-to-dial", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leadId: lead.id,
+          phoneNumber: lead.phoneNumber,
+          contactName: lead.contactName,
+          companyName: lead.companyName,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Failed to trigger Textora Dialer");
+        setIsDialing(false);
+        return;
+      }
+      toast.success(`📲 Dial command sent to your paired phone for ${lead.phoneNumber}!`);
+      setTimeout(() => setIsDialing(false), 5000);
+    } catch {
+      toast.error("Network error triggering call");
+      setIsDialing(false);
+    }
+  }
 
   useEffect(() => {
     if (lead) {
@@ -402,21 +432,35 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
 
           {/* Quick Call & WhatsApp CTA buttons */}
           <div className="flex items-center gap-3 mt-4 pt-4 border-t border-slate-800/80">
-            <a
-              href={telLink}
-              className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2.5 px-4 rounded-xl text-sm transition shadow-sm"
+            <button
+              type="button"
+              onClick={handlePushToDial}
+              disabled={isDialing}
+              className="flex-1 flex items-center justify-center gap-2 bg-[#00c853] hover:bg-[#00b248] text-white font-semibold py-2.5 px-4 rounded-xl text-sm transition shadow-sm cursor-pointer disabled:opacity-60"
+              title="Dispatches call directly to your paired Textora Dialer mobile phone"
             >
-              <Phone className="w-4 h-4" />
-              Call ({lead.phoneNumber})
-            </a>
+              <Smartphone className="w-4 h-4" />
+              <span>
+                {isDialing
+                  ? "Calling on Phone..."
+                  : `Call via Textora Dialer (${lead.phoneNumber})`}
+              </span>
+            </button>
             <a
               href={waLink}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex-1 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-semibold py-2.5 px-4 rounded-xl text-sm transition shadow-sm"
+              className="flex-1 flex items-center justify-center gap-2 bg-[#00b87c] hover:bg-[#00a36c] text-white font-semibold py-2.5 px-4 rounded-xl text-sm transition shadow-sm"
             >
               <MessageCircle className="w-4 h-4" />
               WhatsApp Pitch
+            </a>
+            <a
+              href={telLink}
+              className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+              title="Direct Softphone / tel: Link fallback"
+            >
+              <Phone className="w-4 h-4" />
             </a>
           </div>
         </div>

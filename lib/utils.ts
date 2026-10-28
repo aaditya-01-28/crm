@@ -54,29 +54,28 @@ export function buildTelLink(phone: string): string {
 }
 
 /** Textora standard WhatsApp greeting pitch */
-export const WA_PITCH = `Hello Sir 👋
+export const WA_PITCH = `Hello Sir,
 This is Aaditya from Textora Technologies Pvt Ltd.
 
-Looking to grow your business faster and reach more customers instantly? 🚀
-We offer smart messaging solutions to boost sales, engagement, and brand visibility 📈
+Looking to grow your business faster and reach more customers instantly?
+We offer smart messaging solutions to boost sales, engagement, and brand visibility.
 
-✨ Our Services:
-📲 Business WhatsApp API – Official & automated messaging
-💬 Virtual WhatsApp – Bulk & personalised campaigns
-📩 RCS Messaging – Rich, interactive messages
-🔐 Transactional SMS – OTPs, alerts & notifications
-📢 Promotional SMS – Offers, campaigns & branding
-📞 Voice SMS – Automated voice calls at scale
+Our Services:
+- Business WhatsApp API - Official & automated messaging
+- Virtual WhatsApp - Bulk & personalised campaigns
+- RCS Messaging - Rich, interactive messages
+- Transactional SMS - OTPs, alerts & notifications
+- Promotional SMS - Offers, campaigns & branding
+- Voice SMS - Automated voice calls at scale
 
-📢 Reach customers instantly | Improve response rate | Increase conversions
+Reach customers instantly | Improve response rate | Increase conversions
 
-📞 For details & free demo:
+For details & free demo:
 Aaditya
-📧 aaditya@textorasms.com
+Email: aaditya@textorasms.com
+Mobile: 9902101007
 
-📱 9902101007
-
-Reply YES to get started 👍`;
+Reply YES to get started.`;
 
 export function calculateGST(baseAmount: number): {
   base: number;

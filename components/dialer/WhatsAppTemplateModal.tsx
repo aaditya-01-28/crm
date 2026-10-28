@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { X, Send, Copy, Check, MessageSquare, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
+import { WA_PITCH } from "@/lib/utils";
 
 export interface WhatsAppTemplate {
   id: string;
@@ -13,6 +14,13 @@ export interface WhatsAppTemplate {
 }
 
 export const WA_PREAPPROVED_TEMPLATES: WhatsAppTemplate[] = [
+  {
+    id: "standard_pitch",
+    name: "Textora Services Pitch (Standard)",
+    category: "Introduction",
+    badge: "Direct Pitch",
+    text: () => WA_PITCH,
+  },
   {
     id: "brochure",
     name: "CPaaS Brochure & API Catalog",

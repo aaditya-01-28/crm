@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { KpiCard } from "./KpiCard";
 import { formatCurrency, formatDateTime, buildTelLink, buildWALink, WA_PITCH } from "@/lib/utils";
+import { toast } from "sonner";
 
 interface RepDashboardViewProps {
   metrics: any;
@@ -48,6 +49,30 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
   } = metrics || {};
 
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+
+  async function handlePushToDial(phoneNumber: string, leadId?: string, contactName?: string, companyName?: string) {
+    if (!phoneNumber) return;
+    try {
+      const res = await fetch("/api/telephony/push-to-dial", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leadId,
+          phoneNumber,
+          contactName,
+          companyName,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Failed to trigger Textora Dialer");
+        return;
+      }
+      toast.success(`📲 Calling ${phoneNumber} via your paired Textora Dialer phone!`);
+    } catch {
+      toast.error("Network error triggering call");
+    }
+  }
 
   const activePeriodLabel =
     periodLabel ||
@@ -220,14 +245,22 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
-                          <a
-                            href={telLink}
-                            onClick={(e) => e.stopPropagation()}
-                            className="p-2 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-xl transition border border-emerald-200"
-                            title="Call Lead"
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handlePushToDial(
+                                task.lead?.phoneNumber,
+                                targetLeadId,
+                                task.lead?.contactName,
+                                task.lead?.companyName
+                              );
+                            }}
+                            className="p-2 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-xl transition border border-emerald-200 cursor-pointer"
+                            title="Call Lead via Textora Dialer Phone"
                           >
                             <Phone className="w-3.5 h-3.5" />
-                          </a>
+                          </button>
                           <a
                             href={waLink}
                             target="_blank"

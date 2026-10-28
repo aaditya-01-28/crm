@@ -252,6 +252,30 @@ export default function CallLogsPage() {
   };
   const pagination = data?.pagination || { page: 1, limit: 50, total: 0, totalPages: 1 };
 
+  async function handlePushToDial(phoneNumber: string, leadId?: string, contactName?: string | null, companyName?: string | null) {
+    if (!phoneNumber) return;
+    try {
+      const res = await fetch("/api/telephony/push-to-dial", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leadId,
+          phoneNumber,
+          contactName,
+          companyName,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Failed to trigger Textora Dialer");
+        return;
+      }
+      toast.success(`📲 Calling ${phoneNumber} via your paired Textora Dialer phone!`);
+    } catch {
+      toast.error("Network error triggering call");
+    }
+  }
+
   // CSV Exporter
   function handleExportCSV() {
     if (!isManagerOrAdmin) {
@@ -751,13 +775,21 @@ export default function CallLogsPage() {
                       {/* Quick Actions */}
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-1.5">
-                          <a
-                            href={telLink}
-                            className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition"
-                            title="Call Prospect"
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handlePushToDial(
+                                call.lead.phoneNumber,
+                                call.lead.id,
+                                call.lead.contactName,
+                                call.lead.companyName
+                              )
+                            }
+                            className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition cursor-pointer"
+                            title="Call Prospect via Textora Dialer Phone"
                           >
                             <Phone className="w-4 h-4" />
-                          </a>
+                          </button>
                           <a
                             href={waLink}
                             target="_blank"
