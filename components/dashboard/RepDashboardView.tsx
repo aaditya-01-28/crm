@@ -24,7 +24,7 @@ import { toast } from "sonner";
 
 interface RepDashboardViewProps {
   metrics: any;
-  period: "today" | "yesterday" | "week" | "month" | "custom" | string;
+  period: "all" | "today" | "yesterday" | "week" | "month" | "custom" | string;
   periodLabel?: string;
 }
 
@@ -42,6 +42,9 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
     activePipelineValue = 0,
     wonDealsCount = 0,
     wonRevenueInPeriod = 0,
+    allTimeWonDealsCount = 0,
+    allTimeWonRevenue = 0,
+    recentWonDeals = [],
     dispositionMap = {},
     todayAgenda = [],
     recentDeals = [],
@@ -76,7 +79,9 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
 
   const activePeriodLabel =
     periodLabel ||
-    (period === "today"
+    (period === "all"
+      ? "All Time"
+      : period === "today"
       ? "Today"
       : period === "yesterday"
       ? "Yesterday"
@@ -158,11 +163,25 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
 
         <KpiCard
           label={`Won Revenue (${activePeriodLabel})`}
-          value={formatCurrency(wonRevenueInPeriod)}
-          subValue={`${wonDealsCount} deal(s) closed won`}
+          value={formatCurrency(
+            period === "all"
+              ? (allTimeWonRevenue > 0 ? allTimeWonRevenue : wonRevenueInPeriod)
+              : wonRevenueInPeriod
+          )}
+          subValue={
+            wonDealsCount > 0
+              ? `${wonDealsCount} deal(s) closed won`
+              : allTimeWonDealsCount > 0
+              ? `0 in period • Lifetime: ${allTimeWonDealsCount} won (${formatCurrency(allTimeWonRevenue)})`
+              : "0 closed won deals"
+          }
           icon={DollarSign}
           color="purple"
-          badge={`Pipeline in Play: ${formatCurrency(activePipelineValue)}`}
+          badge={
+            allTimeWonRevenue > 0
+              ? `All-Time Won: ${formatCurrency(allTimeWonRevenue)}`
+              : `Pipeline in Play: ${formatCurrency(activePipelineValue)}`
+          }
         />
       </div>
 
@@ -321,6 +340,112 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
                     </span>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* My Closed Won Deals */}
+          <div className="bg-white rounded-2xl border border-gray-200/90 shadow-xs p-5">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <div>
+                <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  My Closed Won Deals ({recentWonDeals.length})
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Deals you have successfully converted and closed
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  Total: {formatCurrency(allTimeWonRevenue || wonRevenueInPeriod)}
+                </span>
+                <Link
+                  href="/pipeline"
+                  className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+                >
+                  Pipeline <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+            </div>
+
+            {recentWonDeals.length === 0 ? (
+              <p className="text-xs text-gray-400 py-4 text-center">
+                No closed won deals recorded yet.
+              </p>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {recentWonDeals.map((deal: any) => {
+                  const targetLeadId = deal.leadId;
+                  const waLink = buildWALink(deal.phoneNumber, WA_PITCH);
+
+                  return (
+                    <div key={deal.id} className="py-3 first:pt-0 last:pb-0 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-xs font-bold text-gray-900 truncate">
+                            {deal.companyName || deal.contactName || "Client"}
+                          </p>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            CLOSED WON
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                          <span>{deal.serviceType || "Messaging Solution"}</span>
+                          <span>• Quoted: <strong className="text-emerald-700 font-semibold">{formatCurrency(deal.quotedPrice)}</strong></span>
+                          {deal.contactName && <span>• {deal.contactName}</span>}
+                        </p>
+                        {deal.opsApprovalStatus === "approved" ? (
+                          <span className="text-[10px] text-emerald-600 font-medium inline-flex items-center gap-1 mt-0.5">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Payment Approved ({formatCurrency(deal.paymentAmount || deal.quotedPrice)})
+                          </span>
+                        ) : deal.opsApprovalStatus === "pending_verification" ? (
+                          <span className="text-[10px] text-amber-700 font-medium inline-flex items-center gap-1 mt-0.5">
+                            🕒 Payment Pending Ops Verification ({formatCurrency(deal.paymentAmount || deal.quotedPrice)})
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {deal.phoneNumber && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handlePushToDial(
+                                  deal.phoneNumber,
+                                  targetLeadId,
+                                  deal.contactName,
+                                  deal.companyName
+                                )
+                              }
+                              className="p-1.5 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition border border-emerald-200 cursor-pointer"
+                              title="Call Lead"
+                            >
+                              <Phone className="w-3.5 h-3.5" />
+                            </button>
+                            <a
+                              href={waLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1.5 text-green-700 bg-green-50 hover:bg-green-100 rounded-lg transition border border-green-200"
+                              title="WhatsApp Pitch"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5" />
+                            </a>
+                          </>
+                        )}
+                        <Link
+                          href="/pipeline"
+                          className="text-xs font-semibold text-emerald-600 hover:text-emerald-800 px-2 py-1"
+                        >
+                          View →
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

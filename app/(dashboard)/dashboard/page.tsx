@@ -21,6 +21,9 @@ const formatLocalDate = (d: Date): string => {
 const getPresetDates = (preset: DashboardPeriod): { from: string; to: string } => {
   const now = new Date();
   const todayStr = formatLocalDate(now);
+  if (preset === "all") {
+    return { from: "2020-01-01", to: todayStr };
+  }
   if (preset === "yesterday") {
     const y = new Date();
     y.setDate(y.getDate() - 1);
@@ -111,7 +114,9 @@ export default function DashboardPage() {
 
   // Human-readable period label for widgets and KPI cards across all views
   const periodLabel =
-    period === "today"
+    period === "all"
+      ? "All Time"
+      : period === "today"
       ? "Today"
       : period === "yesterday"
       ? "Yesterday"

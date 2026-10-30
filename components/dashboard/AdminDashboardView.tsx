@@ -46,6 +46,11 @@ export function AdminDashboardView({
     activeDealsCount = 0,
     wonDealsCount = 0,
     winRate = 0,
+    allTimeWonDealsCount = 0,
+    allTimeWonRevenue = 0,
+    allTimeVerifiedRevenue = 0,
+    allTimePendingRevenue = 0,
+    recentWonDeals = [],
     totalCalls = 0,
     connectRate = 0,
     talkTimeMins = 0,
@@ -69,7 +74,9 @@ export function AdminDashboardView({
 
   const activePeriodLabel =
     periodLabel ||
-    (period === "today"
+    (period === "all"
+      ? "All Time"
+      : period === "today"
       ? "Today"
       : period === "yesterday"
       ? "Yesterday"
@@ -85,11 +92,27 @@ export function AdminDashboardView({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
           label={`Revenue Inflow (${activePeriodLabel})`}
-          value={formatCurrency(verifiedRevenue > 0 ? verifiedRevenue : wonRevenueInPeriod)}
-          subValue={`${wonDealsCount} closed deal(s) won`}
+          value={formatCurrency(
+            period === "all"
+              ? (allTimeWonRevenue > 0 ? allTimeWonRevenue : wonRevenueInPeriod)
+              : (verifiedRevenue > 0 ? verifiedRevenue : wonRevenueInPeriod)
+          )}
+          subValue={
+            wonDealsCount > 0
+              ? `${wonDealsCount} deal(s) won (${formatCurrency(wonRevenueInPeriod)})`
+              : allTimeWonDealsCount > 0
+              ? `0 in period • Lifetime: ${allTimeWonDealsCount} won (${formatCurrency(allTimeWonRevenue)})`
+              : "0 closed deal(s) won"
+          }
           icon={DollarSign}
           color="emerald"
-          badge={`Won Volume: ${formatCurrency(wonRevenueInPeriod)}`}
+          badge={
+            pendingPaymentsValue > 0
+              ? `Pending Ops: ${formatCurrency(pendingPaymentsValue)}`
+              : allTimeWonRevenue > 0
+              ? `All-Time Won: ${formatCurrency(allTimeWonRevenue)}`
+              : `Won Volume: ${formatCurrency(wonRevenueInPeriod)}`
+          }
         />
 
         <KpiCard
@@ -307,11 +330,25 @@ export function AdminDashboardView({
                       </td>
 
                       <td className="px-4 py-3.5 text-emerald-700 font-semibold">
-                        {rep.wonDeals}
+                        <div>
+                          <span>{rep.wonDeals}</span>
+                          {rep.allTimeWonDeals > rep.wonDeals && (
+                            <span className="text-[10px] text-gray-400 block font-normal">
+                              ({rep.allTimeWonDeals} all-time)
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       <td className="px-5 py-3.5 font-bold text-gray-900">
-                        {formatCurrency(rep.wonRevenue)}
+                        <div>
+                          <span>{formatCurrency(rep.wonRevenue)}</span>
+                          {rep.allTimeWonRevenue > rep.wonRevenue && (
+                            <span className="text-[10px] text-gray-400 block font-normal">
+                              ({formatCurrency(rep.allTimeWonRevenue)} all-time)
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       <td className="px-4 py-3.5 text-right">
@@ -337,6 +374,108 @@ export function AdminDashboardView({
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* 💰 Closed Won Deals & Real Inflow Directory */}
+      <div className="bg-white rounded-2xl border border-gray-200/90 shadow-xs overflow-hidden">
+        <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+              Real Closed Won Deals & Revenue
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Verified closed-won business and associated collections from sales conversions
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+              Total Won: {allTimeWonDealsCount} deals ({formatCurrency(allTimeWonRevenue)})
+            </span>
+            <Link
+              href="/pipeline"
+              className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+            >
+              Pipeline Kanban <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+        </div>
+
+        {recentWonDeals.length === 0 ? (
+          <div className="text-center py-10 px-4">
+            <p className="text-xs text-gray-400">No closed won deals recorded yet.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 font-semibold uppercase tracking-wider">
+                <tr>
+                  <th className="px-5 py-3">Client / Company</th>
+                  <th className="px-4 py-3">Service Quoted</th>
+                  <th className="px-4 py-3">Deal Value</th>
+                  <th className="px-4 py-3">Payment & Ops Status</th>
+                  <th className="px-4 py-3">Sales Rep</th>
+                  <th className="px-4 py-3">Closed Date</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {recentWonDeals.map((deal: any) => (
+                  <tr key={deal.id} className="hover:bg-gray-50/80 transition">
+                    <td className="px-5 py-3.5">
+                      <div>
+                        <span className="font-bold text-gray-900 block">{deal.companyName || deal.contactName || "Client"}</span>
+                        {deal.contactName && deal.companyName && (
+                          <span className="text-[11px] text-gray-500 block">{deal.contactName} • {deal.phoneNumber}</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5 text-gray-700 font-medium">
+                      {deal.serviceType || "Messaging Solution"}
+                    </td>
+                    <td className="px-4 py-3.5 font-bold text-emerald-700">
+                      {formatCurrency(deal.quotedPrice)}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      {deal.opsApprovalStatus === "approved" ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <CheckCircle2 className="w-3 h-3" />
+                          Approved ({formatCurrency(deal.paymentAmount || deal.quotedPrice)})
+                        </span>
+                      ) : deal.opsApprovalStatus === "pending_verification" ? (
+                        <Link
+                          href="/payments"
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition"
+                          title="Click to review in Ops Verification Queue"
+                        >
+                          <ShieldAlert className="w-3 h-3 text-amber-600" />
+                          Pending Ops ({formatCurrency(deal.paymentAmount || deal.quotedPrice)})
+                        </Link>
+                      ) : (
+                        <span className="text-[11px] text-gray-400">Awaiting Invoice</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3.5 text-gray-800 font-medium">
+                      {deal.repFullName}
+                    </td>
+                    <td className="px-4 py-3.5 text-gray-500">
+                      {deal.closedAt ? formatDateTime(deal.closedAt) : "Recently"}
+                    </td>
+                    <td className="px-4 py-3.5 text-right">
+                      <Link
+                        href="/pipeline"
+                        className="text-xs font-semibold text-indigo-600 hover:text-indigo-800"
+                      >
+                        View Deal →
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* 2-Column Sourcing & Quality ROI Analysis */}

@@ -4,7 +4,7 @@ import React from "react";
 import { Calendar, User, RefreshCw, X, Filter } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type DashboardPeriod = "today" | "yesterday" | "week" | "month" | "custom";
+export type DashboardPeriod = "all" | "today" | "yesterday" | "week" | "month" | "custom";
 
 interface TeamMember {
   id: string;
@@ -152,6 +152,7 @@ export function DashboardHeader({
             className="bg-transparent font-semibold text-gray-800 outline-none cursor-pointer py-1 text-xs pr-1"
             title="Filter statistics by period"
           >
+            <option value="all">All Time (Lifetime CRM)</option>
             <option value="today">Today</option>
             <option value="yesterday">Yesterday</option>
             <option value="week">This Week (Last 7 Days)</option>

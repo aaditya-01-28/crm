@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const period = searchParams.get("period") || "today"; // "today" | "yesterday" | "week" | "month" | "custom"
+  const period = searchParams.get("period") || "today"; // "all" | "today" | "yesterday" | "week" | "month" | "custom"
   const dateFromParam = searchParams.get("dateFrom");
   const dateToParam = searchParams.get("dateTo");
   const requestedUserId = searchParams.get("userId");
@@ -42,7 +42,10 @@ export async function GET(request: NextRequest) {
   let startOfPeriod = new Date(startOfToday);
   let endOfPeriod = new Date(endOfToday);
 
-  if (period === "yesterday") {
+  if (period === "all") {
+    startOfPeriod = new Date(0);
+    endOfPeriod = new Date("2100-01-01T00:00:00.000Z");
+  } else if (period === "yesterday") {
     const yesterdayStart = new Date(startOfToday);
     yesterdayStart.setDate(yesterdayStart.getDate() - 1);
     yesterdayStart.setHours(0, 0, 0, 0);
@@ -254,8 +257,67 @@ export async function GET(request: NextRequest) {
       const wonRevenueInPeriod = Number(dealPeriodRes.rows[0]?.wonRevenueInPeriod || 0);
       const lostDealsInPeriod = dealPeriodRes.rows[0]?.lostDealsCount || 0;
 
+      // Lifetime/All-Time Deal Metrics (cumulative regardless of current period)
+      const allTimeDealsRes = await client.query(
+        `SELECT
+           COUNT(CASE WHEN d.stage = 'closed_won' THEN 1 END)::int as "allTimeWonDealsCount",
+           COALESCE(SUM(CASE WHEN d.stage = 'closed_won' THEN d.quoted_price ELSE 0 END), 0)::numeric as "allTimeWonRevenue",
+           COUNT(CASE WHEN d.stage = 'closed_lost' THEN 1 END)::int as "allTimeLostDealsCount"
+         FROM deals d
+         WHERE ${dealWhereClause}`,
+        dealParams
+      );
+
+      const allTimeWonDealsCount = allTimeDealsRes.rows[0]?.allTimeWonDealsCount || 0;
+      const allTimeWonRevenue = Number(allTimeDealsRes.rows[0]?.allTimeWonRevenue || 0);
+      const allTimeLostDealsCount = allTimeDealsRes.rows[0]?.allTimeLostDealsCount || 0;
+
       const totalClosed = wonDealsCount + lostDealsInPeriod;
-      const winRate = totalClosed > 0 ? Math.round((wonDealsCount / totalClosed) * 100) : 0;
+      const winRate = totalClosed > 0
+        ? Math.round((wonDealsCount / totalClosed) * 100)
+        : (allTimeWonDealsCount + allTimeLostDealsCount > 0
+          ? Math.round((allTimeWonDealsCount / (allTimeWonDealsCount + allTimeLostDealsCount)) * 100)
+          : 0);
+
+      // Recent Closed Won Deals (with linked payment verification status)
+      const wonDealsRes = await client.query(
+        `SELECT d.id, d.quoted_price as "quotedPrice", d.stage, d.service_type as "serviceType",
+                d.updated_at as "closedAt", d.created_at as "createdAt",
+                l.id as "leadId", l.company_name as "companyName", l.contact_name as "contactName",
+                l.phone_number as "phoneNumber",
+                u.full_name as "repFullName", u.id as "repId",
+                p.id as "paymentId", p.ops_approval_status as "opsApprovalStatus", p.final_amount as "paymentAmount"
+         FROM deals d
+         JOIN leads l ON d.lead_id = l.id
+         JOIN users u ON d.rep_id = u.id
+         LEFT JOIN LATERAL (
+           SELECT id, ops_approval_status, final_amount
+           FROM payments
+           WHERE deal_id = d.id
+           ORDER BY created_at DESC
+           LIMIT 1
+         ) p ON true
+         WHERE ${dealWhereClause} AND d.stage = 'closed_won'
+         ORDER BY d.updated_at DESC
+         LIMIT 10`,
+        dealParams
+      );
+
+      const recentWonDeals = wonDealsRes.rows.map((r) => ({
+        id: r.id,
+        quotedPrice: Number(r.quotedPrice || 0),
+        stage: r.stage,
+        serviceType: r.serviceType,
+        closedAt: r.closedAt,
+        leadId: r.leadId,
+        companyName: r.companyName,
+        contactName: r.contactName,
+        phoneNumber: r.phoneNumber,
+        repFullName: r.repFullName,
+        paymentId: r.paymentId,
+        opsApprovalStatus: r.opsApprovalStatus,
+        paymentAmount: r.paymentAmount ? Number(r.paymentAmount) : null,
+      }));
 
       const dealsByStageRes = await client.query(
         `SELECT d.stage, COUNT(d.id)::int as count, COALESCE(SUM(d.quoted_price), 0)::numeric as value
@@ -265,7 +327,7 @@ export async function GET(request: NextRequest) {
         dealParams
       );
 
-      // 5. Verified Payments Revenue
+      // 5. Verified & Pending Payments Revenue
       const paymentWhereClause = targetUserId
         ? "tenant_id = $1 AND rep_id = $2 AND ops_approval_status = 'approved' AND created_at >= $3 AND created_at <= $4"
         : "tenant_id = $1 AND ops_approval_status = 'approved' AND created_at >= $2 AND created_at <= $3";
@@ -280,6 +342,18 @@ export async function GET(request: NextRequest) {
         paymentParams
       );
       const verifiedRevenue = Number(paymentsAggRes.rows[0]?.verifiedRevenue || 0);
+
+      // Cumulative Payments Revenue (Approved vs Pending Verification)
+      const allTimePaymentsRes = await client.query(
+        `SELECT
+           COALESCE(SUM(CASE WHEN ops_approval_status = 'approved' THEN final_amount ELSE 0 END), 0)::numeric as "allTimeVerifiedRevenue",
+           COALESCE(SUM(CASE WHEN ops_approval_status = 'pending_verification' THEN final_amount ELSE 0 END), 0)::numeric as "allTimePendingRevenue"
+         FROM payments
+         WHERE ${targetUserId ? "tenant_id = $1 AND rep_id = $2" : "tenant_id = $1"}`,
+        targetUserId ? [tenantId, targetUserId] : [tenantId]
+      );
+      const allTimeVerifiedRevenue = Number(allTimePaymentsRes.rows[0]?.allTimeVerifiedRevenue || 0);
+      const allTimePendingRevenue = Number(allTimePaymentsRes.rows[0]?.allTimePendingRevenue || 0);
 
       // 6. Lead Distribution & Queue stats
       const repFilterForQueue = targetUserId || currentUserId;
@@ -373,6 +447,8 @@ export async function GET(request: NextRequest) {
         demosBooked: number;
         wonDeals: number;
         wonRevenue: number;
+        allTimeWonDeals: number;
+        allTimeWonRevenue: number;
       }> = [];
 
       if (isManagerOrAdmin(role) && !targetUserId) {
@@ -382,7 +458,9 @@ export async function GET(request: NextRequest) {
                   COALESCE(cl.talk_time, 0)::int as "talkTimeMins",
                   COALESCE(st.demos_booked, 0)::int as "demosBooked",
                   COALESCE(dl.won_deals, 0)::int as "wonDeals",
-                  COALESCE(dl.won_revenue, 0)::numeric as "wonRevenue"
+                  COALESCE(dl.won_revenue, 0)::numeric as "wonRevenue",
+                  COALESCE(dl_all.all_won_deals, 0)::int as "allTimeWonDeals",
+                  COALESCE(dl_all.all_won_revenue, 0)::numeric as "allTimeWonRevenue"
            FROM users u
            LEFT JOIN (
              SELECT rep_id, COUNT(id) as total_calls, ROUND(SUM(duration_seconds) / 60) as talk_time
@@ -402,8 +480,14 @@ export async function GET(request: NextRequest) {
              WHERE tenant_id = $1 AND stage = 'closed_won' AND updated_at >= $2 AND updated_at <= $3
              GROUP BY rep_id
            ) dl ON u.id = dl.rep_id
+           LEFT JOIN (
+             SELECT rep_id, COUNT(id) as all_won_deals, SUM(quoted_price) as all_won_revenue
+             FROM deals
+             WHERE tenant_id = $1 AND stage = 'closed_won'
+             GROUP BY rep_id
+           ) dl_all ON u.id = dl_all.rep_id
            WHERE u.tenant_id = $1 AND u.is_active = true AND u.role IN ('sales_rep', 'sales_manager')
-           ORDER BY "wonRevenue" DESC, "totalCalls" DESC`,
+           ORDER BY "wonRevenue" DESC, "allTimeWonRevenue" DESC, "totalCalls" DESC`,
           [tenantId, startOfPeriod, endOfPeriod]
         );
 
@@ -420,6 +504,8 @@ export async function GET(request: NextRequest) {
             demosBooked: r.demosBooked || 0,
             wonDeals: r.wonDeals || 0,
             wonRevenue: Number(r.wonRevenue || 0),
+            allTimeWonDeals: r.allTimeWonDeals || 0,
+            allTimeWonRevenue: Number(r.allTimeWonRevenue || 0),
           };
         });
       }
@@ -458,6 +544,12 @@ export async function GET(request: NextRequest) {
         wonRevenueInPeriod,
         verifiedRevenue,
         winRate,
+        allTimeWonDealsCount,
+        allTimeWonRevenue,
+        allTimeLostDealsCount,
+        allTimeVerifiedRevenue,
+        allTimePendingRevenue,
+        recentWonDeals,
         allDealsByStage: dealsByStageRes.rows.map((s) => ({
           stage: s.stage,
           count: s.count,
