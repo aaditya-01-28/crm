@@ -37,6 +37,7 @@ model User {
   avatarUrl        String?         @map("avatar_url") @db.Text
   isActive         Boolean         @default(true) @map("is_active")
   mustChangePassword Boolean       @default(false) @map("must_change_password")
+  lastLoginAt        DateTime?       @map("last_login_at") @db.Timestamptz(6)
   resetToken       String?         @map("reset_token") @db.VarChar(255)
   resetTokenExpiry DateTime?       @map("reset_token_expiry") @db.Timestamptz(6)
   createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)

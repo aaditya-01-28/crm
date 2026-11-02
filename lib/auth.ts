@@ -6,6 +6,10 @@ const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || "fallback-secret-change-in-production"
 );
 
+export const SESSION_DURATION_HOURS = 9;
+export const SESSION_DURATION_SECONDS = 9 * 60 * 60; // 32400 seconds (9 hours)
+export const JWT_SESSION_EXPIRY = "9h";
+
 export interface JWTPayload {
   sub: string;       // user id
   tenantId: string;
@@ -14,13 +18,15 @@ export interface JWTPayload {
   fullName: string;
   avatarUrl?: string | null;
   mustChangePassword?: boolean;
+  lastLoginAt?: string | null;
+  loginAt?: string | null;
 }
 
 export async function signAccessToken(payload: JWTPayload): Promise<string> {
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime(process.env.JWT_EXPIRY || "365d")
+    .setExpirationTime(process.env.JWT_EXPIRY || JWT_SESSION_EXPIRY)
     .sign(JWT_SECRET);
 }
 
@@ -28,7 +34,7 @@ export async function signRefreshToken(payload: JWTPayload): Promise<string> {
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime(process.env.JWT_REFRESH_EXPIRY || "365d")
+    .setExpirationTime(process.env.JWT_REFRESH_EXPIRY || JWT_SESSION_EXPIRY)
     .sign(JWT_SECRET);
 }
 
@@ -71,11 +77,11 @@ export function setAuthCookies(
 ) {
   response.headers.append(
     "Set-Cookie",
-    `access_token=${accessToken}; HttpOnly; Path=/; Max-Age=31536000; SameSite=Lax`
+    `access_token=${accessToken}; HttpOnly; Path=/; Max-Age=${SESSION_DURATION_SECONDS}; SameSite=Lax`
   );
   response.headers.append(
     "Set-Cookie",
-    `refresh_token=${refreshToken}; HttpOnly; Path=/; Max-Age=31536000; SameSite=Lax`
+    `refresh_token=${refreshToken}; HttpOnly; Path=/; Max-Age=${SESSION_DURATION_SECONDS}; SameSite=Lax`
   );
 }
 

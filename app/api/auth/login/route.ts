@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { queryUserByEmail } from "@/lib/db";
+import { queryUserByEmail, withClient } from "@/lib/db";
 import bcrypt from "bcryptjs";
 import {
   signAccessToken,
@@ -45,6 +45,15 @@ export async function POST(request: NextRequest) {
 
     const mustChangePassword = Boolean(user.mustChangePassword);
 
+    const now = new Date();
+    const loginTimestamp = now.toISOString();
+
+    // Record last login in database
+    await withClient(async (client) => {
+      await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;").catch(() => {});
+      await client.query("UPDATE users SET last_login_at = $1 WHERE id = $2", [now, user.id]).catch(() => {});
+    }).catch((err) => console.warn("[LOGIN] failed to update last_login_at:", err));
+
     const jwtPayload = {
       sub: user.id,
       tenantId: user.tenantId,
@@ -53,6 +62,8 @@ export async function POST(request: NextRequest) {
       fullName: user.fullName,
       avatarUrl: user.avatarUrl && user.avatarUrl.length < 500 ? user.avatarUrl : null,
       mustChangePassword,
+      lastLoginAt: loginTimestamp,
+      loginAt: loginTimestamp,
     };
 
     const accessToken = await signAccessToken(jwtPayload);
@@ -67,6 +78,7 @@ export async function POST(request: NextRequest) {
         tenantName: user.tenant.name,
         avatarUrl: user.avatarUrl ?? null,
         mustChangePassword,
+        lastLoginAt: loginTimestamp,
       },
       mustChangePassword,
       accessToken,

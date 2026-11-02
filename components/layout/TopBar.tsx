@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LogOut, Menu, Smartphone } from "lucide-react";
+import { LogOut, Menu, Smartphone, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { JWTPayload } from "@/lib/auth";
@@ -23,10 +23,48 @@ const ROLE_COLORS: Record<string, string> = {
   accounts_ops: "bg-amber-50 text-amber-800 border-amber-200",
 };
 
+function formatLastLogin(dateStr?: string | null): { display: string; full: string } {
+  if (!dateStr) {
+    return { display: "Active Session", full: "Current session active (9-hr window)" };
+  }
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) {
+      return { display: "Active Session", full: "Current session active (9-hr window)" };
+    }
+    const datePart = d.toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+    });
+    const timePart = d.toLocaleTimeString("en-IN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+    const full = d.toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+    return {
+      display: `${datePart}, ${timePart}`,
+      full,
+    };
+  } catch {
+    return { display: "Active Session", full: "Current session active (9-hr window)" };
+  }
+}
+
 export default function TopBar({ user }: { user: JWTPayload }) {
   const router = useRouter();
   const { toggleMobile } = useSidebar();
   const [repStatus, setRepStatus] = useState<"available" | "in_call" | "break" | "wrapup">("available");
+  const lastLoginTimestamp = user.lastLoginAt || user.loginAt;
+  const lastLoginInfo = formatLastLogin(lastLoginTimestamp);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -110,6 +148,18 @@ export default function TopBar({ user }: { user: JWTPayload }) {
             <option value="break">Short Break</option>
           </select>
         </div>
+        {/* Last Login Timestamp Badge */}
+        <div
+          className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs shadow-2xs hover:bg-slate-100/70 transition-colors"
+          title={`Last login recorded: ${lastLoginInfo.full} • Session token valid for 9 hours`}
+        >
+          <Clock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+          <span className="text-slate-500 font-medium text-[11px] sm:text-xs">Last Login:</span>
+          <span className="font-semibold text-slate-800 font-mono text-[11px] sm:text-xs">
+            {lastLoginInfo.display}
+          </span>
+        </div>
+
         <Link
           href="/profile"
           className="flex items-center gap-2 hover:bg-gray-50 px-2 py-1 rounded-xl transition group"
@@ -126,13 +176,18 @@ export default function TopBar({ user }: { user: JWTPayload }) {
             <p className="text-sm font-semibold text-gray-800 leading-tight group-hover:text-emerald-700 transition-colors">
               {user.fullName}
             </p>
-            <span
-              className={`text-[10px] px-1.5 py-0.2 rounded font-medium border ${
-                ROLE_COLORS[user.role] || "bg-gray-100 text-gray-600"
-              }`}
-            >
-              {ROLE_LABELS[user.role] || user.role}
-            </span>
+            <div className="flex items-center justify-end gap-1.5 mt-0.5">
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded font-medium border ${
+                  ROLE_COLORS[user.role] || "bg-gray-100 text-gray-600"
+                }`}
+              >
+                {ROLE_LABELS[user.role] || user.role}
+              </span>
+              <span className="text-[10px] text-slate-400 font-mono md:hidden" title={`Last login: ${lastLoginInfo.full}`}>
+                • {lastLoginInfo.display}
+              </span>
+            </div>
           </div>
         </Link>
 
