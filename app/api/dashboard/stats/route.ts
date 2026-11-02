@@ -4,7 +4,7 @@ import { normalizeRole, isManagerOrAdmin, isSalesRep } from "@/lib/rbac";
 import { getSession } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
-  const session = await getSession();
+  const session = await getSession(request);
   const headerTenantId = request.headers.get("x-tenant-id");
   const headerRole = request.headers.get("x-user-role");
   const headerUserId = request.headers.get("x-user-id");
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const period = searchParams.get("period") || "today"; // "all" | "today" | "yesterday" | "week" | "month" | "custom"
+  const period = searchParams.get("period") || "today"; // "all" | "today" | "yesterday" | "week" | "month" | "this_month" | "last_month" | "custom"
   const dateFromParam = searchParams.get("dateFrom");
   const dateToParam = searchParams.get("dateTo");
   const requestedUserId = searchParams.get("userId");
@@ -61,25 +61,57 @@ export async function GET(request: NextRequest) {
     past7.setHours(0, 0, 0, 0);
     startOfPeriod = past7;
     endOfPeriod = new Date(endOfToday);
-  } else if (period === "month") {
-    const past30 = new Date(startOfToday);
-    past30.setDate(past30.getDate() - 29);
-    past30.setHours(0, 0, 0, 0);
-    startOfPeriod = past30;
+  } else if (period === "month" || period === "this_month" || period === "thisMonth") {
+    // Current month: 1st of this month to today
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    currentMonthStart.setHours(0, 0, 0, 0);
+    startOfPeriod = currentMonthStart;
     endOfPeriod = new Date(endOfToday);
+  } else if (period === "last_month" || period === "lastMonth") {
+    // Last month: 1st day of last month to last day of last month
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    lastMonthStart.setHours(0, 0, 0, 0);
+    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+    lastMonthEnd.setHours(23, 59, 59, 999);
+    startOfPeriod = lastMonthStart;
+    endOfPeriod = lastMonthEnd;
   } else if (period === "custom") {
     if (dateFromParam) {
-      const fromDate = new Date(dateFromParam);
-      if (!isNaN(fromDate.getTime())) {
-        fromDate.setHours(0, 0, 0, 0);
-        startOfPeriod = fromDate;
+      const parts = dateFromParam.split("-");
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10) - 1;
+        const d = parseInt(parts[2], 10);
+        if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+          const fromDate = new Date(y, m, d);
+          fromDate.setHours(0, 0, 0, 0);
+          startOfPeriod = fromDate;
+        }
+      } else {
+        const fromDate = new Date(dateFromParam);
+        if (!isNaN(fromDate.getTime())) {
+          fromDate.setHours(0, 0, 0, 0);
+          startOfPeriod = fromDate;
+        }
       }
     }
     if (dateToParam) {
-      const toDate = new Date(dateToParam);
-      if (!isNaN(toDate.getTime())) {
-        toDate.setHours(23, 59, 59, 999);
-        endOfPeriod = toDate;
+      const parts = dateToParam.split("-");
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10) - 1;
+        const d = parseInt(parts[2], 10);
+        if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+          const toDate = new Date(y, m, d);
+          toDate.setHours(23, 59, 59, 999);
+          endOfPeriod = toDate;
+        }
+      } else {
+        const toDate = new Date(dateToParam);
+        if (!isNaN(toDate.getTime())) {
+          toDate.setHours(23, 59, 59, 999);
+          endOfPeriod = toDate;
+        }
       }
     } else if (dateFromParam) {
       const singleDayEnd = new Date(startOfPeriod);
@@ -356,20 +388,37 @@ export async function GET(request: NextRequest) {
       const allTimePendingRevenue = Number(allTimePaymentsRes.rows[0]?.allTimePendingRevenue || 0);
 
       // 6. Lead Distribution & Queue stats
-      const repFilterForQueue = targetUserId || currentUserId;
-      const leadCountsRes = await client.query(
-        `SELECT
-           COUNT(id)::int as "totalLeadsCount",
-           COUNT(CASE WHEN assigned_rep_id IS NULL THEN 1 END)::int as "unassignedLeadsCount",
-           COUNT(CASE WHEN assigned_rep_id = $2 AND (status = 'new' OR (status = 'rnr' AND rnr_count < 3)) THEN 1 END)::int as "queueRemainingCount"
-         FROM leads
-         WHERE tenant_id = $1`,
-        [tenantId, repFilterForQueue]
-      );
+      let queueRemainingCount = 0;
+      let totalLeadsCount = 0;
+      let unassignedLeadsCount = 0;
 
-      const totalLeadsCount = leadCountsRes.rows[0]?.totalLeadsCount || 0;
-      const unassignedLeadsCount = leadCountsRes.rows[0]?.unassignedLeadsCount || 0;
-      const queueRemainingCount = leadCountsRes.rows[0]?.queueRemainingCount || 0;
+      if (targetUserId) {
+        const leadCountsRes = await client.query(
+          `SELECT
+             COUNT(id)::int as "totalLeadsCount",
+             COUNT(CASE WHEN assigned_rep_id IS NULL THEN 1 END)::int as "unassignedLeadsCount",
+             COUNT(CASE WHEN assigned_rep_id = $2 AND (status = 'new' OR (status = 'rnr' AND rnr_count < 3)) THEN 1 END)::int as "queueRemainingCount"
+           FROM leads
+           WHERE tenant_id = $1`,
+          [tenantId, targetUserId]
+        );
+        totalLeadsCount = leadCountsRes.rows[0]?.totalLeadsCount || 0;
+        unassignedLeadsCount = leadCountsRes.rows[0]?.unassignedLeadsCount || 0;
+        queueRemainingCount = leadCountsRes.rows[0]?.queueRemainingCount || 0;
+      } else {
+        const leadCountsRes = await client.query(
+          `SELECT
+             COUNT(id)::int as "totalLeadsCount",
+             COUNT(CASE WHEN assigned_rep_id IS NULL THEN 1 END)::int as "unassignedLeadsCount",
+             COUNT(CASE WHEN (status = 'new' OR (status = 'rnr' AND rnr_count < 3)) THEN 1 END)::int as "queueRemainingCount"
+           FROM leads
+           WHERE tenant_id = $1`,
+          [tenantId]
+        );
+        totalLeadsCount = leadCountsRes.rows[0]?.totalLeadsCount || 0;
+        unassignedLeadsCount = leadCountsRes.rows[0]?.unassignedLeadsCount || 0;
+        queueRemainingCount = leadCountsRes.rows[0]?.queueRemainingCount || 0;
+      }
 
       const [leadsStatusRes, leadsVerticalRes, leadsSourceRes] = await Promise.all([
         client.query(
