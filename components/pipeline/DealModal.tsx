@@ -40,6 +40,12 @@ interface Deal {
   closingNotes: string | null;
   leadId: string;
   stage: string;
+  createdAt?: string;
+  updatedAt?: string;
+  rep?: {
+    fullName: string;
+    email?: string;
+  } | null;
   lead: {
     companyName: string | null;
     contactName: string | null;
@@ -47,9 +53,26 @@ interface Deal {
     businessVertical?: string | null;
     customMetadata?: {
       address?: string;
+      customerEmail?: string;
+      email?: string;
       [key: string]: any;
     } | null;
   };
+  payment?: {
+    id: string;
+    userType: string;
+    panelUserId: string;
+    creditsToAdd: number;
+    originalAmount: string;
+    taxAmount: string;
+    tdsAmount: string;
+    finalAmount: string;
+    paymentMode: string;
+    gstin?: string | null;
+    screenshotUrl?: string | null;
+    opsApprovalStatus?: string;
+    createdAt?: string;
+  } | null;
 }
 
 interface LeadOption {
@@ -165,10 +188,26 @@ export function DealModal({
     fetch("/api/auth/me")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data?.user) setCurrentUser(data.user);
+        if (data?.user) {
+          setCurrentUser(data.user);
+          // For a new deal only (!deal), set default executive info if not already customized
+          if (!deal) {
+            setCommercials((prev) =>
+              prev.map((c, idx) =>
+                idx === 0
+                  ? {
+                      ...c,
+                      executiveName: c.executiveName || data.user.fullName || "Sales Executive",
+                      executiveEmail: c.executiveEmail || data.user.email || "",
+                    }
+                  : c
+              )
+            );
+          }
+        }
       })
       .catch(() => {});
-  }, []);
+  }, [deal]);
 
   // Close modal on Escape key
   useEffect(() => {
@@ -196,27 +235,116 @@ export function DealModal({
   );
 
   // Dynamic Array of Deal Commercials & Pipeline Stages
-  const [commercials, setCommercials] = useState<CommercialItem[]>([
-    {
-      id: deal?.id,
-      serviceType:
-        deal?.serviceType
-          ? parseServices(deal.serviceType)[0] || deal.serviceType
-          : "WhatsApp API",
-      quantity: deal?.quantity?.toString() || "10000",
-      quotedPrice: deal?.quotedPrice?.toString() || "0",
-      stage: deal?.stage || "quote_sent",
-      closingDate: deal?.expectedClosingDate
-        ? deal.expectedClosingDate.split("T")[0]
-        : "",
-      notes: deal?.closingNotes || "",
-      contactBackDate: getDefaultNextDayFollowup(),
-      demoDate: getDefaultTomorrowDemo(),
-      userType: "new_user",
-      paymentMode: "UPI / QR",
-      wonDate: new Date().toISOString().split("T")[0],
-    },
-  ]);
+  const [commercials, setCommercials] = useState<CommercialItem[]>(() => {
+    let parsedDossier: Record<string, any> | null = null;
+    if (deal?.closingNotes) {
+      try {
+        const obj = JSON.parse(deal.closingNotes);
+        if (typeof obj === "object" && obj !== null) {
+          parsedDossier = obj;
+        }
+      } catch {}
+    }
+
+    const pay = deal?.payment;
+    const repName =
+      parsedDossier?.executiveName ||
+      deal?.rep?.fullName ||
+      "";
+    const repEmail =
+      parsedDossier?.executiveEmail ||
+      deal?.rep?.email ||
+      "";
+
+    const userType = pay?.userType || parsedDossier?.userType || "new_user";
+    const paymentMode = pay?.paymentMode || parsedDossier?.paymentMode || "UPI / QR";
+    const creditsToAdd =
+      pay?.creditsToAdd?.toString() ||
+      parsedDossier?.creditsToAdd ||
+      deal?.quantity?.toString() ||
+      "10000";
+    const originalAmount = pay?.originalAmount
+      ? parseFloat(pay.originalAmount).toFixed(2)
+      : parsedDossier?.originalAmount ||
+        (deal?.quotedPrice ? parseFloat(deal.quotedPrice).toFixed(2) : "0");
+    const taxAmount = pay?.taxAmount
+      ? parseFloat(pay.taxAmount).toFixed(2)
+      : parsedDossier?.taxAmount ||
+        (parseFloat(originalAmount || "0") * 0.18).toFixed(2);
+    const tds = pay?.tdsAmount
+      ? parseFloat(pay.tdsAmount).toFixed(2)
+      : parsedDossier?.tds || "0";
+    const finalAmount = pay?.finalAmount
+      ? parseFloat(pay.finalAmount).toFixed(2)
+      : parsedDossier?.finalAmount ||
+        (parseFloat(originalAmount || "0") * 1.18).toFixed(2);
+
+    const wonDate =
+      parsedDossier?.wonDate ||
+      (pay?.createdAt ? pay.createdAt.split("T")[0] : null) ||
+      (deal?.createdAt ? deal.createdAt.split("T")[0] : null) ||
+      new Date().toISOString().split("T")[0];
+
+    return [
+      {
+        id: deal?.id,
+        serviceType:
+          deal?.serviceType
+            ? parseServices(deal.serviceType)[0] || deal.serviceType
+            : "WhatsApp API",
+        quantity: creditsToAdd,
+        quotedPrice: originalAmount,
+        stage: deal?.stage || "quote_sent",
+        closingDate: deal?.expectedClosingDate
+          ? deal.expectedClosingDate.split("T")[0]
+          : "",
+        notes: parsedDossier ? (parsedDossier.notes || "") : (deal?.closingNotes || ""),
+        contactBackDate: parsedDossier?.contactBackDate || getDefaultNextDayFollowup(),
+        demoDate: parsedDossier?.demoDate || getDefaultTomorrowDemo(),
+        meetingLink: parsedDossier?.meetingLink || "",
+        decisionMakerName: parsedDossier?.decisionMakerName || "",
+        demoNotes: parsedDossier?.demoNotes || "",
+        followupChannel: parsedDossier?.followupChannel || "phone",
+        demoFeedback: parsedDossier?.demoFeedback || "",
+        paymentDueDate: parsedDossier?.paymentDueDate || "",
+        lostReason: parsedDossier?.lostReason || "",
+        competitorName: parsedDossier?.competitorName || "",
+        lostRemarks: parsedDossier?.lostRemarks || "",
+
+        // Closed Won / Onboarding Dossier fields
+        executiveName: repName,
+        executiveEmail: repEmail,
+        wonDate,
+        userType,
+        paymentMode,
+        productName: parsedDossier?.productName || deal?.serviceType || "WhatsApp API",
+        productDescription: parsedDossier?.productDescription || "",
+        creditsToAdd,
+        userId:
+          pay?.panelUserId ||
+          parsedDossier?.userId ||
+          (deal?.leadId ? `TXT_${deal.leadId.slice(0, 6).toUpperCase()}` : ""),
+        customerCompanyName:
+          parsedDossier?.customerCompanyName || deal?.lead?.companyName || "",
+        customerName:
+          parsedDossier?.customerName || deal?.lead?.contactName || "",
+        customerContactNumber:
+          parsedDossier?.customerContactNumber || deal?.lead?.phoneNumber || "",
+        customerEmail:
+          parsedDossier?.customerEmail ||
+          deal?.lead?.customMetadata?.customerEmail ||
+          deal?.lead?.customMetadata?.email ||
+          "",
+        originalAmount,
+        taxAmount,
+        tds,
+        finalAmount,
+        gstinNumber: pay?.gstin || parsedDossier?.gstinNumber || "",
+        paymentScreenshotUrl:
+          pay?.screenshotUrl || parsedDossier?.paymentScreenshotUrl || "",
+      },
+    ];
+  });
 
   const [saving, setSaving] = useState(false);
 
@@ -505,9 +633,19 @@ export function DealModal({
             expectedClosingDate: firstC.closingDate || null,
             serviceType: firstC.serviceType,
             quantity: parseInt(firstC.quantity) || 0,
+            contactName: contactName.trim() || null,
+            companyName: companyName.trim() || null,
+            phoneNumber: phoneNumber.trim() || null,
+            address: address.trim() || null,
             demoDate: firstC.demoDate,
             meetingLink: firstC.meetingLink,
             contactBackDate: firstC.contactBackDate,
+            decisionMakerName: firstC.decisionMakerName,
+            demoNotes: firstC.demoNotes,
+            followupChannel: firstC.followupChannel,
+            demoFeedback: firstC.demoFeedback,
+            lostReason: firstC.lostReason,
+            competitorName: firstC.competitorName,
             recontactDate: firstC.recontactDate,
             lostRemarks: firstC.lostRemarks,
             wonDetails: firstC.stage === "closed_won" ? {
@@ -559,6 +697,15 @@ export function DealModal({
               contactBackDate: c.contactBackDate,
               recontactDate: c.recontactDate,
               lostRemarks: c.lostRemarks,
+              executiveName: c.executiveName,
+              executiveEmail: c.executiveEmail,
+              wonDate: c.wonDate,
+              productName: c.productName,
+              productDescription: c.productDescription,
+              customerCompanyName: c.customerCompanyName,
+              customerName: c.customerName,
+              customerContactNumber: c.customerContactNumber,
+              customerEmail: c.customerEmail,
               userType: c.userType,
               userId: c.userId,
               creditsToAdd: c.creditsToAdd,
@@ -690,13 +837,15 @@ export function DealModal({
                     <CheckCircle2 className="w-3 h-3" />
                     Existing Lead Linked
                   </span>
-                  <button
-                    type="button"
-                    onClick={handleClearLead}
-                    className="text-[11px] text-rose-600 hover:underline font-medium"
-                  >
-                    Unlink
-                  </button>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={handleClearLead}
+                      className="text-[11px] text-rose-600 hover:underline font-medium"
+                    >
+                      Unlink
+                    </button>
+                  )}
                 </div>
               ) : (
                 <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
@@ -713,10 +862,11 @@ export function DealModal({
                   value={leadSearch}
                   onChange={(e) => handleSearchChange(e.target.value)}
                   onFocus={() => {
-                    if (leadOptions.length > 0) setShowLeadDrop(true);
+                    if (canEdit && leadOptions.length > 0) setShowLeadDrop(true);
                   }}
+                  disabled={!canEdit}
                   placeholder="Type name, company, or phone number to auto-fill..."
-                  className="w-full pl-9 pr-8 py-2.5 bg-white border border-slate-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs font-medium"
+                  className="w-full pl-9 pr-8 py-2.5 bg-white border border-slate-300 rounded-lg text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs font-medium disabled:bg-gray-100 disabled:text-gray-600 disabled:cursor-not-allowed"
                 />
                 <Search className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
                 {isSearching ? (
@@ -818,7 +968,8 @@ export function DealModal({
                       onChange={(e) => setPhoneNumber(e.target.value)}
                       placeholder="e.g. 9876543210"
                       required
-                      className="w-full pl-8 pr-3 py-2 bg-white border border-gray-300 rounded-lg text-xs font-mono outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900"
+                      disabled={!canEdit}
+                      className="w-full pl-8 pr-3 py-2 bg-white border border-gray-300 rounded-lg text-xs font-mono outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900 disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                     />
                     <Phone className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
                   </div>
@@ -834,7 +985,8 @@ export function DealModal({
                       value={contactName}
                       onChange={(e) => setContactName(e.target.value)}
                       placeholder="e.g. Dr. Rajesh Sharma"
-                      className="w-full pl-8 pr-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900 font-medium"
+                      disabled={!canEdit}
+                      className="w-full pl-8 pr-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                     />
                     <User className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
                   </div>
@@ -850,7 +1002,8 @@ export function DealModal({
                       value={companyName}
                       onChange={(e) => setCompanyName(e.target.value)}
                       placeholder="e.g. Apex Health Diagnostic"
-                      className="w-full pl-8 pr-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900 font-medium"
+                      disabled={!canEdit}
+                      className="w-full pl-8 pr-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                     />
                     <Building2 className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
                   </div>
@@ -866,7 +1019,8 @@ export function DealModal({
                       value={address}
                       onChange={(e) => setAddress(e.target.value)}
                       placeholder="e.g. Indiranagar, Bangalore"
-                      className="w-full pl-8 pr-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900"
+                      disabled={!canEdit}
+                      className="w-full pl-8 pr-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900 disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                     />
                     <MapPin className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
                   </div>
@@ -878,6 +1032,7 @@ export function DealModal({
           {/* Section 2: Multi-Select Service Interests (No Custom) */}
           <div className="bg-emerald-50/40 border border-emerald-200/80 rounded-xl p-4">
             <MultiServiceSelect
+              disabled={!canEdit}
               selectedServices={selectedServices}
               onChange={(services) => {
                 setSelectedServices(services);
@@ -910,7 +1065,7 @@ export function DealModal({
               </div>
 
               {/* Quick shortcut pills to add commercials for unassigned services */}
-              {selectedServices.some(
+              {canEdit && selectedServices.some(
                 (s) => !commercials.map((c) => c.serviceType).includes(s)
               ) && (
                 <div className="hidden sm:flex items-center gap-1 text-[11px]">
@@ -956,7 +1111,7 @@ export function DealModal({
                         </span>
                       </div>
 
-                      {commercials.length > 1 && (
+                      {canEdit && commercials.length > 1 && (
                         <button
                           type="button"
                           onClick={() => handleRemoveCommercial(idx)}
@@ -980,7 +1135,8 @@ export function DealModal({
                           <select
                             value={item.stage}
                             onChange={(e) => updateCommercial(idx, "stage", e.target.value)}
-                            className="w-full pl-9 pr-3 py-2 bg-white border-2 border-emerald-600/40 focus:border-emerald-600 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-bold text-gray-900 cursor-pointer shadow-2xs"
+                            disabled={!canEdit}
+                            className="w-full pl-9 pr-3 py-2 bg-white border-2 border-emerald-600/40 focus:border-emerald-600 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-bold text-gray-900 cursor-pointer shadow-2xs disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed disabled:border-gray-300"
                           >
                             {STAGES.map((s) => (
                               <option key={s.value} value={s.value}>
@@ -1000,7 +1156,8 @@ export function DealModal({
                         <select
                           value={item.serviceType}
                           onChange={(e) => updateCommercial(idx, "serviceType", e.target.value)}
-                          className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium text-gray-800"
+                          disabled={!canEdit}
+                          className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium text-gray-800 disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                         >
                           {selectedServices.length > 0 && (
                             <optgroup label="Selected Interested Services">
@@ -1049,7 +1206,8 @@ export function DealModal({
                               value={item.demoDate || getDefaultTomorrowDemo()}
                               onChange={(e) => updateCommercial(idx, "demoDate", e.target.value)}
                               required
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-purple-500 font-medium"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-purple-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1062,7 +1220,8 @@ export function DealModal({
                               value={item.meetingLink || ""}
                               onChange={(e) => updateCommercial(idx, "meetingLink", e.target.value)}
                               placeholder="https://meet.google.com/abc-defg-hij"
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-purple-500 font-mono text-gray-800"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-purple-500 font-mono text-gray-800 disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1075,7 +1234,8 @@ export function DealModal({
                               value={item.decisionMakerName || contactName || ""}
                               onChange={(e) => updateCommercial(idx, "decisionMakerName", e.target.value)}
                               placeholder="e.g. Dr. Rajesh Sharma (Director)"
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-purple-500"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-purple-500 disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1088,7 +1248,8 @@ export function DealModal({
                               value={item.quantity}
                               onChange={(e) => updateCommercial(idx, "quantity", e.target.value)}
                               placeholder="e.g. 50000"
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-purple-500 font-mono"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-purple-500 font-mono disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
                         </div>
@@ -1105,7 +1266,8 @@ export function DealModal({
                             }}
                             rows={2}
                             placeholder="WhatsApp Business API walkthrough, template approvals, auto-reply chatbot, CRM integration..."
-                            className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-purple-500 resize-none text-gray-800"
+                            disabled={!canEdit}
+                            className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-purple-500 resize-none text-gray-800 disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                           />
                         </div>
                       </div>
@@ -1134,7 +1296,8 @@ export function DealModal({
                               value={item.contactBackDate || getDefaultNextDayFollowup()}
                               onChange={(e) => updateCommercial(idx, "contactBackDate", e.target.value)}
                               required
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-teal-500 font-medium"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-teal-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                             <p className="text-[10px] text-teal-700 mt-1">
                               ⚡ Automatically scheduled for next business day at 11:00 AM.
@@ -1148,7 +1311,8 @@ export function DealModal({
                             <select
                               value={item.followupChannel || "phone"}
                               onChange={(e) => updateCommercial(idx, "followupChannel", e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-teal-500 font-medium"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-teal-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             >
                               <option value="phone">📞 Phone Call</option>
                               <option value="whatsapp">💬 WhatsApp Message</option>
@@ -1166,7 +1330,8 @@ export function DealModal({
                               onChange={(e) => updateCommercial(idx, "quantity", e.target.value)}
                               placeholder="e.g. 25000"
                               required
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-teal-500 font-mono"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-teal-500 font-mono disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1180,7 +1345,8 @@ export function DealModal({
                               onChange={(e) => updateCommercial(idx, "quotedPrice", e.target.value)}
                               placeholder="e.g. 15000"
                               required
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-teal-500 font-mono"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-teal-500 font-mono disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
                         </div>
@@ -1197,7 +1363,8 @@ export function DealModal({
                             }}
                             rows={2}
                             placeholder="Client positive on WhatsApp API, asked to share formal quote for 25k credits with SLA details..."
-                            className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-teal-500 resize-none text-gray-800"
+                            disabled={!canEdit}
+                            className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-teal-500 resize-none text-gray-800 disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                           />
                         </div>
                       </div>
@@ -1227,7 +1394,8 @@ export function DealModal({
                               onChange={(e) => updateCommercial(idx, "quantity", e.target.value)}
                               placeholder="e.g. 50000"
                               required
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-amber-500 font-mono"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-amber-500 font-mono disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1241,7 +1409,8 @@ export function DealModal({
                               onChange={(e) => updateCommercial(idx, "quotedPrice", e.target.value)}
                               placeholder="e.g. 25000"
                               required
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-amber-500 font-mono"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-amber-500 font-mono disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1254,7 +1423,8 @@ export function DealModal({
                               value={item.contactBackDate || getDefaultNextDayFollowup()}
                               onChange={(e) => updateCommercial(idx, "contactBackDate", e.target.value)}
                               required
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-amber-500 font-medium"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-amber-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                             <p className="text-[10px] text-amber-700 mt-1">
                               ⚡ Default: Next business day at 11:00 AM for quotation follow-up.
@@ -1269,7 +1439,8 @@ export function DealModal({
                               type="date"
                               value={item.closingDate}
                               onChange={(e) => updateCommercial(idx, "closingDate", e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-amber-500"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
                         </div>
@@ -1283,7 +1454,8 @@ export function DealModal({
                             onChange={(e) => updateCommercial(idx, "notes", e.target.value)}
                             rows={2}
                             placeholder="Official quote PDF sent on WhatsApp/Email. Promised volume pricing 26p/WA message if closed this week..."
-                            className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-amber-500 resize-none text-gray-800"
+                            disabled={!canEdit}
+                            className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-amber-500 resize-none text-gray-800 disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                           />
                         </div>
                       </div>
@@ -1338,7 +1510,8 @@ export function DealModal({
                             <select
                               value={item.paymentMode || "UPI / QR"}
                               onChange={(e) => updateCommercial(idx, "paymentMode", e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-orange-500 font-medium"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-orange-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             >
                               <option value="UPI / QR">UPI / QR Code</option>
                               <option value="Bank Transfer (NEFT/RTGS)">Bank Transfer (NEFT / RTGS)</option>
@@ -1356,7 +1529,8 @@ export function DealModal({
                               type="date"
                               value={item.closingDate || new Date().toISOString().split("T")[0]}
                               onChange={(e) => updateCommercial(idx, "closingDate", e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-orange-500 font-medium"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-orange-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
                         </div>
@@ -1426,9 +1600,10 @@ export function DealModal({
                             </label>
                             <input
                               type="text"
-                              value={item.executiveName ?? (currentUser?.fullName || "Sales Executive")}
+                              value={item.executiveName || (isEdit ? (deal?.rep?.fullName || "") : (currentUser?.fullName || ""))}
                               onChange={(e) => updateCommercial(idx, "executiveName", e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1439,10 +1614,11 @@ export function DealModal({
                             </label>
                             <input
                               type="email"
-                              value={item.executiveEmail ?? (currentUser?.email || "")}
+                              value={item.executiveEmail || (isEdit ? (deal?.rep?.email || "") : (currentUser?.email || ""))}
                               onChange={(e) => updateCommercial(idx, "executiveEmail", e.target.value)}
                               required
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1456,7 +1632,8 @@ export function DealModal({
                               value={item.wonDate || new Date().toISOString().split("T")[0]}
                               onChange={(e) => updateCommercial(idx, "wonDate", e.target.value)}
                               required
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1468,7 +1645,8 @@ export function DealModal({
                             <select
                               value={item.userType || "new_user"}
                               onChange={(e) => updateCommercial(idx, "userType", e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             >
                               <option value="new_user">New User</option>
                               <option value="existing_user">Existing User (Top-up)</option>
@@ -1484,7 +1662,8 @@ export function DealModal({
                             <select
                               value={item.paymentMode || "Bank Transfer (NEFT/RTGS)"}
                               onChange={(e) => updateCommercial(idx, "paymentMode", e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             >
                               <option value="Bank Transfer (NEFT/RTGS)">Bank Transfer (NEFT / RTGS)</option>
                               <option value="UPI / QR">UPI / QR Code</option>
@@ -1506,7 +1685,8 @@ export function DealModal({
                               onChange={(e) => updateCommercial(idx, "productName", e.target.value)}
                               placeholder="e.g. WhatsApp API / Bulk SMS"
                               required
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1524,7 +1704,8 @@ export function DealModal({
                               }}
                               placeholder="e.g. 50000"
                               required
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1539,7 +1720,8 @@ export function DealModal({
                               onChange={(e) => updateCommercial(idx, "userId", e.target.value)}
                               placeholder="e.g. TXT_99021 or client portal username"
                               required
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono text-emerald-900 font-bold"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono text-emerald-900 font-bold disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1553,7 +1735,8 @@ export function DealModal({
                               value={item.customerCompanyName ?? companyName}
                               onChange={(e) => updateCommercial(idx, "customerCompanyName", e.target.value)}
                               placeholder="Company name"
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1567,7 +1750,8 @@ export function DealModal({
                               value={item.customerName ?? contactName}
                               onChange={(e) => updateCommercial(idx, "customerName", e.target.value)}
                               placeholder="Customer contact person"
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1582,7 +1766,8 @@ export function DealModal({
                               onChange={(e) => updateCommercial(idx, "customerContactNumber", e.target.value)}
                               required
                               placeholder="e.g. 9876543210"
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1597,7 +1782,8 @@ export function DealModal({
                               onChange={(e) => updateCommercial(idx, "customerEmail", e.target.value)}
                               required
                               placeholder="billing@customercompany.com"
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1636,7 +1822,8 @@ export function DealModal({
                               }}
                               placeholder="e.g. 50000"
                               required
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono font-bold"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono font-bold disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1656,7 +1843,8 @@ export function DealModal({
                                 updateCommercial(idx, "taxAmount", tax);
                                 updateCommercial(idx, "finalAmount", finalVal);
                               }}
-                              className="w-full px-3 py-2 bg-slate-50 border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-slate-50 border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1677,7 +1865,8 @@ export function DealModal({
                                 updateCommercial(idx, "finalAmount", finalVal);
                               }}
                               placeholder="0"
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1691,7 +1880,8 @@ export function DealModal({
                               value={item.finalAmount ?? (parseFloat(item.originalAmount || item.quotedPrice || "0") * 1.18).toFixed(2)}
                               onChange={(e) => updateCommercial(idx, "finalAmount", e.target.value)}
                               required
-                              className="w-full px-3 py-2 bg-emerald-50/80 border border-emerald-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono font-bold text-emerald-900"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-emerald-50/80 border border-emerald-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono font-bold text-emerald-900 disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1706,7 +1896,8 @@ export function DealModal({
                               onChange={(e) => updateCommercial(idx, "gstinNumber", e.target.value.toUpperCase())}
                               placeholder="29AAAAA0000A1Z5"
                               maxLength={15}
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1721,7 +1912,8 @@ export function DealModal({
                               onChange={(e) => updateCommercial(idx, "paymentScreenshotUrl", e.target.value)}
                               placeholder="Paste UTR / Bank Ref or upload image link"
                               required
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-mono disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
                         </div>
@@ -1774,7 +1966,8 @@ export function DealModal({
                               value={item.lostReason || "Chose Competitor"}
                               onChange={(e) => updateCommercial(idx, "lostReason", e.target.value)}
                               required
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-rose-500 font-medium"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-rose-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             >
                               <option value="Chose Competitor">Chose Competitor</option>
                               <option value="Budget / Pricing Mismatch">Budget / Pricing Mismatch</option>
@@ -1809,7 +2002,8 @@ export function DealModal({
                               type="date"
                               value={item.recontactDate || ""}
                               onChange={(e) => updateCommercial(idx, "recontactDate", e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-rose-500"
+                              disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-rose-500 disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                             <p className="text-[10px] text-gray-500 mt-0.5">
                               Follow up when their competitor annual contract is up for renewal.
@@ -1829,7 +2023,8 @@ export function DealModal({
                             }}
                             rows={2}
                             placeholder="Feedback shared by client, what pricing or feature they got elsewhere, or key takeaways..."
-                            className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-rose-500 resize-none text-gray-800"
+                            disabled={!canEdit}
+                            className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-rose-500 resize-none text-gray-800 disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                           />
                         </div>
                       </div>
@@ -1841,14 +2036,16 @@ export function DealModal({
 
             {/* Button to Add Additional Deal Commercial & Pipeline Stage */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => handleAddCommercial()}
-                className="px-4 py-2.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border-2 border-dashed border-emerald-300 hover:border-emerald-400 rounded-xl flex items-center justify-center gap-2 transition shadow-2xs group"
-              >
-                <Plus className="w-4 h-4 text-emerald-700 group-hover:scale-110 transition" />
-                <span>+ Add Commercial & Pipeline Stage for Additional Service</span>
-              </button>
+              {canEdit ? (
+                <button
+                  type="button"
+                  onClick={() => handleAddCommercial()}
+                  className="px-4 py-2.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border-2 border-dashed border-emerald-300 hover:border-emerald-400 rounded-xl flex items-center justify-center gap-2 transition shadow-2xs group"
+                >
+                  <Plus className="w-4 h-4 text-emerald-700 group-hover:scale-110 transition" />
+                  <span>+ Add Commercial & Pipeline Stage for Additional Service</span>
+                </button>
+              ) : <div />}
 
               {/* Commercials Summary Badge */}
               {commercials.length > 1 && (

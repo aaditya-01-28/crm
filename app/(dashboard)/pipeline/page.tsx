@@ -81,7 +81,24 @@ interface Deal {
       [key: string]: any;
     } | null;
   };
-  rep?: { fullName: string } | null;
+  rep?: { fullName: string; email?: string } | null;
+  payment?: {
+    id: string;
+    userType: string;
+    panelUserId: string;
+    creditsToAdd: number;
+    originalAmount: string;
+    taxAmount: string;
+    tdsAmount: string;
+    finalAmount: string;
+    paymentMode: string;
+    gstin?: string | null;
+    screenshotUrl?: string | null;
+    opsApprovalStatus?: string;
+    createdAt?: string;
+  } | null;
+  createdAt?: string;
+  updatedAt?: string;
   leadId: string;
 }
 
@@ -375,7 +392,7 @@ export default function PipelinePage() {
       {showDealModal && (
         <DealModal
           deal={editingDeal}
-          canEdit={canManageDeals}
+          canEdit={editingDeal ? canManageDeals : true}
           canDelete={canManageDeals}
           onClose={() => setShowDealModal(false)}
           onSaved={() => {

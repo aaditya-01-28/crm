@@ -38,7 +38,7 @@ export async function PATCH(
 
     return await withClient(async (client) => {
       const dealRes = await client.query(
-        "SELECT id, lead_id, stage, closing_notes, quoted_price, expected_closing_date, service_type, quantity FROM deals WHERE id = $1 AND tenant_id = $2",
+        "SELECT id, lead_id, rep_id, stage, closing_notes, quoted_price, expected_closing_date, service_type, quantity FROM deals WHERE id = $1 AND tenant_id = $2",
         [id, tenantId]
       );
 
@@ -48,13 +48,70 @@ export async function PATCH(
 
       const deal = dealRes.rows[0];
       const newStage = stage || deal.stage;
-      const newNotes = closingNotes !== undefined ? closingNotes : deal.closing_notes;
       const newPrice = quotedPrice !== undefined ? quotedPrice : deal.quoted_price;
       const newClosingDate = expectedClosingDate
         ? new Date(expectedClosingDate)
         : deal.expected_closing_date;
       const newService = serviceType !== undefined ? serviceType : deal.service_type;
       const newQuantity = quantity !== undefined ? quantity : deal.quantity;
+
+      const wonDetails = body.wonDetails || body;
+      let newNotes = closingNotes !== undefined ? closingNotes : deal.closing_notes;
+
+      if (newStage === "closed_won" || wonDetails?.userId || wonDetails?.panelUserId) {
+        // Parse existing closing notes if it was JSON
+        let existingDossier: Record<string, any> = {};
+        try {
+          if (deal.closing_notes) {
+            existingDossier = JSON.parse(deal.closing_notes);
+          }
+        } catch {}
+
+        const dossier = {
+          ...existingDossier,
+          executiveName: wonDetails.executiveName || existingDossier.executiveName || null,
+          executiveEmail: wonDetails.executiveEmail || existingDossier.executiveEmail || null,
+          wonDate: wonDetails.wonDate || existingDossier.wonDate || new Date().toISOString().split("T")[0],
+          productName: wonDetails.productName || existingDossier.productName || newService,
+          productDescription: wonDetails.productDescription ?? existingDossier.productDescription ?? null,
+          customerCompanyName: wonDetails.customerCompanyName || body.companyName || existingDossier.customerCompanyName || null,
+          customerName: wonDetails.customerName || body.contactName || existingDossier.customerName || null,
+          customerContactNumber: wonDetails.customerContactNumber || body.phoneNumber || existingDossier.customerContactNumber || null,
+          customerEmail: wonDetails.customerEmail || existingDossier.customerEmail || null,
+          userType: wonDetails.userType || existingDossier.userType || "new_user",
+          userId: wonDetails.userId || wonDetails.panelUserId || existingDossier.userId || null,
+          creditsToAdd: wonDetails.creditsToAdd || newQuantity,
+          originalAmount: wonDetails.originalAmount || newPrice,
+          taxAmount: wonDetails.taxAmount ?? existingDossier.taxAmount ?? null,
+          tds: wonDetails.tds ?? existingDossier.tds ?? "0",
+          finalAmount: wonDetails.finalAmount || newPrice,
+          paymentMode: wonDetails.paymentMode || existingDossier.paymentMode || null,
+          gstinNumber: wonDetails.gstinNumber || wonDetails.gstin || existingDossier.gstinNumber || null,
+          paymentScreenshotUrl: wonDetails.paymentScreenshotUrl || wonDetails.screenshotUrl || existingDossier.paymentScreenshotUrl || null,
+          notes: closingNotes || existingDossier.notes || null,
+        };
+        newNotes = JSON.stringify(dossier);
+      } else if (newStage === "demo_scheduled" && (body.demoDate || body.meetingLink)) {
+        newNotes = JSON.stringify({
+          demoDate: body.demoDate,
+          meetingLink: body.meetingLink,
+          decisionMakerName: body.decisionMakerName,
+          notes: closingNotes || body.demoNotes || null,
+        });
+      } else if ((newStage === "demo_done" || newStage === "quote_sent") && (body.contactBackDate || body.followupChannel)) {
+        newNotes = JSON.stringify({
+          contactBackDate: body.contactBackDate,
+          followupChannel: body.followupChannel,
+          notes: closingNotes || body.demoFeedback || null,
+        });
+      } else if (newStage === "closed_lost" && (body.lostReason || body.competitorName || body.lostRemarks)) {
+        newNotes = JSON.stringify({
+          lostReason: body.lostReason,
+          competitorName: body.competitorName,
+          lostRemarks: body.lostRemarks,
+          notes: closingNotes || body.lostRemarks || null,
+        });
+      }
 
       const updateRes = await client.query(
         `UPDATE deals
@@ -70,15 +127,20 @@ export async function PATCH(
 
       const updated = updateRes.rows[0];
 
-      // Update lead metadata/contact/company if edited by manager/admin
-      if (body.contactName || body.companyName || body.serviceType || body.address) {
+      // Update lead metadata/contact/company if edited
+      const customerEmail = wonDetails?.customerEmail || body.customerEmail || null;
+      if (body.contactName || body.companyName || body.serviceType || body.address || customerEmail) {
         const leadRes = await client.query(
           "SELECT id, custom_metadata FROM leads WHERE id = $1 AND tenant_id = $2",
           [deal.lead_id, tenantId]
         );
         if (leadRes.rows.length > 0) {
           const oldMeta = (leadRes.rows[0].custom_metadata as Record<string, any>) || {};
-          const updatedMeta = { ...oldMeta, ...(body.address ? { address: body.address } : {}) };
+          const updatedMeta = {
+            ...oldMeta,
+            ...(body.address ? { address: body.address } : {}),
+            ...(customerEmail ? { customerEmail } : {}),
+          };
           await client.query(
             `UPDATE leads
              SET contact_name = COALESCE($1, contact_name),
@@ -139,7 +201,7 @@ export async function PATCH(
               [
                 tenantId,
                 deal.lead_id,
-                session?.sub || repId,
+                deal.rep_id || session?.sub || repId,
                 item.serviceType,
                 parseInt(item.quantity) || 0,
                 parseFloat(item.quotedPrice) || 0,
@@ -152,10 +214,9 @@ export async function PATCH(
         }
       }
 
-      const wonDetails = body.wonDetails || body;
-
       // Closed Won payment dossier record (upsert payment to keep in sync)
-      if (newStage === "closed_won" && (wonDetails.userId || wonDetails.panelUserId)) {
+      if (newStage === "closed_won") {
+        const portalUserId = wonDetails.userId || wonDetails.panelUserId || (deal.lead_id ? `TXT_${deal.lead_id.slice(0, 6).toUpperCase()}` : "PORTAL_USER");
         const existingPay = await client.query(
           "SELECT id FROM payments WHERE deal_id = $1 AND tenant_id = $2 LIMIT 1",
           [id, tenantId]
@@ -169,15 +230,15 @@ export async function PATCH(
              WHERE id = $11`,
             [
               wonDetails.userType || "new_user",
-              wonDetails.userId || wonDetails.panelUserId || "PORTAL_USER",
+              portalUserId,
               parseInt(wonDetails.creditsToAdd || newQuantity) || 0,
               parseFloat(wonDetails.originalAmount || newPrice) || 0,
               parseFloat(wonDetails.taxAmount || 0) || 0,
               parseFloat(wonDetails.tds || 0) || 0,
               parseFloat(wonDetails.finalAmount || newPrice) || 0,
-              wonDetails.paymentMode || "Bank Transfer",
-              wonDetails.gstinNumber || null,
-              wonDetails.paymentScreenshotUrl || "https://placeholder-payment-ref",
+              wonDetails.paymentMode || "UPI / QR",
+              wonDetails.gstinNumber || wonDetails.gstin || null,
+              wonDetails.paymentScreenshotUrl || wonDetails.screenshotUrl || "NA",
               existingPay.rows[0].id,
             ]
           );
@@ -193,7 +254,7 @@ export async function PATCH(
               tenantId,
               id,
               deal.lead_id,
-              session?.sub || repId,
+              deal.rep_id || session?.sub || repId,
               wonDetails.userType || "new_user",
               wonDetails.userId || wonDetails.panelUserId || "PORTAL_USER",
               parseInt(wonDetails.creditsToAdd || newQuantity) || 0,
@@ -201,9 +262,9 @@ export async function PATCH(
               parseFloat(wonDetails.taxAmount || 0) || 0,
               parseFloat(wonDetails.tds || 0) || 0,
               parseFloat(wonDetails.finalAmount || newPrice) || 0,
-              wonDetails.paymentMode || "Bank Transfer",
-              wonDetails.gstinNumber || null,
-              wonDetails.paymentScreenshotUrl || "https://placeholder-payment-ref",
+              wonDetails.paymentMode || "UPI / QR",
+              wonDetails.gstinNumber || wonDetails.gstin || null,
+              wonDetails.paymentScreenshotUrl || wonDetails.screenshotUrl || "NA",
             ]
           );
         }
