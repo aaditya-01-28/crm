@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import { verifyToken, signAccessToken, SESSION_DURATION_SECONDS } from "@/lib/auth";
 
 const PUBLIC_PATHS = [
   "/login",
@@ -31,19 +31,38 @@ export async function proxy(request: NextRequest) {
 
   const authHeader = request.headers.get("authorization");
   const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
-  const token = request.cookies.get("access_token")?.value || bearerToken;
+  const cookieAccessToken = request.cookies.get("access_token")?.value;
+  const cookieRefreshToken = request.cookies.get("refresh_token")?.value;
+  const token = cookieAccessToken || bearerToken;
 
-  if (!token) {
-    if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  let payload = token ? await verifyToken(token) : null;
+  let renewedAccessToken: string | null = null;
+
+  // Seamless auto-refresh: if access token is expired or invalid, check refresh token
+  if (!payload && cookieRefreshToken) {
+    const refreshPayload = await verifyToken(cookieRefreshToken);
+    if (refreshPayload) {
+      payload = refreshPayload;
+      try {
+        renewedAccessToken = await signAccessToken({
+          sub: refreshPayload.sub,
+          tenantId: refreshPayload.tenantId,
+          role: refreshPayload.role,
+          email: refreshPayload.email,
+          fullName: refreshPayload.fullName,
+          avatarUrl: refreshPayload.avatarUrl,
+          mustChangePassword: refreshPayload.mustChangePassword,
+          lastLoginAt: refreshPayload.lastLoginAt,
+          loginAt: refreshPayload.loginAt,
+        });
+      } catch (e) {
+        console.warn("[PROXY] Failed to re-sign access token:", e);
+      }
     }
-    return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  const payload = await verifyToken(token);
-
   if (!payload) {
-    // Token expired or invalid
+    // Both access token and refresh token are missing, expired, or invalid
     if (pathname.startsWith("/api/")) {
       return NextResponse.json(
         { error: "Token expired or invalid" },
@@ -56,7 +75,7 @@ export async function proxy(request: NextRequest) {
     return response;
   }
 
-  // Inject tenant info into request headers for API routes
+  // Inject tenant and user info into request headers for downstream API routes & components
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-user-id", payload.sub);
   requestHeaders.set("x-tenant-id", payload.tenantId);
@@ -64,7 +83,19 @@ export async function proxy(request: NextRequest) {
   requestHeaders.set("x-user-email", payload.email);
   requestHeaders.set("x-user-name", payload.fullName);
 
-  return NextResponse.next({ request: { headers: requestHeaders } });
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
+
+  // If a renewed access token was generated, update the browser's cookie
+  if (renewedAccessToken) {
+    response.cookies.set("access_token", renewedAccessToken, {
+      httpOnly: true,
+      path: "/",
+      maxAge: SESSION_DURATION_SECONDS,
+      sameSite: "lax",
+    });
+  }
+
+  return response;
 }
 
 export const config = {

@@ -41,12 +41,46 @@ export async function PATCH(
       );
 
       if (status === "approved") {
-        await client.query("UPDATE deals SET stage = 'closed_won', updated_at = NOW() WHERE id = $1", [
-          payment.deal_id,
-        ]);
-        await client.query("UPDATE leads SET status = 'won', updated_at = NOW() WHERE id = $1", [
-          payment.lead_id,
-        ]);
+        let matchedDealId = payment.deal_id;
+
+        if (matchedDealId) {
+          await client.query("UPDATE deals SET stage = 'closed_won', updated_at = NOW() WHERE id = $1", [
+            matchedDealId,
+          ]);
+        }
+
+        if (payment.lead_id) {
+          await client.query("UPDATE leads SET status = 'won', updated_at = NOW() WHERE id = $1", [
+            payment.lead_id,
+          ]);
+
+          // If payment was not linked to a deal, find or create the deal for this lead
+          if (!matchedDealId) {
+            const existingDeal = await client.query(
+              "SELECT id FROM deals WHERE lead_id = $1 ORDER BY created_at DESC LIMIT 1",
+              [payment.lead_id]
+            );
+            if (existingDeal.rows.length > 0) {
+              matchedDealId = existingDeal.rows[0].id;
+              await client.query("UPDATE deals SET stage = 'closed_won', updated_at = NOW() WHERE id = $1", [matchedDealId]);
+              await client.query("UPDATE payments SET deal_id = $1 WHERE id = $2", [matchedDealId, id]);
+            } else {
+              const newDeal = await client.query(
+                `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes, created_at, updated_at)
+                 SELECT p.tenant_id, p.lead_id, COALESCE(p.rep_id, $2), COALESCE(l.service_type, 'WhatsApp API'), COALESCE(p.credits_to_add, 10000), COALESCE(p.original_amount, p.final_amount, 0), 'closed_won', 'Approved Payment Onboarding', NOW(), NOW()
+                 FROM payments p
+                 LEFT JOIN leads l ON p.lead_id = l.id
+                 WHERE p.id = $1
+                 RETURNING id`,
+                [id, approverId]
+              );
+              if (newDeal.rows.length > 0) {
+                matchedDealId = newDeal.rows[0].id;
+                await client.query("UPDATE payments SET deal_id = $1 WHERE id = $2", [matchedDealId, id]);
+              }
+            }
+          }
+        }
       }
 
       return NextResponse.json({ payment: updateRes.rows[0] });

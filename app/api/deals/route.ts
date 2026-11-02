@@ -55,6 +55,46 @@ export async function GET(request: NextRequest) {
            WHERE d.lead_id = l.id AND l.tenant_id = $1 AND l.status IN ('lost', 'closed_lost') AND d.stage NOT IN ('closed_lost', 'lost')`,
           [tenantId]
         );
+
+        // Auto-create deals for approved payments that have no deal
+        await client.query(
+          `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes, created_at, updated_at)
+           SELECT p.tenant_id, p.lead_id, COALESCE(p.rep_id, $1), COALESCE(l.service_type, 'WhatsApp API'), COALESCE(p.credits_to_add, 10000), COALESCE(p.original_amount, p.final_amount, 0), 'closed_won', 'Approved Payment Onboarding', COALESCE(p.created_at, NOW()), NOW()
+           FROM payments p
+           LEFT JOIN leads l ON p.lead_id = l.id
+           WHERE p.tenant_id = $2 AND p.ops_approval_status = 'approved'
+             AND NOT EXISTS (SELECT 1 FROM deals d WHERE d.id = p.deal_id OR (p.deal_id IS NULL AND p.lead_id IS NOT NULL AND d.lead_id = p.lead_id))`,
+          [repId, tenantId]
+        );
+
+        // Auto-link unlinked payments to matching deals by lead_id
+        await client.query(
+          `UPDATE payments p
+           SET deal_id = d.id
+           FROM deals d
+           WHERE p.deal_id IS NULL AND p.lead_id IS NOT NULL AND d.lead_id = p.lead_id AND p.tenant_id = $1`,
+          [tenantId]
+        );
+
+        // Auto-sync deal stage if payment is approved
+        await client.query(
+          `UPDATE deals d
+           SET stage = 'closed_won', updated_at = NOW()
+           FROM payments p
+           WHERE (p.deal_id = d.id OR (p.deal_id IS NULL AND p.lead_id = d.lead_id))
+             AND p.tenant_id = $1 AND p.ops_approval_status = 'approved'
+             AND d.stage NOT IN ('closed_won', 'won')`,
+          [tenantId]
+        );
+
+        // Auto-sync leads to won if payment is approved
+        await client.query(
+          `UPDATE leads l
+           SET status = 'won', updated_at = NOW()
+           FROM payments p
+           WHERE p.lead_id = l.id AND p.tenant_id = $1 AND p.ops_approval_status = 'approved' AND l.status NOT IN ('won', 'closed_won')`,
+          [tenantId]
+        );
       } catch (syncErr) {
         console.warn("[DEALS SYNC WARNING]", syncErr);
       }
@@ -93,11 +133,11 @@ export async function GET(request: NextRequest) {
                   p.ops_approval_status as "payment_opsApprovalStatus",
                   p.created_at as "payment_createdAt"
            FROM payments p
-           WHERE p.deal_id = d.id
-           ORDER BY p.created_at DESC
+           WHERE p.deal_id = d.id OR (p.deal_id IS NULL AND d.lead_id IS NOT NULL AND p.lead_id = d.lead_id)
+           ORDER BY (CASE WHEN p.ops_approval_status = 'approved' THEN 1 ELSE 2 END) ASC, p.created_at DESC
            LIMIT 1
          ) pay ON true
-         WHERE d.tenant_id = $1 ${isRep ? "AND (d.rep_id = $2 OR l.assigned_rep_id = $2)" : ""}
+         WHERE d.tenant_id = $1 ${isRep ? "AND (d.rep_id = $2 OR l.assigned_rep_id = $2 OR EXISTS (SELECT 1 FROM payments p2 WHERE (p2.deal_id = d.id OR (p2.deal_id IS NULL AND p2.lead_id = d.lead_id)) AND p2.rep_id = $2))" : ""}
          ORDER BY d.created_at DESC`,
         isRep ? [tenantId, repId] : [tenantId]
       );

@@ -22,19 +22,29 @@ export interface JWTPayload {
   loginAt?: string | null;
 }
 
+function resolveExpiry(envVal: string | undefined, defaultExpiry: string): string {
+  // Guard: If legacy env variable has "15m" or is empty, enforce user-requested 9 hours
+  if (!envVal || envVal === "15m") {
+    return defaultExpiry;
+  }
+  return envVal;
+}
+
 export async function signAccessToken(payload: JWTPayload): Promise<string> {
+  const expiry = resolveExpiry(process.env.JWT_EXPIRY, JWT_SESSION_EXPIRY);
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime(process.env.JWT_EXPIRY || JWT_SESSION_EXPIRY)
+    .setExpirationTime(expiry)
     .sign(JWT_SECRET);
 }
 
 export async function signRefreshToken(payload: JWTPayload): Promise<string> {
+  const expiry = resolveExpiry(process.env.JWT_REFRESH_EXPIRY, "7d");
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime(process.env.JWT_REFRESH_EXPIRY || JWT_SESSION_EXPIRY)
+    .setExpirationTime(expiry)
     .sign(JWT_SECRET);
 }
 
@@ -59,8 +69,16 @@ export async function getSession(request?: NextRequest | Request): Promise<JWTPa
   try {
     const cookieStore = await cookies();
     const token = cookieStore.get("access_token")?.value;
-    if (!token) return null;
-    return verifyToken(token);
+    if (token) {
+      const payload = await verifyToken(token);
+      if (payload) return payload;
+    }
+    // Seamless fallback to refresh_token if access_token is expired or missing
+    const refreshToken = cookieStore.get("refresh_token")?.value;
+    if (refreshToken) {
+      return await verifyToken(refreshToken);
+    }
+    return null;
   } catch {
     return null;
   }
