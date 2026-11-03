@@ -3,12 +3,15 @@ import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { isManagerOrAdmin } from "@/lib/rbac";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await getSession();
+  const session = await getSession(request);
   const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
   const repId = request.headers.get("x-user-id") || session?.sub || "";
   const role = request.headers.get("x-user-role") || session?.role || "";
@@ -341,7 +344,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await getSession();
+  const session = await getSession(request);
   const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
   const role = request.headers.get("x-user-role") || session?.role || "";
 

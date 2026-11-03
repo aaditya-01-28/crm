@@ -21,6 +21,7 @@ import {
   Search,
   X,
   Filter,
+  AlertCircle,
 } from "lucide-react";
 import { formatCurrency, SERVICE_INTERESTS } from "@/lib/utils";
 import { DealCard } from "@/components/pipeline/DealCard";
@@ -117,8 +118,20 @@ interface Deal {
 }
 
 async function fetchDeals(): Promise<{ deals: Deal[] }> {
-  const res = await fetch("/api/deals");
-  if (!res.ok) throw new Error("Failed to fetch deals");
+  const res = await fetch("/api/deals", { cache: "no-store" });
+  if (!res.ok) {
+    let errMsg = `Failed to fetch deals (${res.status})`;
+    try {
+      const errJson = await res.json();
+      if (errJson?.error) errMsg += `: ${errJson.error}`;
+    } catch {
+      try {
+        const text = await res.text();
+        if (text) errMsg += `: ${text}`;
+      } catch {}
+    }
+    throw new Error(errMsg);
+  }
   return res.json();
 }
 
@@ -138,9 +151,11 @@ export default function PipelinePage() {
   const [repFilter, setRepFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
 
-  const { data, isLoading, isRefetching, refetch } = useQuery({
+  const { data, isLoading, isError, error, isRefetching, refetch } = useQuery({
     queryKey: ["deals"],
     queryFn: fetchDeals,
+    retry: 2,
+    staleTime: 5000,
   });
 
   const deleteMutation = useMutation({
@@ -545,6 +560,27 @@ export default function PipelinePage() {
           </div>
         )}
       </div>
+
+      {/* Error Notice Ribbon */}
+      {isError && (
+        <div className="mb-4 p-3.5 rounded-xl border border-rose-200 bg-rose-50/90 text-rose-800 flex items-center justify-between shadow-xs shrink-0">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <div>
+              <p className="font-semibold text-xs">Failed to load pipeline deals</p>
+              <p className="text-[11px] text-rose-700 font-mono mt-0.5">{(error as Error)?.message || "Unknown error"}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg bg-rose-600 text-white hover:bg-rose-700 transition cursor-pointer shrink-0"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* Board summary ribbon */}
       <div className="mb-4 bg-white border border-slate-200/80 rounded-xl px-4 py-2.5 flex items-center justify-between text-xs text-slate-600 shadow-2xs shrink-0">

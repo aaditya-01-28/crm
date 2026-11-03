@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET(request: NextRequest) {
-  const session = await getSession();
+  const session = await getSession(request);
   const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
   const repId = request.headers.get("x-user-id") || session?.sub || "";
   const role = request.headers.get("x-user-role") || session?.role || "";
@@ -13,92 +16,11 @@ export async function GET(request: NextRequest) {
   }
 
   const isRep = role === "sales_rep";
+  const isValidUuid = (val?: string | null) =>
+    typeof val === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
   try {
     return await withClient(async (client) => {
-      // Auto-heal: Ensure all closed won/lost leads have matching deals in the pipeline
-      try {
-        // Auto-create deals for won leads without deals
-        await client.query(
-          `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes, created_at, updated_at)
-           SELECT l.tenant_id, l.id, COALESCE(l.assigned_rep_id, $1), COALESCE(l.service_type, 'WhatsApp API'), 10000, 0, 'closed_won', 'Closed Won Lead', NOW(), NOW()
-           FROM leads l
-           WHERE l.tenant_id = $2 AND l.status IN ('won', 'closed_won')
-             AND NOT EXISTS (SELECT 1 FROM deals d WHERE d.lead_id = l.id)`,
-          [repId, tenantId]
-        );
-
-        // Auto-create deals for lost leads without deals
-        await client.query(
-          `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes, created_at, updated_at)
-           SELECT l.tenant_id, l.id, COALESCE(l.assigned_rep_id, $1), COALESCE(l.service_type, 'WhatsApp API'), 10000, 0, 'closed_lost', 'Closed Lost Lead', NOW(), NOW()
-           FROM leads l
-           WHERE l.tenant_id = $2 AND l.status IN ('lost', 'closed_lost')
-             AND NOT EXISTS (SELECT 1 FROM deals d WHERE d.lead_id = l.id)`,
-          [repId, tenantId]
-        );
-
-        // Auto-sync deal stage if lead status is won but deal is in an earlier stage
-        await client.query(
-          `UPDATE deals d
-           SET stage = 'closed_won', updated_at = NOW()
-           FROM leads l
-           WHERE d.lead_id = l.id AND l.tenant_id = $1 AND l.status IN ('won', 'closed_won') AND d.stage NOT IN ('closed_won', 'won')`,
-          [tenantId]
-        );
-
-        // Auto-sync deal stage if lead status is lost but deal is in an earlier stage
-        await client.query(
-          `UPDATE deals d
-           SET stage = 'closed_lost', updated_at = NOW()
-           FROM leads l
-           WHERE d.lead_id = l.id AND l.tenant_id = $1 AND l.status IN ('lost', 'closed_lost') AND d.stage NOT IN ('closed_lost', 'lost')`,
-          [tenantId]
-        );
-
-        // Auto-create deals for approved payments that have no deal
-        await client.query(
-          `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes, created_at, updated_at)
-           SELECT p.tenant_id, p.lead_id, COALESCE(p.rep_id, $1), COALESCE(l.service_type, 'WhatsApp API'), COALESCE(p.credits_to_add, 10000), COALESCE(p.original_amount, p.final_amount, 0), 'closed_won', 'Approved Payment Onboarding', COALESCE(p.created_at, NOW()), NOW()
-           FROM payments p
-           LEFT JOIN leads l ON p.lead_id = l.id
-           WHERE p.tenant_id = $2 AND p.ops_approval_status = 'approved'
-             AND NOT EXISTS (SELECT 1 FROM deals d WHERE d.id = p.deal_id OR (p.deal_id IS NULL AND p.lead_id IS NOT NULL AND d.lead_id = p.lead_id))`,
-          [repId, tenantId]
-        );
-
-        // Auto-link unlinked payments to matching deals by lead_id
-        await client.query(
-          `UPDATE payments p
-           SET deal_id = d.id
-           FROM deals d
-           WHERE p.deal_id IS NULL AND p.lead_id IS NOT NULL AND d.lead_id = p.lead_id AND p.tenant_id = $1`,
-          [tenantId]
-        );
-
-        // Auto-sync deal stage if payment is approved
-        await client.query(
-          `UPDATE deals d
-           SET stage = 'closed_won', updated_at = NOW()
-           FROM payments p
-           WHERE (p.deal_id = d.id OR (p.deal_id IS NULL AND p.lead_id = d.lead_id))
-             AND p.tenant_id = $1 AND p.ops_approval_status = 'approved'
-             AND d.stage NOT IN ('closed_won', 'won')`,
-          [tenantId]
-        );
-
-        // Auto-sync leads to won if payment is approved
-        await client.query(
-          `UPDATE leads l
-           SET status = 'won', updated_at = NOW()
-           FROM payments p
-           WHERE p.lead_id = l.id AND p.tenant_id = $1 AND p.ops_approval_status = 'approved' AND l.status NOT IN ('won', 'closed_won')`,
-          [tenantId]
-        );
-      } catch (syncErr) {
-        console.warn("[DEALS SYNC WARNING]", syncErr);
-      }
-
       const dealsRes = await client.query(
         `SELECT d.id, d.tenant_id as "tenantId", d.lead_id as "leadId", d.rep_id as "repId",
                 d.service_type as "serviceType", d.quantity, d.quoted_price as "quotedPrice",
@@ -109,11 +31,19 @@ export async function GET(request: NextRequest) {
                 l.custom_metadata as "lead_customMetadata",
                 COALESCE(u.full_name, rep_lead.full_name, 'Assigned Representative') as "rep_fullName",
                 COALESCE(u.email, rep_lead.email, '') as "rep_email",
-                pay.payment_id, pay.payment_userType, pay.payment_panelUserId,
-                pay.payment_creditsToAdd, pay.payment_originalAmount, pay.payment_taxAmount,
-                pay.payment_tdsAmount, pay.payment_finalAmount, pay.payment_paymentMode,
-                pay.payment_gstin, pay.payment_screenshotUrl, pay.payment_opsApprovalStatus,
-                pay.payment_createdAt
+                COALESCE(pay.payment_id, pay_fb.fallback_payment_id) as payment_id,
+                COALESCE(pay.payment_userType, pay_fb.fallback_payment_userType) as "payment_userType",
+                COALESCE(pay.payment_panelUserId, pay_fb.fallback_payment_panelUserId) as "payment_panelUserId",
+                COALESCE(pay.payment_creditsToAdd, pay_fb.fallback_payment_creditsToAdd) as "payment_creditsToAdd",
+                COALESCE(pay.payment_originalAmount, pay_fb.fallback_payment_originalAmount) as "payment_originalAmount",
+                COALESCE(pay.payment_taxAmount, pay_fb.fallback_payment_taxAmount) as "payment_taxAmount",
+                COALESCE(pay.payment_tdsAmount, pay_fb.fallback_payment_tdsAmount) as "payment_tdsAmount",
+                COALESCE(pay.payment_finalAmount, pay_fb.fallback_payment_finalAmount) as "payment_finalAmount",
+                COALESCE(pay.payment_paymentMode, pay_fb.fallback_payment_paymentMode) as "payment_paymentMode",
+                COALESCE(pay.payment_gstin, pay_fb.fallback_payment_gstin) as "payment_gstin",
+                COALESCE(pay.payment_screenshotUrl, pay_fb.fallback_payment_screenshotUrl) as "payment_screenshotUrl",
+                COALESCE(pay.payment_opsApprovalStatus, pay_fb.fallback_payment_opsApprovalStatus) as "payment_opsApprovalStatus",
+                COALESCE(pay.payment_createdAt, pay_fb.fallback_payment_createdAt) as "payment_createdAt"
          FROM deals d
          LEFT JOIN leads l ON d.lead_id = l.id
          LEFT JOIN users u ON d.rep_id = u.id
@@ -133,19 +63,50 @@ export async function GET(request: NextRequest) {
                   p.ops_approval_status as "payment_opsApprovalStatus",
                   p.created_at as "payment_createdAt"
            FROM payments p
-           WHERE p.deal_id = d.id OR (p.deal_id IS NULL AND d.lead_id IS NOT NULL AND p.lead_id = d.lead_id)
-           ORDER BY (CASE WHEN p.ops_approval_status = 'approved' THEN 1 ELSE 2 END) ASC, p.created_at DESC
+           WHERE p.deal_id = d.id
+           ORDER BY p.created_at DESC
            LIMIT 1
          ) pay ON true
-         WHERE d.tenant_id = $1 ${isRep ? "AND (d.rep_id = $2 OR l.assigned_rep_id = $2 OR EXISTS (SELECT 1 FROM payments p2 WHERE (p2.deal_id = d.id OR (p2.deal_id IS NULL AND p2.lead_id = d.lead_id)) AND p2.rep_id = $2))" : ""}
+         LEFT JOIN LATERAL (
+           SELECT p.id as fallback_payment_id,
+                  p.user_type as "fallback_payment_userType",
+                  p.panel_user_id as "fallback_payment_panelUserId",
+                  p.credits_to_add as "fallback_payment_creditsToAdd",
+                  p.original_amount as "fallback_payment_originalAmount",
+                  p.tax_amount as "fallback_payment_taxAmount",
+                  p.tds_amount as "fallback_payment_tdsAmount",
+                  p.final_amount as "fallback_payment_finalAmount",
+                  p.payment_mode as "fallback_payment_paymentMode",
+                  p.gstin as "fallback_payment_gstin",
+                  p.screenshot_url as "fallback_payment_screenshotUrl",
+                  p.ops_approval_status as "fallback_payment_opsApprovalStatus",
+                  p.created_at as "fallback_payment_createdAt"
+           FROM payments p
+           WHERE pay.payment_id IS NULL AND d.lead_id IS NOT NULL AND p.lead_id = d.lead_id
+           ORDER BY p.created_at DESC
+           LIMIT 1
+         ) pay_fb ON true
+         WHERE d.tenant_id = $1 ${isRep && isValidUuid(repId) ? "AND (d.rep_id = $2 OR l.assigned_rep_id = $2)" : ""}
          ORDER BY d.created_at DESC`,
-        isRep ? [tenantId, repId] : [tenantId]
+        isRep && isValidUuid(repId) ? [tenantId, repId] : [tenantId]
       );
 
       const deals = dealsRes.rows.map((r) => {
         let normalizedStage = r.stage;
-        if (normalizedStage === "won") normalizedStage = "closed_won";
-        if (normalizedStage === "lost") normalizedStage = "closed_lost";
+        if (r.payment_opsApprovalStatus === "approved") {
+          normalizedStage = "closed_won";
+        } else if (normalizedStage === "won") {
+          normalizedStage = "closed_won";
+        } else if (normalizedStage === "lost") {
+          normalizedStage = "closed_lost";
+        }
+
+        let customMetadata = r.lead_customMetadata;
+        if (typeof customMetadata === "string") {
+          try {
+            customMetadata = JSON.parse(customMetadata);
+          } catch {}
+        }
 
         return {
           id: r.id,
@@ -165,7 +126,7 @@ export async function GET(request: NextRequest) {
             contactName: r.lead_contactName,
             companyName: r.lead_companyName,
             businessVertical: r.lead_businessVertical,
-            customMetadata: r.lead_customMetadata,
+            customMetadata,
           },
           rep: {
             fullName: r.rep_fullName,
@@ -200,7 +161,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getSession();
+  const session = await getSession(request);
   const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
   const repId = request.headers.get("x-user-id") || session?.sub || "";
 
