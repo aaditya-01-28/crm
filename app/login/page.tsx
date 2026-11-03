@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Eye, EyeOff, Mail, KeyRound, X, CheckCircle2, ArrowRight, ShieldAlert, ShieldCheck, UserCheck } from "lucide-react";
@@ -29,6 +29,16 @@ export default function LoginPage() {
   const [showNewPw, setShowNewPw] = useState(false);
   const [showConfirmPw, setShowConfirmPw] = useState(false);
   const [settingNewPassword, setSettingNewPassword] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("mustChangePassword") === "true") {
+        setShowSetNewPasswordModal(true);
+        toast.info("Please create your new permanent password before proceeding.");
+      }
+    }
+  }, []);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -430,7 +440,7 @@ export default function LoginPage() {
                 Set New Permanent Password
               </h3>
               <p className="text-xs text-emerald-300/80 mt-1">
-                Temporary Password Verified · Super Admin Account Security
+                Temporary Password Verified · Account Access Setup
               </p>
             </div>
 

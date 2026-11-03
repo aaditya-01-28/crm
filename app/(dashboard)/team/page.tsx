@@ -203,7 +203,10 @@ export default function TeamPage() {
       return resData;
     },
     onSuccess: (data, vars) => {
-      toast.success(`Password for ${targetUser?.fullName} updated successfully! ✅`);
+      toast.success(
+        data.message ||
+          `Temporary password for ${targetUser?.fullName} dispatched to ${targetUser?.email}! User must set a permanent password on 1st login. ✅`
+      );
       setResetSuccessData({
         email: targetUser?.email || "",
         password: vars.newPassword,
@@ -639,10 +642,10 @@ export default function TeamPage() {
                   </div>
                   <div>
                     <h4 className="font-bold text-gray-900 text-base">
-                      Password Updated Successfully!
+                      Temporary Password Dispatched!
                     </h4>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      New credentials for <strong>{resetSuccessData.name}</strong> are ready.
+                      Sent to <strong>{resetSuccessData.email}</strong>. User will be required to create their permanent password on 1st login.
                     </p>
                   </div>
 
@@ -655,11 +658,15 @@ export default function TeamPage() {
                     </div>
                     <div>
                       <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">
-                        New Password
+                        Assigned Temporary Password
                       </span>
                       <span className="font-mono font-bold text-indigo-700 text-sm select-all">
                         {resetSuccessData.password}
                       </span>
+                    </div>
+                    <div className="pt-1 text-[11px] text-emerald-700 flex items-center gap-1 font-medium">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Emailed to user's inbox & first-login password prompt active</span>
                     </div>
                   </div>
 
@@ -711,14 +718,14 @@ export default function TeamPage() {
                       Level 3 Super Admin Privilege
                     </p>
                     <p className="text-[11px] text-indigo-800 leading-relaxed">
-                      You are manually assigning a new password for <strong>{targetUser.fullName}</strong> ({targetUser.email}). Any open reset requests for this user will automatically be marked resolved.
+                      You are assigning a temporary password for <strong>{targetUser.fullName}</strong> ({targetUser.email}). The temporary credentials will be sent to their email ID, and on their 1st login they will be prompted to create their new permanent password.
                     </p>
                   </div>
 
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                        New Password <span className="text-red-500">*</span>
+                        Temporary Password <span className="text-red-500">*</span>
                       </label>
                       <button
                         type="button"
@@ -736,7 +743,7 @@ export default function TeamPage() {
                         onChange={(e) => setNewPassword(e.target.value)}
                         required
                         placeholder="Minimum 6 characters"
-                        className="w-full pl-3.5 pr-10 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm bg-gray-50/50"
+                        className="w-full pl-3.5 pr-10 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm bg-gray-50/50 font-mono"
                       />
                       <button
                         type="button"
@@ -764,7 +771,7 @@ export default function TeamPage() {
                       {adminResetPasswordMutation.isPending ? (
                         <>
                           <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          Updating...
+                          Sending & Updating...
                         </>
                       ) : (
                         <>

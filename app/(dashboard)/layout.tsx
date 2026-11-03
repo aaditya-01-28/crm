@@ -16,6 +16,10 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
+  if (session.mustChangePassword) {
+    redirect("/login?mustChangePassword=true");
+  }
+
   let enrichedUser = session;
   if (!session.lastLoginAt && !session.loginAt) {
     try {

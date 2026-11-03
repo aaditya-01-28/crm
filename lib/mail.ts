@@ -213,7 +213,7 @@ export async function sendTemporaryPasswordEmail({
           Textora Engage CRM
         </h1>
         <p style="color: #34d399; margin: 4px 0 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">
-          Super Admin Security System
+          Enterprise Authentication System
         </p>
       </div>
       <div style="padding: 32px;">
@@ -224,7 +224,7 @@ export async function sendTemporaryPasswordEmail({
           Hello <strong>${fullName}</strong>,
         </p>
         <p style="font-size: 14px; line-height: 1.6; color: #475569; margin: 0 0 20px;">
-          A password reset was requested for your Level 3 Super Admin account. Use the temporary password below to sign in:
+          A temporary password has been assigned for your Textora Engage CRM account. Use the temporary password below to sign in:
         </p>
 
         <div style="background-color: #f0fdf4; border: 2px dashed #10b981; padding: 20px; border-radius: 12px; text-align: center; margin: 24px 0;">

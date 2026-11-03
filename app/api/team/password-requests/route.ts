@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { sendTemporaryPasswordEmail } from "@/lib/mail";
 import bcrypt from "bcryptjs";
 
 export async function GET(request: NextRequest) {
@@ -109,10 +110,15 @@ export async function PATCH(request: NextRequest) {
 
         const passwordHash = await bcrypt.hash(newPassword, 12);
 
-        // Update target user's password
+        await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false;").catch(() => {});
+
+        // Update target user's password and require password change on first login
         await client.query(
           `UPDATE users
-           SET password_hash = $1, reset_token = NULL, reset_token_expiry = NULL
+           SET password_hash = $1,
+               must_change_password = true,
+               reset_token = NULL,
+               reset_token_expiry = NULL
            WHERE id = $2 AND tenant_id = $3`,
           [passwordHash, resetReq.userId, tenantId]
         );
@@ -125,9 +131,29 @@ export async function PATCH(request: NextRequest) {
           [currentUserId, adminNotes || null, requestId]
         );
 
+        const origin =
+          request.headers.get("origin") ||
+          process.env.NEXT_PUBLIC_APP_URL ||
+          "https://crm.textorasms.com";
+        const loginUrl = `${origin}/login`;
+
+        let emailDelivered = false;
+        try {
+          const mailResult = await sendTemporaryPasswordEmail({
+            to: resetReq.email,
+            fullName: resetReq.fullName,
+            tempPassword: newPassword,
+            loginUrl,
+          });
+          emailDelivered = mailResult.delivered;
+        } catch (err) {
+          console.error("[PASSWORD_REQUEST_EMAIL_ERROR]", err);
+        }
+
         return NextResponse.json({
           success: true,
-          message: `Password for ${resetReq.fullName} has been updated. You can now provide the credentials to the user.`,
+          emailDelivered,
+          message: `Temporary password assigned and sent to ${resetReq.email}. User will create their permanent password on next login.`,
         });
       }
 

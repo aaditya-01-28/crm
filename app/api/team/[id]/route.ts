@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { sendTemporaryPasswordEmail } from "@/lib/mail";
 import bcrypt from "bcryptjs";
 
 export async function PATCH(
@@ -126,6 +127,8 @@ export async function PATCH(
         passwordHash = await bcrypt.hash(newPassword, 12);
       }
 
+      await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false;").catch(() => {});
+
       const updateRes = await client.query(
         `UPDATE users
          SET is_active = $1,
@@ -134,6 +137,7 @@ export async function PATCH(
              email = $4,
              phone_number = $5,
              password_hash = COALESCE($6, password_hash),
+             must_change_password = CASE WHEN $6 IS NOT NULL THEN true ELSE must_change_password END,
              reset_token = NULL,
              reset_token_expiry = NULL
          WHERE id = $7 AND tenant_id = $8
@@ -145,6 +149,7 @@ export async function PATCH(
       const updatedUser = updateRes.rows[0];
 
       // If password was reset, mark any pending password reset requests for this user as resolved
+      let emailDelivered = false;
       if (newPassword) {
         await client.query(
           `UPDATE password_reset_requests
@@ -152,14 +157,33 @@ export async function PATCH(
            WHERE user_id = $2 AND tenant_id = $3 AND status = 'pending'`,
           [currentUserId, id, tenantId]
         );
+
+        const origin =
+          request.headers.get("origin") ||
+          process.env.NEXT_PUBLIC_APP_URL ||
+          "https://crm.textorasms.com";
+        const loginUrl = `${origin}/login`;
+
+        try {
+          const mailResult = await sendTemporaryPasswordEmail({
+            to: targetEmail,
+            fullName: targetFullName,
+            tempPassword: newPassword,
+            loginUrl,
+          });
+          emailDelivered = mailResult.delivered;
+        } catch (err) {
+          console.error("[TEAM_PATCH_USER_EMAIL_ERROR]", err);
+        }
       }
 
       return NextResponse.json({
         success: true,
         user: updatedUser,
         passwordUpdated: !!newPassword,
+        emailDelivered,
         message: newPassword
-          ? `Password for ${updatedUser.fullName} has been updated successfully.`
+          ? `Temporary password assigned and sent to ${targetEmail}. User will create their permanent password upon first login.`
           : `User ${updatedUser.fullName} updated successfully.`,
       });
     });
