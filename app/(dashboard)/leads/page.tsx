@@ -206,6 +206,7 @@ export default function LeadsDirectoryPage() {
   const [newVertical, setNewVertical] = useState("");
   const [newServices, setNewServices] = useState<string[]>(["WhatsApp API"]);
   const [newLanguage, setNewLanguage] = useState("");
+  const [newAssignedRepId, setNewAssignedRepId] = useState("unassigned");
   const [savingLead, setSavingLead] = useState(false);
 
   // Fetch active sales reps for assignment
@@ -373,6 +374,7 @@ export default function LeadsDirectoryPage() {
           businessVertical: newVertical || null,
           serviceType: newServices.join(", ") || null,
           preferredLanguage: newLanguage || null,
+          assignedRepId: canAssign ? (newAssignedRepId || "unassigned") : undefined,
           source: "Manual Rep Entry",
         }),
       });
@@ -385,6 +387,7 @@ export default function LeadsDirectoryPage() {
       setNewVertical("");
       setNewServices(["WhatsApp API"]);
       setNewLanguage("");
+      setNewAssignedRepId("unassigned");
       refetch();
     } catch {
       toast.error("Failed to create lead");
@@ -656,12 +659,45 @@ export default function LeadsDirectoryPage() {
             <div className="w-8 h-8 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
           </div>
         ) : leads.length === 0 ? (
-          <div className="text-center py-16 text-gray-400">
-            <Contact className="w-12 h-12 mx-auto mb-3 opacity-30 text-gray-400" />
-            <p className="font-semibold text-gray-700">No leads found in this view</p>
-            <p className="text-xs text-gray-500 mt-1">
-              Try adjusting your search query, status tab, or import a new lead batch.
-            </p>
+          <div className="text-center py-16 text-gray-500">
+            <div className="w-14 h-14 mx-auto mb-3 rounded-full bg-amber-50 flex items-center justify-center text-amber-600">
+              <Contact className="w-7 h-7" />
+            </div>
+            {selectedRepFilter === "unassigned" ? (
+              <>
+                <p className="font-semibold text-gray-800 text-base">No Unassigned Leads in Pool</p>
+                <p className="text-xs text-gray-500 mt-1 max-w-md mx-auto">
+                  All {stats.all ?? 0} active leads in your CRM are currently assigned to sales representatives.
+                  New imported unassigned leads or leads unassigned via bulk actions will appear here.
+                </p>
+                <div className="mt-4 flex items-center justify-center gap-2">
+                  <button
+                    onClick={() => {
+                      setSelectedRepFilter("all");
+                      setActiveStatus("all");
+                    }}
+                    className="px-3.5 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition"
+                  >
+                    View All Leads ({stats.all ?? 0})
+                  </button>
+                  {canImport && (
+                    <button
+                      onClick={() => setShowImporter(true)}
+                      className="px-3.5 py-1.5 text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg transition"
+                    >
+                      Import New Batch
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="font-semibold text-gray-700">No leads found in this view</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Try adjusting your search query, status tab, or import a new lead batch.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -1053,6 +1089,43 @@ export default function LeadsDirectoryPage() {
                   Enables smart language-based representative assignment & transfer.
                 </p>
               </div>
+
+              {canAssign && (
+                <div>
+                  <label className="text-xs font-semibold text-gray-700 mb-1 block">
+                    Assign Lead To
+                  </label>
+                  <select
+                    value={newAssignedRepId}
+                    onChange={(e) => setNewAssignedRepId(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  >
+                    <option value="unassigned">⚠️ Unassigned Pool (Assign Later)</option>
+                    {teamReps.some((r) => r.role === "sales_manager") && (
+                      <optgroup label="Level 2 • Sales Managers">
+                        {teamReps
+                          .filter((r) => r.role === "sales_manager")
+                          .map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.fullName} (Manager)
+                            </option>
+                          ))}
+                      </optgroup>
+                    )}
+                    {teamReps.some((r) => r.role === "sales_rep") && (
+                      <optgroup label="Level 1 • Sales Representatives">
+                        {teamReps
+                          .filter((r) => r.role === "sales_rep")
+                          .map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.fullName} (Rep)
+                            </option>
+                          ))}
+                      </optgroup>
+                    )}
+                  </select>
+                </div>
+              )}
 
               <div className="flex gap-2 justify-end pt-2">
                 <button

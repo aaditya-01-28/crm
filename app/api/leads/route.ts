@@ -172,10 +172,20 @@ export async function GET(request: NextRequest) {
       );
       const total = countRes.rows[0]?.total || 0;
 
-      const baseWhereClause = baseConditions.join(" AND ");
+      // Compute status tab counts across the tenant (or scoped to the rep if sales_rep).
+      // We decouple this from filterRepId / search / vertical so top-level status navigation tabs
+      // never get wiped out to 0 when inspecting the unassigned pool or filtering by a specific rep.
+      const statusBaseConditions: string[] = ["l.tenant_id = $1"];
+      const statusBaseParams: any[] = [tenantId];
+
+      if (isSalesRep(role)) {
+        statusBaseConditions.push(`l.assigned_rep_id = $${statusBaseParams.push(repId)}`);
+      }
+
+      const statusWhereClause = statusBaseConditions.join(" AND ");
       const statusCountsRes = await client.query(
-        `SELECT status, COUNT(id)::int as count FROM leads l WHERE ${baseWhereClause} GROUP BY status`,
-        baseParams
+        `SELECT status, COUNT(id)::int as count FROM leads l WHERE ${statusWhereClause} GROUP BY status`,
+        statusBaseParams
       );
 
       let unassignedTotal = 0;
@@ -302,10 +312,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const initialRep =
-      can(role, "leads:assign") && assignedRepId
+    const initialRep = can(role, "leads:assign")
+      ? assignedRepId && assignedRepId !== "unassigned"
         ? assignedRepId
-        : repId;
+        : null
+      : repId;
 
     const metadata = {
       ...(preferredLanguage ? { preferredLanguage } : {}),
