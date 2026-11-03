@@ -31,61 +31,42 @@ export async function GET(request: NextRequest) {
                 l.custom_metadata as "lead_customMetadata",
                 COALESCE(u.full_name, rep_lead.full_name, 'Assigned Representative') as "rep_fullName",
                 COALESCE(u.email, rep_lead.email, '') as "rep_email",
-                COALESCE(pay.payment_id, pay_fb.fallback_payment_id) as payment_id,
-                COALESCE(pay.payment_userType, pay_fb.fallback_payment_userType) as "payment_userType",
-                COALESCE(pay.payment_panelUserId, pay_fb.fallback_payment_panelUserId) as "payment_panelUserId",
-                COALESCE(pay.payment_creditsToAdd, pay_fb.fallback_payment_creditsToAdd) as "payment_creditsToAdd",
-                COALESCE(pay.payment_originalAmount, pay_fb.fallback_payment_originalAmount) as "payment_originalAmount",
-                COALESCE(pay.payment_taxAmount, pay_fb.fallback_payment_taxAmount) as "payment_taxAmount",
-                COALESCE(pay.payment_tdsAmount, pay_fb.fallback_payment_tdsAmount) as "payment_tdsAmount",
-                COALESCE(pay.payment_finalAmount, pay_fb.fallback_payment_finalAmount) as "payment_finalAmount",
-                COALESCE(pay.payment_paymentMode, pay_fb.fallback_payment_paymentMode) as "payment_paymentMode",
-                COALESCE(pay.payment_gstin, pay_fb.fallback_payment_gstin) as "payment_gstin",
-                COALESCE(pay.payment_screenshotUrl, pay_fb.fallback_payment_screenshotUrl) as "payment_screenshotUrl",
-                COALESCE(pay.payment_opsApprovalStatus, pay_fb.fallback_payment_opsApprovalStatus) as "payment_opsApprovalStatus",
-                COALESCE(pay.payment_createdAt, pay_fb.fallback_payment_createdAt) as "payment_createdAt"
+                pay.id as payment_id,
+                pay.user_type as "payment_userType",
+                pay.panel_user_id as "payment_panelUserId",
+                pay.credits_to_add as "payment_creditsToAdd",
+                pay.original_amount as "payment_originalAmount",
+                pay.tax_amount as "payment_taxAmount",
+                pay.tds_amount as "payment_tdsAmount",
+                pay.final_amount as "payment_finalAmount",
+                pay.payment_mode as "payment_paymentMode",
+                pay.gstin as "payment_gstin",
+                pay.screenshot_url as "payment_screenshotUrl",
+                pay.ops_approval_status as "payment_opsApprovalStatus",
+                pay.created_at as "payment_createdAt"
          FROM deals d
          LEFT JOIN leads l ON d.lead_id = l.id
          LEFT JOIN users u ON d.rep_id = u.id
          LEFT JOIN users rep_lead ON l.assigned_rep_id = rep_lead.id
          LEFT JOIN LATERAL (
-           SELECT p.id as payment_id,
-                  p.user_type as "payment_userType",
-                  p.panel_user_id as "payment_panelUserId",
-                  p.credits_to_add as "payment_creditsToAdd",
-                  p.original_amount as "payment_originalAmount",
-                  p.tax_amount as "payment_taxAmount",
-                  p.tds_amount as "payment_tdsAmount",
-                  p.final_amount as "payment_finalAmount",
-                  p.payment_mode as "payment_paymentMode",
-                  p.gstin as "payment_gstin",
-                  p.screenshot_url as "payment_screenshotUrl",
-                  p.ops_approval_status as "payment_opsApprovalStatus",
-                  p.created_at as "payment_createdAt"
+           SELECT p.id,
+                  p.user_type,
+                  p.panel_user_id,
+                  p.credits_to_add,
+                  p.original_amount,
+                  p.tax_amount,
+                  p.tds_amount,
+                  p.final_amount,
+                  p.payment_mode,
+                  p.gstin,
+                  p.screenshot_url,
+                  p.ops_approval_status,
+                  p.created_at
            FROM payments p
            WHERE p.deal_id = d.id
            ORDER BY p.created_at DESC
            LIMIT 1
          ) pay ON true
-         LEFT JOIN LATERAL (
-           SELECT p.id as fallback_payment_id,
-                  p.user_type as "fallback_payment_userType",
-                  p.panel_user_id as "fallback_payment_panelUserId",
-                  p.credits_to_add as "fallback_payment_creditsToAdd",
-                  p.original_amount as "fallback_payment_originalAmount",
-                  p.tax_amount as "fallback_payment_taxAmount",
-                  p.tds_amount as "fallback_payment_tdsAmount",
-                  p.final_amount as "fallback_payment_finalAmount",
-                  p.payment_mode as "fallback_payment_paymentMode",
-                  p.gstin as "fallback_payment_gstin",
-                  p.screenshot_url as "fallback_payment_screenshotUrl",
-                  p.ops_approval_status as "fallback_payment_opsApprovalStatus",
-                  p.created_at as "fallback_payment_createdAt"
-           FROM payments p
-           WHERE pay.payment_id IS NULL AND d.lead_id IS NOT NULL AND p.lead_id = d.lead_id
-           ORDER BY p.created_at DESC
-           LIMIT 1
-         ) pay_fb ON true
          WHERE d.tenant_id = $1 ${isRep && isValidUuid(repId) ? "AND (d.rep_id = $2 OR l.assigned_rep_id = $2)" : ""}
          ORDER BY d.created_at DESC`,
         isRep && isValidUuid(repId) ? [tenantId, repId] : [tenantId]
@@ -156,7 +137,8 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error("[DEALS GET]", error);
-    return NextResponse.json({ error: "Failed to fetch deals" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Failed to fetch deals";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 

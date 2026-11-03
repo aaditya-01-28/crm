@@ -74,8 +74,8 @@ export default function TopBar({ user }: { user: JWTPayload }) {
   }
 
   return (
-    <header className="h-14 bg-white border-b border-gray-200/80 px-4 sm:px-6 flex items-center justify-between shrink-0 shadow-2xs">
-      {/* Left: Mobile menu trigger + Executive Product Branding */}
+    <header className="h-16 bg-white border-b border-gray-200/80 px-4 sm:px-6 flex items-center justify-between shrink-0 shadow-2xs">
+      {/* Left: Mobile menu trigger + Executive Product Branding (2-line layout) */}
       <div className="flex items-center gap-3">
         {/* Mobile menu trigger */}
         <button
@@ -87,26 +87,24 @@ export default function TopBar({ user }: { user: JWTPayload }) {
           <Menu className="w-5 h-5" />
         </button>
 
-        {/* Product Identity & Platform Branding */}
-        <div className="flex items-center gap-2.5 sm:gap-3">
-          <div className="flex items-center gap-1.5">
-            <span className="font-extrabold text-sm sm:text-base tracking-tight text-slate-900 flex items-center gap-1">
-              <span>TEXTORA</span>
-              <span className="text-emerald-600 font-bold">ENGAGE</span>
-              <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 ml-0.5">
+        {/* Product Identity & Platform Branding (Stacked 2-line layout) */}
+        <div className="flex items-center gap-3">
+          <div className="flex flex-col justify-center">
+            <div className="flex items-center gap-1.5 leading-tight">
+              <span className="font-extrabold text-sm sm:text-base tracking-tight text-slate-900 flex items-center gap-1">
+                <span>TEXTORA</span>
+                <span className="text-emerald-600 font-bold">ENGAGE</span>
+              </span>
+              <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 leading-none">
                 PRO
               </span>
+            </div>
+            <span className="text-[11px] font-medium text-slate-500 leading-tight mt-0.5 hidden sm:block">
+              Cloud Telephony &amp; Omnichannel Sales CRM
             </span>
           </div>
 
-          <div className="hidden lg:block h-4 w-px bg-slate-200" />
-
-          {/* Product Suite Tagline */}
-          <span className="hidden lg:inline-flex text-[11px] font-medium text-slate-500 items-center gap-1.5">
-            Cloud Telephony & Omnichannel Sales CRM
-          </span>
-
-          <div className="hidden sm:block h-4 w-px bg-slate-200" />
+          <div className="hidden sm:block h-7 w-px bg-slate-200" />
 
           {/* Operational Status Pill */}
           <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200/80 flex items-center gap-1.5">
@@ -117,13 +115,13 @@ export default function TopBar({ user }: { user: JWTPayload }) {
         </div>
       </div>
 
-      {/* Right: rep status + user info + profile + logout */}
+      {/* Right: rep status + last login + user info + profile + logout */}
       <div className="flex items-center gap-2 sm:gap-3">
-        {/* Representative Calling Availability Dropdown */}
-        <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 shadow-2xs">
+        {/* Representative Calling Availability Dropdown (Stacked 2-line layout) */}
+        <div className="hidden lg:flex items-center gap-2 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 shadow-2xs">
           <span
             className={cn(
-              "w-2 h-2 rounded-full",
+              "w-2 h-2 rounded-full shrink-0",
               repStatus === "available"
                 ? "bg-emerald-500 animate-pulse"
                 : repStatus === "in_call"
@@ -133,31 +131,37 @@ export default function TopBar({ user }: { user: JWTPayload }) {
                 : "bg-purple-500"
             )}
           />
-          <select
-            value={repStatus}
-            onChange={(e) => {
-              const newStatus = e.target.value as any;
-              setRepStatus(newStatus);
-              toast.info(`Status updated to: ${newStatus.toUpperCase()}`);
-            }}
-            className="bg-transparent outline-none cursor-pointer text-xs font-semibold text-slate-800"
-          >
-            <option value="available">Ready to Call</option>
-            <option value="in_call">In Live Call</option>
-            <option value="wrapup">Call Wrap-up</option>
-            <option value="break">Short Break</option>
-          </select>
+          <div className="flex flex-col text-left leading-tight">
+            <span className="text-[9px] uppercase font-bold tracking-wider text-slate-400">Telephony Status</span>
+            <select
+              value={repStatus}
+              onChange={(e) => {
+                const newStatus = e.target.value as any;
+                setRepStatus(newStatus);
+                toast.info(`Status updated to: ${newStatus.toUpperCase()}`);
+              }}
+              className="bg-transparent outline-none cursor-pointer text-xs font-semibold text-slate-800 -ml-0.5"
+            >
+              <option value="available">Ready to Call</option>
+              <option value="in_call">In Live Call</option>
+              <option value="wrapup">Call Wrap-up</option>
+              <option value="break">Short Break</option>
+            </select>
+          </div>
         </div>
-        {/* Last Login Timestamp Badge */}
+
+        {/* Last Login Timestamp Badge (Stacked 2-line layout) */}
         <div
-          className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs shadow-2xs hover:bg-slate-100/70 transition-colors"
+          className="hidden md:flex items-center gap-2 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg shadow-2xs hover:bg-slate-100/70 transition-colors"
           title={`Last login recorded: ${lastLoginInfo.full} • Session token valid for 9 hours`}
         >
           <Clock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-          <span className="text-slate-500 font-medium text-[11px] sm:text-xs">Last Login:</span>
-          <span className="font-semibold text-slate-800 font-mono text-[11px] sm:text-xs">
-            {lastLoginInfo.display}
-          </span>
+          <div className="flex flex-col text-left leading-tight">
+            <span className="text-[9px] uppercase font-bold tracking-wider text-slate-400">Last Login</span>
+            <span className="font-semibold text-slate-800 font-mono text-[11px] sm:text-xs">
+              {lastLoginInfo.display}
+            </span>
+          </div>
         </div>
 
         <Link
