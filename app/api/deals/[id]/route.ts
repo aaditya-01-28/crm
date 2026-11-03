@@ -52,13 +52,16 @@ export async function PATCH(
       const deal = dealRes.rows[0];
       const newStage = stage || deal.stage;
       const newPrice = quotedPrice !== undefined ? quotedPrice : deal.quoted_price;
-      const newClosingDate = expectedClosingDate
-        ? new Date(expectedClosingDate)
-        : deal.expected_closing_date;
+      const newClosingDate =
+        expectedClosingDate && !isNaN(new Date(expectedClosingDate).getTime())
+          ? new Date(expectedClosingDate)
+          : expectedClosingDate === null || expectedClosingDate === ""
+          ? null
+          : deal.expected_closing_date;
       const newService = serviceType !== undefined ? serviceType : deal.service_type;
       const newQuantity = quantity !== undefined ? quantity : deal.quantity;
 
-      const wonDetails = body.wonDetails || body;
+      const wonDetails = body.wonDetails || body || {};
       let newNotes = closingNotes !== undefined ? closingNotes : deal.closing_notes;
 
       if (newStage === "closed_won" || wonDetails?.userId || wonDetails?.panelUserId) {
@@ -132,7 +135,7 @@ export async function PATCH(
 
       // Update lead metadata/contact/company if edited
       const customerEmail = wonDetails?.customerEmail || body.customerEmail || null;
-      if (body.contactName || body.companyName || body.serviceType || body.address || customerEmail) {
+      if (deal.lead_id && (body.contactName || body.companyName || body.serviceType || body.address || customerEmail)) {
         const leadRes = await client.query(
           "SELECT id, custom_metadata FROM leads WHERE id = $1 AND tenant_id = $2",
           [deal.lead_id, tenantId]
@@ -164,15 +167,15 @@ export async function PATCH(
       }
 
       // Update lead status according to deal stage
-      if (stage === "closed_won") {
+      if (stage === "closed_won" && deal.lead_id) {
         await client.query("UPDATE leads SET status = 'won', updated_at = NOW() WHERE id = $1", [
           deal.lead_id,
         ]);
-      } else if (stage === "closed_lost") {
+      } else if (stage === "closed_lost" && deal.lead_id) {
         await client.query("UPDATE leads SET status = 'lost', updated_at = NOW() WHERE id = $1", [
           deal.lead_id,
         ]);
-      } else if (stage === "demo_done") {
+      } else if (stage === "demo_done" && deal.lead_id) {
         await client.query("UPDATE leads SET status = 'demo_done', updated_at = NOW() WHERE id = $1", [
           deal.lead_id,
         ]);
@@ -180,21 +183,25 @@ export async function PATCH(
           "UPDATE scheduled_tasks SET status = 'completed', updated_at = NOW() WHERE lead_id = $1 AND task_type = 'product_demo' AND status = 'pending'",
           [deal.lead_id]
         );
-      } else if (stage === "demo_scheduled") {
+      } else if (stage === "demo_scheduled" && deal.lead_id) {
         await client.query(
           "UPDATE leads SET status = 'demo_scheduled', updated_at = NOW() WHERE id = $1",
           [deal.lead_id]
         );
-      } else if (stage === "quote_sent" || stage === "payment_pending") {
+      } else if ((stage === "quote_sent" || stage === "payment_pending") && deal.lead_id) {
         await client.query(
           "UPDATE leads SET status = 'deal_created', updated_at = NOW() WHERE id = $1",
           [deal.lead_id]
         );
       }
 
-      if (Array.isArray(body.additionalCommercials) && body.additionalCommercials.length > 0) {
+      if (deal.lead_id && Array.isArray(body.additionalCommercials) && body.additionalCommercials.length > 0) {
         for (const item of body.additionalCommercials) {
           if (item.serviceType && item.quantity && item.quotedPrice !== undefined) {
+            const addClosingDate =
+              item.expectedClosingDate && !isNaN(new Date(item.expectedClosingDate).getTime())
+                ? new Date(item.expectedClosingDate)
+                : null;
             await client.query(
               `INSERT INTO deals (
                  tenant_id, lead_id, rep_id, service_type, quantity, quoted_price,
@@ -208,7 +215,7 @@ export async function PATCH(
                 item.serviceType,
                 parseInt(item.quantity) || 0,
                 parseFloat(item.quotedPrice) || 0,
-                item.expectedClosingDate ? new Date(item.expectedClosingDate) : null,
+                addClosingDate,
                 item.stage || "quote_sent",
                 item.closingNotes || null,
               ]
@@ -218,18 +225,33 @@ export async function PATCH(
       }
 
       // Closed Won payment dossier record (upsert payment to keep in sync)
-      if (newStage === "closed_won") {
-        const portalUserId = wonDetails.userId || wonDetails.panelUserId || (deal.lead_id ? `TXT_${deal.lead_id.slice(0, 6).toUpperCase()}` : "PORTAL_USER");
+      // Note: "payments" table does NOT have an updated_at column in database schema.
+      if (newStage === "closed_won" && deal.lead_id) {
+        const portalUserId =
+          wonDetails.userId ||
+          wonDetails.panelUserId ||
+          `TXT_${deal.lead_id.slice(0, 6).toUpperCase()}`;
+
+        let paymentRepId = deal.rep_id || session?.sub || (repId && repId.trim() ? repId : null);
+        if (!paymentRepId) {
+          const userRes = await client.query(
+            "SELECT id FROM users WHERE tenant_id = $1 LIMIT 1",
+            [tenantId]
+          );
+          paymentRepId = userRes.rows[0]?.id || null;
+        }
+
         const existingPay = await client.query(
           "SELECT id FROM payments WHERE deal_id = $1 AND tenant_id = $2 LIMIT 1",
           [id, tenantId]
         );
+
         if (existingPay.rows.length > 0) {
           await client.query(
             `UPDATE payments
              SET user_type = $1, panel_user_id = $2, credits_to_add = $3,
                  original_amount = $4, tax_amount = $5, tds_amount = $6, final_amount = $7,
-                 payment_mode = $8, gstin = $9, screenshot_url = $10, updated_at = NOW()
+                 payment_mode = $8, gstin = $9, screenshot_url = $10
              WHERE id = $11`,
             [
               wonDetails.userType || "new_user",
@@ -245,7 +267,7 @@ export async function PATCH(
               existingPay.rows[0].id,
             ]
           );
-        } else {
+        } else if (paymentRepId) {
           await client.query(
             `INSERT INTO payments (
                tenant_id, deal_id, lead_id, rep_id, user_type, panel_user_id,
@@ -257,9 +279,9 @@ export async function PATCH(
               tenantId,
               id,
               deal.lead_id,
-              deal.rep_id || session?.sub || repId,
+              paymentRepId,
               wonDetails.userType || "new_user",
-              wonDetails.userId || wonDetails.panelUserId || "PORTAL_USER",
+              portalUserId,
               parseInt(wonDetails.creditsToAdd || newQuantity) || 0,
               parseFloat(wonDetails.originalAmount || newPrice) || 0,
               parseFloat(wonDetails.taxAmount || 0) || 0,
@@ -274,68 +296,81 @@ export async function PATCH(
       }
 
       // Demo Scheduled calendar task
-      if (newStage === "demo_scheduled" && body.demoDate) {
-        await client.query(
-          `INSERT INTO scheduled_tasks (
-             tenant_id, lead_id, rep_id, task_type, scheduled_time, meeting_link, notes, status, created_at, updated_at
-           )
-           VALUES ($1, $2, $3, 'product_demo', $4, $5, $6, 'pending', NOW(), NOW())`,
-          [
-            tenantId,
-            deal.lead_id,
-            session?.sub || repId,
-            new Date(body.demoDate),
-            body.meetingLink || null,
-            body.demoNotes || newNotes || null,
-          ]
-        );
+      if (newStage === "demo_scheduled" && body.demoDate && deal.lead_id) {
+        const demoDateObj = new Date(body.demoDate);
+        if (!isNaN(demoDateObj.getTime())) {
+          await client.query(
+            `INSERT INTO scheduled_tasks (
+               tenant_id, lead_id, rep_id, task_type, scheduled_time, meeting_link, notes, status, created_at, updated_at
+             )
+             VALUES ($1, $2, $3, 'product_demo', $4, $5, $6, 'pending', NOW(), NOW())`,
+            [
+              tenantId,
+              deal.lead_id,
+              session?.sub || repId,
+              demoDateObj,
+              body.meetingLink || null,
+              body.demoNotes || newNotes || null,
+            ]
+          );
+        }
       }
 
       // Demo Done & Quote Sent contact back callback task
-      if ((newStage === "demo_done" || newStage === "quote_sent") && body.contactBackDate) {
-        await client.query(
-          `INSERT INTO scheduled_tasks (
-             tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, created_at, updated_at
-           )
-           VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', NOW(), NOW())`,
-          [
-            tenantId,
-            deal.lead_id,
-            session?.sub || repId,
-            new Date(body.contactBackDate),
-            newNotes ||
-              (newStage === "demo_done"
-                ? "Post-demo update follow-up"
-                : "Quotation update follow-up"),
-          ]
-        );
+      if ((newStage === "demo_done" || newStage === "quote_sent") && body.contactBackDate && deal.lead_id) {
+        const cbDateObj = new Date(body.contactBackDate);
+        if (!isNaN(cbDateObj.getTime())) {
+          await client.query(
+            `INSERT INTO scheduled_tasks (
+               tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, created_at, updated_at
+             )
+             VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', NOW(), NOW())`,
+            [
+              tenantId,
+              deal.lead_id,
+              session?.sub || repId,
+              cbDateObj,
+              newNotes ||
+                (newStage === "demo_done"
+                  ? "Post-demo update follow-up"
+                  : "Quotation update follow-up"),
+            ]
+          );
+        }
       }
 
       // Closed Lost recontact callback task
-      if (newStage === "closed_lost" && body.recontactDate) {
-        await client.query(
-          `INSERT INTO scheduled_tasks (
-             tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, created_at, updated_at
-           )
-           VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', NOW(), NOW())`,
-          [
-            tenantId,
-            deal.lead_id,
-            session?.sub || repId,
-            new Date(body.recontactDate),
-            body.lostRemarks
-              ? `Closed Lost Re-contact: ${body.lostRemarks}`
-              : "Closed Lost re-contact follow-up",
-          ]
-        );
+      if (newStage === "closed_lost" && body.recontactDate && deal.lead_id) {
+        const rcDateObj = new Date(body.recontactDate);
+        if (!isNaN(rcDateObj.getTime())) {
+          await client.query(
+            `INSERT INTO scheduled_tasks (
+               tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, created_at, updated_at
+             )
+             VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', NOW(), NOW())`,
+            [
+              tenantId,
+              deal.lead_id,
+              session?.sub || repId,
+              rcDateObj,
+              body.lostRemarks
+                ? `Closed Lost Re-contact: ${body.lostRemarks}`
+                : "Closed Lost re-contact follow-up",
+            ]
+          );
+        }
       }
 
-      const triggerPaymentModal = (newStage === "payment_pending" || newStage === "closed_won") && !wonDetails.userId;
+      const triggerPaymentModal =
+        (newStage === "payment_pending" || newStage === "closed_won") && !wonDetails?.userId;
       return NextResponse.json({ deal: updated, triggerPaymentModal });
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[DEALS PATCH]", error);
-    return NextResponse.json({ error: "Failed to update deal" }, { status: 500 });
+    return NextResponse.json(
+      { error: error?.message || "Failed to update deal" },
+      { status: 500 }
+    );
   }
 }
 
