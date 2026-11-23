@@ -19,6 +19,8 @@ import {
   AlertCircle,
   PhoneCall,
   Flame,
+  Smartphone,
+  Layers,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDateTime } from "@/lib/utils";
@@ -392,6 +394,35 @@ export default function ProfilePage() {
                 </li>
               ))}
             </ul>
+          </div>
+
+          {/* System & Companion Version Card */}
+          <div className="bg-white rounded-2xl border border-gray-200/90 p-5 shadow-xs">
+            <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2 mb-3">
+              <Layers className="w-4 h-4 text-emerald-600" />
+              Software & App Versions
+            </h3>
+            <div className="space-y-3 text-xs">
+              <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+                <span className="text-gray-500 font-medium">Web CRM Platform</span>
+                <span className="font-mono font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                  v1.1.0 (Build 2)
+                </span>
+              </div>
+              <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+                <span className="text-gray-500 font-medium">Android Companion App</span>
+                <span className="font-mono font-semibold text-blue-800 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+                  v1.1.0+2
+                </span>
+              </div>
+              <div className="flex items-center justify-between pt-0.5">
+                <span className="text-gray-500 font-medium">In-App Auto-Update</span>
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Active on crm.textorasms.com
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 

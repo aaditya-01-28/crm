@@ -360,25 +360,33 @@ export default function Sidebar({ role }: SidebarProps) {
           })}
         </nav>
 
-        {/* Clean Dignified Footer (No redundant toggle buttons) */}
+        {/* Clean Dignified Footer with Version */}
         <div
           className={cn(
             "border-t border-slate-900 text-slate-500 transition-all",
             isCollapsed
-              ? "py-3.5 px-2 flex justify-center items-center"
+              ? "py-3 px-2 flex flex-col justify-center items-center gap-1.5"
               : "px-5 py-3.5 flex items-center justify-between text-xs"
           )}
         >
           {isCollapsed ? (
-            <span
-              className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"
-              title="System Online"
-            />
+            <>
+              <span
+                className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"
+                title="System Online • v1.1.0"
+              />
+              <span className="text-[9px] font-mono font-bold text-slate-500" title="Textora CRM v1.1.0">
+                v1.1
+              </span>
+            </>
           ) : (
             <>
-              <span className="font-medium text-slate-400">Textora Technologies</span>
-              <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-semibold">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <div className="flex flex-col">
+                <span className="font-semibold text-slate-300">Textora Engage</span>
+                <span className="text-[10px] text-slate-500 font-mono tracking-tight">v1.1.0 (Build 2)</span>
+              </div>
+              <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 <span>Online</span>
               </div>
             </>
