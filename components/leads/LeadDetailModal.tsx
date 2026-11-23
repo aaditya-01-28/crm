@@ -80,7 +80,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
   const [submittingLog, setSubmittingLog] = useState(false);
   const canAssign = useCanAssignLeads();
   const isLevel3Admin = useIsAdmin();
-  const { role, userId } = useSession();
+  const { role, userId, userName, userEmail, userPhone } = useSession();
 
   // Delete lead state (Level 3 Super Admin only)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -329,7 +329,12 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
   }
 
   const telLink = buildTelLink(lead.phoneNumber);
-  const waLink = buildWALink(lead.phoneNumber, WA_PITCH);
+  const waLink = buildWALink(lead.phoneNumber, {
+    repName: userName,
+    repEmail: userEmail,
+    repPhone: userPhone,
+    contactName: lead.contactName,
+  });
 
   // Construct unified lifecycle stages and interaction history
   const timelineItems = (() => {
