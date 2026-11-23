@@ -127,20 +127,32 @@ export async function PATCH(
         [newStatus, rnrCount, id]
       );
 
-      // Create call log — idempotency guard: skip if identical log created in last 15 seconds
-      // This prevents duplicate RNR entries from rapid double-clicks or push-to-dial webhook replay
+      // Create or update call log: if a call log was recently recorded (e.g. from SIM dialer/telephony),
+      // update it with the executive's authoritative disposition and remarks, avoiding duplicate entries.
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS log_source TEXT DEFAULT 'dialer_web';").catch(() => {});
 
-      const recentDupe = await client.query(
-        `SELECT id FROM call_logs
-         WHERE lead_id = $1 AND rep_id = $2 AND disposition = $3
-           AND call_timestamp > NOW() - INTERVAL '15 seconds'
+      const recentLog = await client.query(
+        `SELECT id, duration_seconds FROM call_logs
+         WHERE lead_id = $1 AND rep_id = $2
+           AND call_timestamp > NOW() - INTERVAL '3 minutes'
+         ORDER BY call_timestamp DESC
          LIMIT 1`,
-        [id, repId, disposition]
+        [id, repId]
       );
 
-      if (recentDupe.rows.length === 0) {
+      if (recentLog.rows.length > 0) {
+        await client.query(
+          `UPDATE call_logs
+           SET disposition = $1,
+               duration_seconds = GREATEST(duration_seconds, $2),
+               remark = COALESCE($3, remark),
+               recording_url = COALESCE($4, recording_url),
+               log_source = $5
+           WHERE id = $6`,
+          [disposition, durationSeconds, remark || null, recordingUrl || null, logSource, recentLog.rows[0].id]
+        );
+      } else {
         await client.query(
           `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, call_timestamp)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,

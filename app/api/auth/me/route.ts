@@ -8,19 +8,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let lastLoginAt = session.lastLoginAt || session.loginAt || null;
-  if (!lastLoginAt) {
+  let lastLoginAt = session.lastLoginAt || null;
+  if (!lastLoginAt && session.sub) {
     try {
       const userRes = await withClient(async (client) => {
-        await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;").catch(() => {});
+        await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS previous_login_at TIMESTAMPTZ;").catch(() => {});
         const res = await client.query(
-          `SELECT last_login_at as "lastLoginAt" FROM users WHERE id = $1`,
+          `SELECT previous_login_at as "previousLoginAt" FROM users WHERE id = $1`,
           [session.sub]
         );
         return res.rows[0];
       });
-      if (userRes?.lastLoginAt) {
-        lastLoginAt = new Date(userRes.lastLoginAt).toISOString();
+      if (userRes?.previousLoginAt) {
+        lastLoginAt = new Date(userRes.previousLoginAt).toISOString();
       }
     } catch {}
   }
@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     user: {
       ...session,
-      lastLoginAt: lastLoginAt || session.lastLoginAt || session.loginAt || null,
+      lastLoginAt: lastLoginAt || null,
     },
   });
 }

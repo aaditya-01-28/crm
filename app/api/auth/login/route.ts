@@ -47,11 +47,17 @@ export async function POST(request: NextRequest) {
 
     const now = new Date();
     const loginTimestamp = now.toISOString();
+    // The last login before this session was initiated
+    const previousLoginTimestamp = user.lastLoginAt || null;
 
-    // Record last login in database
+    // Record login in database: archive previous login to previous_login_at and record current in last_login_at
     await withClient(async (client) => {
+      await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS previous_login_at TIMESTAMPTZ;").catch(() => {});
       await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;").catch(() => {});
-      await client.query("UPDATE users SET last_login_at = $1 WHERE id = $2", [now, user.id]).catch(() => {});
+      await client.query(
+        "UPDATE users SET previous_login_at = last_login_at, last_login_at = $1 WHERE id = $2",
+        [now, user.id]
+      ).catch(() => {});
     }).catch((err) => console.warn("[LOGIN] failed to update last_login_at:", err));
 
     const jwtPayload = {
@@ -62,7 +68,7 @@ export async function POST(request: NextRequest) {
       fullName: user.fullName,
       avatarUrl: user.avatarUrl && user.avatarUrl.length < 500 ? user.avatarUrl : null,
       mustChangePassword,
-      lastLoginAt: loginTimestamp,
+      lastLoginAt: previousLoginTimestamp,
       loginAt: loginTimestamp,
     };
 
@@ -78,7 +84,7 @@ export async function POST(request: NextRequest) {
         tenantName: user.tenant.name,
         avatarUrl: user.avatarUrl ?? null,
         mustChangePassword,
-        lastLoginAt: loginTimestamp,
+        lastLoginAt: previousLoginTimestamp,
       },
       mustChangePassword,
       accessToken,

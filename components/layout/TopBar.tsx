@@ -25,12 +25,12 @@ const ROLE_COLORS: Record<string, string> = {
 
 function formatLastLogin(dateStr?: string | null): { display: string; full: string } {
   if (!dateStr) {
-    return { display: "Active Session", full: "Current session active (9-hr window)" };
+    return { display: "First Login", full: "First recorded session for this account" };
   }
   try {
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) {
-      return { display: "Active Session", full: "Current session active (9-hr window)" };
+      return { display: "First Login", full: "First recorded session for this account" };
     }
     const datePart = d.toLocaleDateString("en-IN", {
       day: "2-digit",
@@ -63,7 +63,7 @@ export default function TopBar({ user }: { user: JWTPayload }) {
   const router = useRouter();
   const { toggleMobile } = useSidebar();
   const [repStatus, setRepStatus] = useState<"available" | "in_call" | "break" | "wrapup">("available");
-  const lastLoginTimestamp = user.lastLoginAt || user.loginAt;
+  const lastLoginTimestamp = user.lastLoginAt;
   const lastLoginInfo = formatLastLogin(lastLoginTimestamp);
 
   async function handleLogout() {

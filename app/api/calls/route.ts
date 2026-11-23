@@ -190,7 +190,25 @@ export async function POST(request: NextRequest) {
         const disposition = item.disposition || (durationSeconds > 0 ? "Connected" : "RNR");
         const remark = item.remark || null;
         const recordingUrl = item.recordingUrl || item.recording_url || null;
-        const callTimestamp = item.callTimestamp ? new Date(item.callTimestamp) : new Date();
+        const logSource = item.logSource || "apk_manual";
+
+        // Timezone-safe timestamp parsing:
+        // Indian clients often serialize local ISO strings without trailing Z (e.g. "2026-11-23T11:34:00.000").
+        // In UTC server environments, new Date(str_without_tz) is parsed as UTC, causing an incorrect +5:30 shift in IST browsers.
+        let callTimestamp = new Date();
+        if (item.callTimestamp) {
+          const raw = String(item.callTimestamp).trim();
+          const hasTz = /Z|[+-]\d{2}(:\d{2})?$/i.test(raw);
+          const parsed = new Date(hasTz ? raw : `${raw}+05:30`);
+          if (!isNaN(parsed.getTime())) {
+            // Guard against timestamps in the future (> 5 mins)
+            if (parsed.getTime() > Date.now() + 5 * 60 * 1000) {
+              callTimestamp = new Date();
+            } else {
+              callTimestamp = parsed;
+            }
+          }
+        }
 
         if (!targetLeadId && phoneNumber) {
           const cleanDigits = phoneNumber.replace(/\D/g, "");
@@ -218,25 +236,72 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        const logRes = await client.query(
-          `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, call_timestamp)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-           RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
-                     disposition, duration_seconds as "durationSeconds", remark,
-                     recording_url as "recordingUrl", log_source as "logSource", call_timestamp as "callTimestamp"`,
-          [tenantId, targetLeadId, repId, disposition, durationSeconds, remark, recordingUrl, item.logSource || "apk_manual", callTimestamp]
+        // Deduplication and Upsert: check if a call log already exists for this lead & rep in the last 3 minutes
+        const recentLogRes = await client.query(
+          `SELECT id, disposition, duration_seconds as "durationSeconds", log_source as "logSource", remark, recording_url as "recordingUrl"
+           FROM call_logs
+           WHERE tenant_id = $1 AND lead_id = $2 AND rep_id = $3
+             AND call_timestamp >= ($4::TIMESTAMPTZ - INTERVAL '3 minutes')
+             AND call_timestamp <= ($4::TIMESTAMPTZ + INTERVAL '3 minutes')
+           ORDER BY call_timestamp DESC
+           LIMIT 1`,
+          [tenantId, targetLeadId, repId, callTimestamp]
         );
 
-        if (disposition === "RNR") {
-          await client.query(
-            "UPDATE leads SET rnr_count = rnr_count + 1, updated_at = NOW() WHERE id = $1",
-            [targetLeadId]
+        let finalLog;
+        if (recentLogRes.rows.length > 0) {
+          const existing = recentLogRes.rows[0];
+          const newDuration = Math.max(existing.durationSeconds || 0, durationSeconds);
+          const newRemark = remark || existing.remark;
+          const newRecording = recordingUrl || existing.recordingUrl;
+          const finalSource = logSource === "apk_manual" ? "apk_manual" : existing.logSource || logSource;
+
+          const updatedRes = await client.query(
+            `UPDATE call_logs
+             SET disposition = $1,
+                 duration_seconds = $2,
+                 remark = $3,
+                 recording_url = $4,
+                 log_source = $5,
+                 call_timestamp = $6
+             WHERE id = $7
+             RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
+                       disposition, duration_seconds as "durationSeconds", remark,
+                       recording_url as "recordingUrl", log_source as "logSource", call_timestamp as "callTimestamp"`,
+            [disposition, newDuration, newRemark, newRecording, finalSource, callTimestamp, existing.id]
           );
+          finalLog = updatedRes.rows[0];
+
+          if (disposition === "RNR" && existing.disposition !== "RNR") {
+            await client.query(
+              "UPDATE leads SET rnr_count = rnr_count + 1, updated_at = NOW() WHERE id = $1",
+              [targetLeadId]
+            );
+          } else {
+            await client.query("UPDATE leads SET updated_at = NOW() WHERE id = $1", [targetLeadId]);
+          }
         } else {
-          await client.query("UPDATE leads SET updated_at = NOW() WHERE id = $1", [targetLeadId]);
+          const logRes = await client.query(
+            `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, call_timestamp)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
+                       disposition, duration_seconds as "durationSeconds", remark,
+                       recording_url as "recordingUrl", log_source as "logSource", call_timestamp as "callTimestamp"`,
+            [tenantId, targetLeadId, repId, disposition, durationSeconds, remark, recordingUrl, logSource, callTimestamp]
+          );
+          finalLog = logRes.rows[0];
+
+          if (disposition === "RNR") {
+            await client.query(
+              "UPDATE leads SET rnr_count = rnr_count + 1, updated_at = NOW() WHERE id = $1",
+              [targetLeadId]
+            );
+          } else {
+            await client.query("UPDATE leads SET updated_at = NOW() WHERE id = $1", [targetLeadId]);
+          }
         }
 
-        createdLogs.push(logRes.rows[0]);
+        createdLogs.push(finalLog);
       }
 
       if (Array.isArray(body.calls)) {

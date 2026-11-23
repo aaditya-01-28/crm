@@ -672,14 +672,20 @@ export default function CallLogsPage() {
                         <div className="font-semibold text-gray-900">
                           {formatDateTime(call.callTimestamp)}
                         </div>
-                        {/* Log source badge — Type 1: Web Dialer, Type 2: APK Manual entry */}
+                        {/* Log source badge — Type 1: Connected Call (Dialer), Type 2: APK Call Update */}
                         <span className={cn(
                           "text-[10px] font-semibold px-1.5 py-0.5 rounded",
                           call.logSource === "apk_manual"
-                            ? "bg-blue-50 text-blue-600 border border-blue-200"
-                            : "bg-slate-50 text-slate-500 border border-slate-200"
+                            ? "bg-blue-50 text-blue-700 border border-blue-200"
+                            : call.logSource === "dialer_connected"
+                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            : "bg-slate-50 text-slate-600 border border-slate-200"
                         )}>
-                          {call.logSource === "apk_manual" ? "📱 APK Entry" : "🖥 Dialer"}
+                          {call.logSource === "apk_manual"
+                            ? "📱 APK Call Update"
+                            : call.logSource === "dialer_connected"
+                            ? "📞 Connected Call"
+                            : "🖥 Dialer"}
                         </span>
                       </td>
 
