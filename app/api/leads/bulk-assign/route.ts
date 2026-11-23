@@ -50,11 +50,6 @@ export async function POST(request: NextRequest) {
           targetRepIds = activeRepsRes.rows.map((r: any) => r.id);
         }
 
-        // Restriction: Managers cannot assign leads to themselves
-        if (normalizedRole === "sales_manager") {
-          targetRepIds = targetRepIds.filter((id) => id !== currentUserId);
-        }
-
         if (targetRepIds.length === 0) {
           return NextResponse.json(
             { error: "No active sales executives available for round-robin assignment." },
@@ -100,14 +95,6 @@ export async function POST(request: NextRequest) {
 
       // Mode 3: Assign to specific representative
       if (typeof repId === "string" && repId.trim()) {
-        // Restriction: Managers cannot assign leads to themselves
-        if (normalizedRole === "sales_manager" && repId === currentUserId) {
-          return NextResponse.json(
-            { error: "Manager restriction: You cannot assign leads to yourself. Please select another executive." },
-            { status: 400 }
-          );
-        }
-
         const targetRepRes = await client.query(
           "SELECT id, full_name as \"fullName\" FROM users WHERE id = $1 AND tenant_id = $2 AND is_active = true",
           [repId, tenantId]

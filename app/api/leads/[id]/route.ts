@@ -218,20 +218,6 @@ export async function PATCH(
 
     const isLevel1 = isSalesRep(role);
 
-    // Restriction: Managers cannot assign leads to themselves
-    if (
-      normalizeRole(role) === "sales_manager" &&
-      assignedRepId !== undefined &&
-      assignedRepId !== null &&
-      assignedRepId !== "unassigned" &&
-      assignedRepId === repId
-    ) {
-      return NextResponse.json(
-        { error: "Manager restriction: You cannot assign leads to yourself. Please select another executive." },
-        { status: 400 }
-      );
-    }
-
     return await withClient(async (client) => {
       const existingRes = await client.query(
         `SELECT * FROM leads WHERE id = $1 AND tenant_id = $2 ${isLevel1 ? "AND assigned_rep_id = $3" : ""}`,

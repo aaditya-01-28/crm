@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { normalizePhone } from "@/lib/utils";
+import { useSession } from "@/components/layout/SessionProvider";
 
 interface ExtractedLead {
   phone: string;
@@ -197,22 +198,29 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
   const [importProgress, setImportProgress] = useState(0);
   const [importStatusText, setImportStatusText] = useState("");
 
+  const { userId } = useSession();
+
   // Assignment configuration
   const [assignmentMode, setAssignmentMode] = useState<"unassigned" | "specific" | "round_robin">("unassigned");
   const [selectedRepId, setSelectedRepId] = useState("");
   const [teamMembers, setTeamMembers] = useState<Array<{ id: string; fullName: string; role: string }>>([]);
 
-  // Fetch active reps for assignment
+  // Fetch active team members (Sales Reps, Level 2 Managers, and Super Admin) for assignment
   useEffect(() => {
     async function loadTeam() {
       try {
         const res = await fetch("/api/team");
         if (res.ok) {
           const data = await res.json();
-          const reps = (data.users || []).filter((u: { role: string; isActive?: boolean }) => u.role === "sales_rep" && u.isActive !== false);
-          setTeamMembers(reps);
-          if (reps.length > 0) {
-            setSelectedRepId(reps[0].id);
+          const assignable = (data.users || []).filter(
+            (u: { role: string; isActive?: boolean }) =>
+              ["sales_rep", "sales_manager", "super_admin"].includes(u.role) && u.isActive !== false
+          );
+          setTeamMembers(assignable);
+          if (assignable.length > 0) {
+            // Default to self if available, otherwise first user
+            const selfUser = assignable.find((u: { id: string }) => u.id === userId);
+            setSelectedRepId(selfUser ? selfUser.id : assignable[0].id);
           }
         }
       } catch (e) {
@@ -220,7 +228,7 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
       }
     }
     loadTeam();
-  }, []);
+  }, [userId]);
 
   // Download official sample CSV template
   function downloadSampleCSV() {
@@ -420,7 +428,10 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
   }
 
   const preview = extractedLeads.slice(0, 5);
-  const assignedRepName = teamMembers.find((r) => r.id === selectedRepId)?.fullName || "Sales Rep";
+  const selectedMember = teamMembers.find((r) => r.id === selectedRepId);
+  const assignedRepName = selectedMember
+    ? `${selectedMember.fullName}${selectedMember.id === userId ? " (You)" : ""}`
+    : "Selected Assignee";
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-in fade-in duration-150">
@@ -854,7 +865,7 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
                   {assignmentMode === "specific" && (
                     <div className="pt-1 animate-in fade-in duration-150">
                       <label className="text-[11px] font-semibold text-gray-600 block mb-1">
-                        Select Sales Representative:
+                        Select Assignee (Sales Rep, Level 2 Manager, or Yourself):
                       </label>
                       <select
                         value={selectedRepId}
@@ -862,13 +873,54 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
                         className="w-full px-3 py-1.5 text-xs border border-gray-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500 text-gray-800"
                       >
                         {teamMembers.length === 0 ? (
-                          <option value="">No active sales reps found</option>
+                          <option value="">No active team members found</option>
                         ) : (
-                          teamMembers.map((rep) => (
-                            <option key={rep.id} value={rep.id}>
-                              {rep.fullName} (Sales Rep)
-                            </option>
-                          ))
+                          <>
+                            {teamMembers.some((r) => r.id === userId) && (
+                              <optgroup label="Assign to Yourself">
+                                {teamMembers
+                                  .filter((r) => r.id === userId)
+                                  .map((u) => (
+                                    <option key={u.id} value={u.id}>
+                                      ⭐ {u.fullName} ({u.role === "super_admin" ? "Super Admin" : u.role === "sales_manager" ? "Sales Manager" : "Sales Rep"} • You)
+                                    </option>
+                                  ))}
+                              </optgroup>
+                            )}
+                            {teamMembers.some((r) => r.role === "sales_manager" && r.id !== userId) && (
+                              <optgroup label="Level 2 • Sales Managers">
+                                {teamMembers
+                                  .filter((r) => r.role === "sales_manager" && r.id !== userId)
+                                  .map((rep) => (
+                                    <option key={rep.id} value={rep.id}>
+                                      {rep.fullName} (Sales Manager)
+                                    </option>
+                                  ))}
+                              </optgroup>
+                            )}
+                            {teamMembers.some((r) => r.role === "sales_rep" && r.id !== userId) && (
+                              <optgroup label="Level 1 • Sales Representatives">
+                                {teamMembers
+                                  .filter((r) => r.role === "sales_rep" && r.id !== userId)
+                                  .map((rep) => (
+                                    <option key={rep.id} value={rep.id}>
+                                      {rep.fullName} (Sales Rep)
+                                    </option>
+                                  ))}
+                              </optgroup>
+                            )}
+                            {teamMembers.some((r) => r.role === "super_admin" && r.id !== userId) && (
+                              <optgroup label="Level 3 • Super Admin">
+                                {teamMembers
+                                  .filter((r) => r.role === "super_admin" && r.id !== userId)
+                                  .map((rep) => (
+                                    <option key={rep.id} value={rep.id}>
+                                      {rep.fullName} (Super Admin)
+                                    </option>
+                                  ))}
+                              </optgroup>
+                            )}
+                          </>
                         )}
                       </select>
                     </div>

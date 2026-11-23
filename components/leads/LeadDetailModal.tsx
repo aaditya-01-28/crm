@@ -130,7 +130,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
 
   const teamReps = (teamData?.users || []).filter(
     (u: { id: string; role: string; isActive?: boolean }) =>
-      u.role === "sales_rep" && u.isActive !== false && !(role === "sales_manager" && u.id === userId)
+      ["sales_rep", "sales_manager", "super_admin"].includes(u.role) && u.isActive !== false
   );
 
   const lead = data?.lead;
@@ -803,12 +803,14 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                     className="w-full text-xs px-3 py-2 bg-white border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900"
                   >
                     <option value="">Unassigned Pool</option>
-                    {teamReps.map((rep: { id: string; fullName: string; language?: string }) => {
+                    {teamReps.map((rep: { id: string; fullName: string; role?: string; language?: string }) => {
                       const repLanguagesLabel = formatLanguageLabels(rep.language);
                       const isMatch = hasLanguageMatch(rep.language, editLanguage);
+                      const roleTag = rep.role === "sales_manager" ? "Manager" : rep.role === "super_admin" ? "Admin" : "Rep";
+                      const isSelf = rep.id === userId;
                       return (
                         <option key={rep.id} value={rep.id}>
-                          {rep.fullName} {repLanguagesLabel ? `(${repLanguagesLabel})` : ""} {isMatch ? "⭐ [Language Match]" : ""}
+                          {isSelf ? `⭐ ${rep.fullName} (${roleTag} • You)` : `${rep.fullName} (${roleTag})`} {repLanguagesLabel ? `(${repLanguagesLabel})` : ""} {isMatch ? "⭐ [Language Match]" : ""}
                         </option>
                       );
                     })}
@@ -865,11 +867,13 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                     className="px-2.5 py-1 rounded-lg font-semibold bg-white border border-gray-300 text-gray-800 text-xs focus:ring-2 focus:ring-emerald-500 cursor-pointer"
                   >
                     <option value="">Unassigned</option>
-                    {teamReps.map((rep: { id: string; fullName: string; language?: string }) => {
+                    {teamReps.map((rep: { id: string; fullName: string; role?: string; language?: string }) => {
                       const repLangMeta = getLanguageMeta(rep.language);
+                      const roleTag = rep.role === "sales_manager" ? "Manager" : rep.role === "super_admin" ? "Admin" : "Rep";
+                      const isSelf = rep.id === userId;
                       return (
                         <option key={rep.id} value={rep.id}>
-                          {rep.fullName} {repLangMeta ? `(${repLangMeta.flag} ${repLangMeta.label})` : ""}
+                          {isSelf ? `⭐ ${rep.fullName} (${roleTag} • You)` : `${rep.fullName} (${roleTag})`} {repLangMeta ? `(${repLangMeta.flag} ${repLangMeta.label})` : ""}
                         </option>
                       );
                     })}

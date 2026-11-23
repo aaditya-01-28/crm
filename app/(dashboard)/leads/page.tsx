@@ -265,13 +265,11 @@ export default function LeadsDirectoryPage() {
 
   const teamReps: Array<{ id: string; fullName: string; role: string; language?: string; isActive?: boolean }> =
     (teamData?.users || []).filter(
-      (u: { role: string; isActive?: boolean }) => ["sales_rep", "sales_manager"].includes(u.role) && u.isActive !== false
+      (u: { role: string; isActive?: boolean }) => ["sales_rep", "sales_manager", "super_admin"].includes(u.role) && u.isActive !== false
     );
 
-  // Managers cannot assign leads to themselves
-  const assignableReps = teamReps.filter(
-    (r) => !(role === "sales_manager" && r.id === userId)
-  );
+  // All active team members (Level 1 Reps, Level 2 Managers, and Super Admin/Self) can be assigned leads
+  const assignableReps = teamReps;
 
   const { data, isLoading, isFetching, refetch } = useQuery<LeadsResponse>({
     queryKey: ["leads-directory", activeStatus, vertical, search, selectedRepFilter, page],
@@ -664,7 +662,7 @@ export default function LeadsDirectoryPage() {
                     .filter((r) => r.role === "sales_manager")
                     .map((r) => (
                       <option key={r.id} value={r.id}>
-                        {r.fullName} (Manager)
+                        {r.fullName} (Manager){r.id === userId ? " • You" : ""}
                       </option>
                     ))}
                 </optgroup>
@@ -675,7 +673,18 @@ export default function LeadsDirectoryPage() {
                     .filter((r) => r.role === "sales_rep")
                     .map((r) => (
                       <option key={r.id} value={r.id}>
-                        {r.fullName} (Rep)
+                        {r.fullName} (Rep){r.id === userId ? " • You" : ""}
+                      </option>
+                    ))}
+                </optgroup>
+              )}
+              {teamReps.some((r) => r.role === "super_admin") && (
+                <optgroup label="Level 3 • Super Admin">
+                  {teamReps
+                    .filter((r) => r.role === "super_admin")
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.fullName} (Admin){r.id === userId ? " • You" : ""}
                       </option>
                     ))}
                 </optgroup>
@@ -1154,10 +1163,21 @@ export default function LeadsDirectoryPage() {
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                   >
                     <option value="unassigned">⚠️ Unassigned Pool (Assign Later)</option>
-                    {assignableReps.some((r) => r.role === "sales_manager") && (
+                    {assignableReps.some((r) => r.id === userId) && (
+                      <optgroup label="Assign to Yourself">
+                        {assignableReps
+                          .filter((r) => r.id === userId)
+                          .map((u) => (
+                            <option key={u.id} value={u.id}>
+                              ⭐ {u.fullName} ({u.role === "super_admin" ? "Admin" : u.role === "sales_manager" ? "Manager" : "Rep"} • You)
+                            </option>
+                          ))}
+                      </optgroup>
+                    )}
+                    {assignableReps.some((r) => r.role === "sales_manager" && r.id !== userId) && (
                       <optgroup label="Level 2 • Sales Managers">
                         {assignableReps
-                          .filter((r) => r.role === "sales_manager")
+                          .filter((r) => r.role === "sales_manager" && r.id !== userId)
                           .map((r) => (
                             <option key={r.id} value={r.id}>
                               {r.fullName} (Manager)
@@ -1165,13 +1185,24 @@ export default function LeadsDirectoryPage() {
                           ))}
                       </optgroup>
                     )}
-                    {assignableReps.some((r) => r.role === "sales_rep") && (
+                    {assignableReps.some((r) => r.role === "sales_rep" && r.id !== userId) && (
                       <optgroup label="Level 1 • Sales Representatives">
                         {assignableReps
-                          .filter((r) => r.role === "sales_rep")
+                          .filter((r) => r.role === "sales_rep" && r.id !== userId)
                           .map((r) => (
                             <option key={r.id} value={r.id}>
                               {r.fullName} (Rep)
+                            </option>
+                          ))}
+                      </optgroup>
+                    )}
+                    {assignableReps.some((r) => r.role === "super_admin" && r.id !== userId) && (
+                      <optgroup label="Level 3 • Super Admin">
+                        {assignableReps
+                          .filter((r) => r.role === "super_admin" && r.id !== userId)
+                          .map((r) => (
+                            <option key={r.id} value={r.id}>
+                              {r.fullName} (Admin)
                             </option>
                           ))}
                       </optgroup>
@@ -1228,10 +1259,24 @@ export default function LeadsDirectoryPage() {
               className="bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-emerald-500"
             >
               <option value="">Assign To Team Member...</option>
-              {assignableReps.some((r) => r.role === "sales_manager") && (
+              {assignableReps.some((r) => r.id === userId) && (
+                <optgroup label="Assign to Yourself">
+                  {assignableReps
+                    .filter((r) => r.id === userId)
+                    .map((rep) => {
+                      const repLangMeta = getLanguageMeta(rep.language);
+                      return (
+                        <option key={rep.id} value={rep.id}>
+                          ⭐ {rep.fullName} ({rep.role === "super_admin" ? "Admin" : rep.role === "sales_manager" ? "Manager" : "Rep"} • You) {repLangMeta ? `(${repLangMeta.flag} ${repLangMeta.label})` : ""}
+                        </option>
+                      );
+                    })}
+                </optgroup>
+              )}
+              {assignableReps.some((r) => r.role === "sales_manager" && r.id !== userId) && (
                 <optgroup label="Level 2 • Sales Managers">
                   {assignableReps
-                    .filter((r) => r.role === "sales_manager")
+                    .filter((r) => r.role === "sales_manager" && r.id !== userId)
                     .map((rep) => {
                       const repLangMeta = getLanguageMeta(rep.language);
                       return (
@@ -1242,15 +1287,29 @@ export default function LeadsDirectoryPage() {
                     })}
                 </optgroup>
               )}
-              {assignableReps.some((r) => r.role === "sales_rep") && (
+              {assignableReps.some((r) => r.role === "sales_rep" && r.id !== userId) && (
                 <optgroup label="Level 1 • Sales Representatives">
                   {assignableReps
-                    .filter((r) => r.role === "sales_rep")
+                    .filter((r) => r.role === "sales_rep" && r.id !== userId)
                     .map((rep) => {
                       const repLangMeta = getLanguageMeta(rep.language);
                       return (
                         <option key={rep.id} value={rep.id}>
                           {rep.fullName} (Rep) {repLangMeta ? `(${repLangMeta.flag} ${repLangMeta.label})` : ""}
+                        </option>
+                      );
+                    })}
+                </optgroup>
+              )}
+              {assignableReps.some((r) => r.role === "super_admin" && r.id !== userId) && (
+                <optgroup label="Level 3 • Super Admin">
+                  {assignableReps
+                    .filter((r) => r.role === "super_admin" && r.id !== userId)
+                    .map((rep) => {
+                      const repLangMeta = getLanguageMeta(rep.language);
+                      return (
+                        <option key={rep.id} value={rep.id}>
+                          {rep.fullName} (Admin) {repLangMeta ? `(${repLangMeta.flag} ${repLangMeta.label})` : ""}
                         </option>
                       );
                     })}

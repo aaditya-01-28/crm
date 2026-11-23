@@ -321,19 +321,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Restriction: Managers cannot assign leads to themselves
-    if (
-      normalizeRole(role) === "sales_manager" &&
-      assignedRepId &&
-      assignedRepId !== "unassigned" &&
-      assignedRepId === repId
-    ) {
-      return NextResponse.json(
-        { error: "Manager restriction: You cannot assign leads to yourself. Please select another executive." },
-        { status: 400 }
-      );
-    }
-
     const initialRep = can(role, "leads:assign")
       ? assignedRepId && assignedRepId !== "unassigned"
         ? assignedRepId
