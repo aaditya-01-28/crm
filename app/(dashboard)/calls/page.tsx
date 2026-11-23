@@ -662,7 +662,7 @@ export default function CallLogsPage() {
                 <tr>
                   <th className="py-3.5 px-4">Connected Time</th>
                   <th className="py-3.5 px-4">Prospect / Lead</th>
-                  <th className="py-3.5 px-4">Representative</th>
+                  {isManagerOrAdmin && <th className="py-3.5 px-4">Representative</th>}
                   <th className="py-3.5 px-4 text-center">Status / Outcome</th>
                   <th className="py-3.5 px-4 text-center">Talk Duration</th>
                   <th className="py-3.5 px-4">Call Audio / QA Audit</th>
@@ -737,22 +737,24 @@ export default function CallLogsPage() {
                         </div>
                       </td>
 
-                      {/* Rep */}
-                      <td className="py-3.5 px-4 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-6 h-6 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-[10px]">
-                            {call.rep.fullName.charAt(0)}
+                      {/* Rep (Visible only for Level 2 Managers & Level 3 Admins) */}
+                      {isManagerOrAdmin && (
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <div className="w-6 h-6 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-[10px]">
+                              {call.rep.fullName.charAt(0)}
+                            </div>
+                            <div>
+                              <p className="font-medium text-gray-800 leading-tight">
+                                {call.rep.fullName}
+                              </p>
+                              <p className="text-[10px] text-gray-400 leading-tight">
+                                {call.rep.email}
+                              </p>
+                            </div>
                           </div>
-                          <div>
-                            <p className="font-medium text-gray-800 leading-tight">
-                              {call.rep.fullName}
-                            </p>
-                            <p className="text-[10px] text-gray-400 leading-tight">
-                              {call.rep.email}
-                            </p>
-                          </div>
-                        </div>
-                      </td>
+                        </td>
+                      )}
 
                       {/* Disposition */}
                       <td className="py-3.5 px-4 text-center whitespace-nowrap">

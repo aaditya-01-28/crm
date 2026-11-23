@@ -138,67 +138,38 @@ export async function PATCH(
           break;
       }
 
-      // Create or update call log: if a call log was recently recorded (e.g. from SIM dialer/telephony),
-      // update it with the executive's authoritative disposition and remarks, avoiding duplicate entries.
+      // Create or update call log: attach disposition and remarks to the call from this active session
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS log_source TEXT DEFAULT 'dialer_web';").catch(() => {});
 
-      // If disposition is "Demo Done" or "Demo Completed", check if there is an existing "Demo Scheduled" call log
-      // for this lead. If so, update that log to "Demo Done" so call logs shows ONE at a time instead of duplicate logs!
-      let handledDemoLog = false;
-      if (disposition === "Demo Done" || disposition === "Demo Completed") {
-        const existingDemoScheduled = await client.query(
-          `SELECT id, duration_seconds FROM call_logs
-           WHERE lead_id = $1 AND disposition = 'Demo Scheduled'
-           ORDER BY call_timestamp DESC
-           LIMIT 1`,
-          [id]
+      // Only attach to a recent call if it was completed in the last 20 seconds of this active dialer session.
+      // Older calls are preserved as immutable interaction history and never overwritten!
+      const recentLog = await client.query(
+        `SELECT id, duration_seconds FROM call_logs
+         WHERE lead_id = $1 AND rep_id = $2
+           AND call_timestamp > NOW() - INTERVAL '20 seconds'
+         ORDER BY call_timestamp DESC
+         LIMIT 1`,
+        [id, repId]
+      );
+
+      if (recentLog.rows.length > 0) {
+        await client.query(
+          `UPDATE call_logs
+           SET disposition = $1,
+               duration_seconds = GREATEST(duration_seconds, $2),
+               remark = COALESCE($3, remark),
+               recording_url = COALESCE($4, recording_url),
+               log_source = $5
+           WHERE id = $6`,
+          [disposition, durationSeconds, remark || null, recordingUrl || null, logSource, recentLog.rows[0].id]
         );
-
-        if (existingDemoScheduled.rows.length > 0) {
-          await client.query(
-            `UPDATE call_logs
-             SET disposition = 'Demo Done',
-                 duration_seconds = GREATEST(duration_seconds, $1),
-                 remark = COALESCE($2, 'Product demo completed and moved to pipeline.'),
-                 recording_url = COALESCE($3, recording_url),
-                 log_source = $4,
-                 call_timestamp = NOW()
-             WHERE id = $5`,
-            [durationSeconds, remark || null, recordingUrl || null, logSource, existingDemoScheduled.rows[0].id]
-          );
-          handledDemoLog = true;
-        }
-      }
-
-      if (!handledDemoLog) {
-        const recentLog = await client.query(
-          `SELECT id, duration_seconds FROM call_logs
-           WHERE lead_id = $1 AND rep_id = $2
-             AND call_timestamp > NOW() - INTERVAL '3 minutes'
-           ORDER BY call_timestamp DESC
-           LIMIT 1`,
-          [id, repId]
+      } else {
+        await client.query(
+          `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, call_timestamp)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+          [tenantId, id, repId, disposition, durationSeconds, remark || null, recordingUrl || null, logSource]
         );
-
-        if (recentLog.rows.length > 0) {
-          await client.query(
-            `UPDATE call_logs
-             SET disposition = $1,
-                 duration_seconds = GREATEST(duration_seconds, $2),
-                 remark = COALESCE($3, remark),
-                 recording_url = COALESCE($4, recording_url),
-                 log_source = $5
-             WHERE id = $6`,
-            [disposition, durationSeconds, remark || null, recordingUrl || null, logSource, recentLog.rows[0].id]
-          );
-        } else {
-          await client.query(
-            `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, call_timestamp)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
-            [tenantId, id, repId, disposition, durationSeconds, remark || null, recordingUrl || null, logSource]
-          );
-        }
       }
 
       // Record stage transition into persistent lead_stage_history table

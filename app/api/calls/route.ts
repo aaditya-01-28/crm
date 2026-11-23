@@ -28,21 +28,6 @@ export async function GET(request: NextRequest) {
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS log_source TEXT DEFAULT 'dialer_web';").catch(() => {});
 
-      // Deduplicate historical demo logs: if both Demo Scheduled and Demo Done were logged for the same lead,
-      // keep Demo Done so Call Logs shows one at a time as requested!
-      await client.query(`
-        DELETE FROM call_logs c1
-        WHERE c1.disposition = 'Demo Scheduled'
-          AND c1.duration_seconds = 0
-          AND EXISTS (
-            SELECT 1 FROM call_logs c2
-            WHERE c2.lead_id = c1.lead_id
-              AND (c2.disposition = 'Demo Done' OR c2.disposition = 'Demo Completed')
-              AND c2.call_timestamp >= c1.call_timestamp
-              AND c2.call_timestamp <= c1.call_timestamp + INTERVAL '24 hours'
-          );
-      `).catch(() => {});
-
       // Correct existing leads where remark indicates competitor / other company service but status was already_using
       await client.query(`
         UPDATE leads
@@ -295,13 +280,15 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // Deduplication and Upsert: check if a call log already exists for this lead & rep in the last 3 minutes
+        // Deduplication and Upsert:
+        // Only treat as the same call if it has the exact same timestamp (within 15 seconds) from a network retry/duplicate.
+        // Multiple calls placed to the same lead minutes or hours apart are distinct interactions and must NEVER be overwritten!
         const recentLogRes = await client.query(
-          `SELECT id, disposition, duration_seconds as "durationSeconds", log_source as "logSource", remark, recording_url as "recordingUrl"
+          `SELECT id, disposition, duration_seconds as "durationSeconds", log_source as "logSource", remark, recording_url as "recordingUrl", call_timestamp as "callTimestamp"
            FROM call_logs
            WHERE tenant_id = $1 AND lead_id = $2 AND rep_id = $3
-             AND call_timestamp >= ($4::TIMESTAMPTZ - INTERVAL '3 minutes')
-             AND call_timestamp <= ($4::TIMESTAMPTZ + INTERVAL '3 minutes')
+             AND call_timestamp >= ($4::TIMESTAMPTZ - INTERVAL '15 seconds')
+             AND call_timestamp <= ($4::TIMESTAMPTZ + INTERVAL '15 seconds')
            ORDER BY call_timestamp DESC
            LIMIT 1`,
           [tenantId, targetLeadId, repId, callTimestamp]
@@ -314,6 +301,7 @@ export async function POST(request: NextRequest) {
           const newRemark = remark || existing.remark;
           const newRecording = recordingUrl || existing.recordingUrl;
           const finalSource = logSource === "apk_manual" ? "apk_manual" : existing.logSource || logSource;
+          const finalTimestamp = existing.callTimestamp || callTimestamp;
 
           const updatedRes = await client.query(
             `UPDATE call_logs
@@ -327,7 +315,7 @@ export async function POST(request: NextRequest) {
              RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
                        disposition, duration_seconds as "durationSeconds", remark,
                        recording_url as "recordingUrl", log_source as "logSource", call_timestamp as "callTimestamp"`,
-            [disposition, newDuration, newRemark, newRecording, finalSource, callTimestamp, existing.id]
+            [disposition, newDuration, newRemark, newRecording, finalSource, finalTimestamp, existing.id]
           );
           finalLog = updatedRes.rows[0];
 
