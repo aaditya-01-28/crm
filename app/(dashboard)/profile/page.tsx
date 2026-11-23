@@ -406,13 +406,13 @@ export default function ProfilePage() {
               <div className="flex items-center justify-between pb-2 border-b border-gray-100">
                 <span className="text-gray-500 font-medium">Web CRM Platform</span>
                 <span className="font-mono font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                  v1.1.0 (Build 2)
+                  v1.1.0
                 </span>
               </div>
               <div className="flex items-center justify-between pb-2 border-b border-gray-100">
                 <span className="text-gray-500 font-medium">Android Companion App</span>
                 <span className="font-mono font-semibold text-blue-800 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
-                  v1.1.0+2
+                  v1.1.0
                 </span>
               </div>
               <div className="flex items-center justify-between pt-0.5">

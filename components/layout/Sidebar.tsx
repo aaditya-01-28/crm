@@ -383,7 +383,7 @@ export default function Sidebar({ role }: SidebarProps) {
             <>
               <div className="flex flex-col">
                 <span className="font-semibold text-slate-300">Textora Engage</span>
-                <span className="text-[10px] text-slate-500 font-mono tracking-tight">v1.1.0 (Build 2)</span>
+                <span className="text-[10px] text-slate-500 font-mono tracking-tight">v1.1.0</span>
               </div>
               <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
