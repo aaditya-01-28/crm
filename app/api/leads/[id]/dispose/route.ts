@@ -7,7 +7,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await getSession();
+  const session = await getSession(request);
   const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
   const repId = request.headers.get("x-user-id") || session?.sub || "";
 

@@ -3,7 +3,7 @@ import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
-  const session = await getSession();
+  const session = await getSession(request);
   const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
   const repId = request.headers.get("x-user-id") || session?.sub || "";
   const role = request.headers.get("x-user-role") || session?.role || "";
@@ -208,7 +208,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getSession();
+  const session = await getSession(request);
   const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
   const repId = request.headers.get("x-user-id") || session?.sub || "";
 

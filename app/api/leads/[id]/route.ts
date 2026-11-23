@@ -8,7 +8,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await getSession();
+  const session = await getSession(request);
   const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
   const repId = request.headers.get("x-user-id") || session?.sub || "";
   const role = request.headers.get("x-user-role") || session?.role || "";
@@ -197,7 +197,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await getSession();
+  const session = await getSession(request);
   const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
   const role = request.headers.get("x-user-role") || session?.role || "";
   const repId = request.headers.get("x-user-id") || session?.sub || "";
@@ -383,7 +383,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await getSession();
+  const session = await getSession(request);
   const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
   const role = request.headers.get("x-user-role") || session?.role || "";
 

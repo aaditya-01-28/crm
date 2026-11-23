@@ -5,7 +5,7 @@ import bcrypt from "bcryptjs";
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getSession();
+    const session = await getSession(request);
     const headerUserId = request.headers.get("x-user-id");
     const currentUserId = headerUserId || session?.sub;
 
@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const session = await getSession();
+    const session = await getSession(request);
     const headerUserId = request.headers.get("x-user-id");
     const currentUserId = headerUserId || session?.sub;
 

@@ -3,7 +3,7 @@ import { getSession } from "@/lib/auth";
 import { withClient } from "@/lib/db";
 
 export async function GET(request: NextRequest) {
-  const session = await getSession();
+  const session = await getSession(request);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
