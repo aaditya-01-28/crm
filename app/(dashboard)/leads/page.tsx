@@ -367,7 +367,7 @@ export default function LeadsDirectoryPage() {
   async function handleBulkAssign(mode: "specific" | "round_robin" | "unassign") {
     if (selectedLeadIds.length === 0) return;
     if (mode === "specific" && !bulkTargetRepId) {
-      toast.error("Please select a sales representative to assign to.");
+      toast.error("Please select a team member to assign to.");
       return;
     }
     setAssigningBulk(true);
