@@ -78,6 +78,7 @@ export async function GET(
         `SELECT t.id, t.tenant_id as "tenantId", t.lead_id as "leadId", t.rep_id as "repId",
                 t.task_type as "taskType", t.scheduled_time as "scheduledTime", t.status,
                 t.meeting_link as "meetingLink", t.notes, t.created_at as "createdAt",
+                t.updated_at as "updatedAt",
                 u.full_name as "repFullName"
          FROM scheduled_tasks t
          LEFT JOIN users u ON t.rep_id = u.id
@@ -111,6 +112,47 @@ export async function GET(
         payments: [],
       }));
 
+      // Stage History: Detailed lifecycle milestones and stage transitions
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS lead_stage_history (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          tenant_id UUID NOT NULL,
+          lead_id UUID NOT NULL,
+          rep_id UUID,
+          stage_name VARCHAR(100) NOT NULL,
+          stage_type VARCHAR(50) NOT NULL,
+          notes TEXT,
+          metadata JSONB DEFAULT '{}',
+          created_at TIMESTAMPTZ(6) DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_lead_stage_history_lead ON lead_stage_history(lead_id, created_at DESC);
+      `).catch(() => {});
+
+      const stageHistoryRes = await client.query(
+        `SELECT h.id, h.tenant_id as "tenantId", h.lead_id as "leadId", h.rep_id as "repId",
+                h.stage_name as "stageName", h.stage_type as "stageType", h.notes,
+                h.metadata, h.created_at as "createdAt",
+                u.full_name as "repFullName"
+         FROM lead_stage_history h
+         LEFT JOIN users u ON h.rep_id = u.id
+         WHERE h.lead_id = $1
+         ORDER BY h.created_at DESC`,
+        [id]
+      ).catch(() => ({ rows: [] }));
+
+      const stageHistory = stageHistoryRes.rows.map((h: any) => ({
+        id: h.id,
+        tenantId: h.tenantId,
+        leadId: h.leadId,
+        repId: h.repId,
+        stageName: h.stageName,
+        stageType: h.stageType,
+        notes: h.notes,
+        metadata: h.metadata,
+        createdAt: h.createdAt,
+        rep: { fullName: h.repFullName },
+      }));
+
       const meta = (l.customMetadata as Record<string, unknown>) || {};
       const preferredLanguage = (meta.preferredLanguage as string) || null;
 
@@ -139,6 +181,7 @@ export async function GET(
           callLogs,
           tasks,
           deals,
+          stageHistory,
           preferredLanguage,
         },
       });

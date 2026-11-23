@@ -27,6 +27,33 @@ export async function GET(request: NextRequest) {
     return await withClient(async (client) => {
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS log_source TEXT DEFAULT 'dialer_web';").catch(() => {});
+
+      // Deduplicate historical demo logs: if both Demo Scheduled and Demo Done were logged for the same lead,
+      // keep Demo Done so Call Logs shows one at a time as requested!
+      await client.query(`
+        DELETE FROM call_logs c1
+        WHERE c1.disposition = 'Demo Scheduled'
+          AND c1.duration_seconds = 0
+          AND EXISTS (
+            SELECT 1 FROM call_logs c2
+            WHERE c2.lead_id = c1.lead_id
+              AND (c2.disposition = 'Demo Done' OR c2.disposition = 'Demo Completed')
+              AND c2.call_timestamp >= c1.call_timestamp
+              AND c2.call_timestamp <= c1.call_timestamp + INTERVAL '24 hours'
+          );
+      `).catch(() => {});
+
+      // Correct existing leads where remark indicates competitor / other company service but status was already_using
+      await client.query(`
+        UPDATE leads
+        SET status = 'already_purchased', updated_at = NOW()
+        WHERE status = 'already_using'
+          AND id IN (
+            SELECT lead_id FROM call_logs
+            WHERE remark ILIKE '%other compny%' OR remark ILIKE '%other company%' OR remark ILIKE '%competitor%'
+          );
+      `).catch(() => {});
+
       const conditions: string[] = ["c.tenant_id = $1"];
       const params: any[] = [tenantId];
 
@@ -43,9 +70,17 @@ export async function GET(request: NextRequest) {
       if (disposition && disposition !== "all") {
         if (
           disposition === "Already Using Our Service" ||
-          disposition === "Already Using"
+          disposition === "Already Using" ||
+          disposition === "Using Our Service"
         ) {
-          conditions.push(`(c.disposition = 'Already Using Our Service' OR c.disposition = 'Already Using')`);
+          conditions.push(`(c.disposition = 'Already Using Our Service' OR c.disposition = 'Already Using' OR c.disposition = 'Using Our Service')`);
+        } else if (
+          disposition === "Already Purchased or Using Other Company Service" ||
+          disposition === "Already Purchased" ||
+          disposition === "Using Other Service" ||
+          disposition === "Already Using Other Company"
+        ) {
+          conditions.push(`(c.disposition ILIKE '%Other%' OR c.disposition ILIKE '%Purchased%')`);
         } else if (disposition === "Demo Done" || disposition === "Demo Completed") {
           conditions.push(`(c.disposition = 'Demo Done' OR c.disposition = 'Demo Completed')`);
         } else {

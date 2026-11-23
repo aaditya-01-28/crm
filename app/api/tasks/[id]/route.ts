@@ -83,11 +83,59 @@ export async function PATCH(
             );
           }
 
-          await client.query(
-            `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, call_timestamp)
-             VALUES ($1, $2, $3, 'Demo Done', 0, 'Product demo completed and moved to pipeline.', NOW())`,
-            [tenantId, lead.id, task.rep_id]
+          // Check if there is an existing 'Demo Scheduled' call log for this lead.
+          // If so, update that log to 'Demo Done' so Call Logs shows ONE at a time instead of duplicate logs!
+          const existingDemoLog = await client.query(
+            `SELECT id FROM call_logs
+             WHERE lead_id = $1 AND disposition = 'Demo Scheduled'
+             ORDER BY call_timestamp DESC
+             LIMIT 1`,
+            [lead.id]
           );
+
+          if (existingDemoLog.rows.length > 0) {
+            await client.query(
+              `UPDATE call_logs
+               SET disposition = 'Demo Done',
+                   remark = 'Product demo completed and moved to pipeline.',
+                   call_timestamp = NOW()
+               WHERE id = $1`,
+              [existingDemoLog.rows[0].id]
+            );
+          } else {
+            await client.query(
+              `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, call_timestamp)
+               VALUES ($1, $2, $3, 'Demo Done', 0, 'Product demo completed and moved to pipeline.', NOW())`,
+              [tenantId, lead.id, task.rep_id]
+            );
+          }
+
+          // Record stage transition in lead_stage_history
+          await client.query(`
+            CREATE TABLE IF NOT EXISTS lead_stage_history (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              tenant_id UUID NOT NULL,
+              lead_id UUID NOT NULL,
+              rep_id UUID,
+              stage_name VARCHAR(100) NOT NULL,
+              stage_type VARCHAR(50) NOT NULL,
+              notes TEXT,
+              metadata JSONB DEFAULT '{}',
+              created_at TIMESTAMPTZ(6) DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS idx_lead_stage_history_lead ON lead_stage_history(lead_id, created_at DESC);
+          `).catch(() => {});
+
+          await client.query(
+            `INSERT INTO lead_stage_history (tenant_id, lead_id, rep_id, stage_name, stage_type, notes, metadata, created_at)
+             VALUES ($1, $2, $3, 'Demo Done', 'demo', 'Product demo completed and moved to pipeline.', $4, NOW())`,
+            [
+              tenantId,
+              lead.id,
+              task.rep_id,
+              JSON.stringify({ taskId: id, stage: "demo_done" }),
+            ]
+          ).catch(() => {});
         }
       }
 
