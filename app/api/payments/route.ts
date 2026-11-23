@@ -17,11 +17,21 @@ export async function GET(request: NextRequest) {
 
   try {
     return await withClient(async (client) => {
+      // Fix: Rep view shows only their PENDING payments (for submission tracking).
+      // Ops/Manager view filters by ops_approval_status tab (pending/approved/rejected) — strictly exclusive.
       const isRep = role === "sales_rep";
-      const whereClause = isRep
-        ? "p.tenant_id = $1 AND p.rep_id = $2"
-        : "p.tenant_id = $1 AND p.ops_approval_status = $2";
-      const params = isRep ? [tenantId, repId] : [tenantId, opsStatus];
+      let whereClause: string;
+      let params: any[];
+
+      if (isRep) {
+        // Reps see only their own pending_verification payments (ones they submitted)
+        whereClause = "p.tenant_id = $1 AND p.rep_id = $2 AND p.ops_approval_status = 'pending_verification'";
+        params = [tenantId, repId];
+      } else {
+        // Ops/Manager/Admin see payments filtered by exact status tab — no cross-tab bleed
+        whereClause = "p.tenant_id = $1 AND p.ops_approval_status = $2";
+        params = [tenantId, opsStatus];
+      }
 
       const paymentsRes = await client.query(
         `SELECT p.id, p.tenant_id as "tenantId", p.deal_id as "dealId", p.lead_id as "leadId",

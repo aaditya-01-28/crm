@@ -70,7 +70,9 @@ export default function PaymentsPage() {
           ? "Payment approved — credits provisioned ✅"
           : "Payment rejected"
       );
-      queryClient.invalidateQueries({ queryKey: ["payments"] });
+      // Invalidate all payment tabs to prevent stale approved/rejected cross-tab bleed
+      queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
     },
     onError: () => toast.error("Failed to update payment status"),
   });

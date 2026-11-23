@@ -24,7 +24,6 @@ import {
   FileText,
 } from "lucide-react";
 import {
-  buildTelLink,
   buildWALink,
   WA_PITCH,
   cn,
@@ -124,7 +123,7 @@ export function DialerCard({ lead: initialLead, onDisposed, onCallLogged }: Dial
     };
   }, [callStarted, callStartTime]);
 
-  // Push-to-dial status poller
+  // Push-to-dial status poller — only starts timer when call confirmed live (avoids premature duration)
   useEffect(() => {
     if (!pushJobId || pushStatus === "idle" || pushStatus === "in_call") return;
 
@@ -140,8 +139,11 @@ export function DialerCard({ lead: initialLead, onDisposed, onCallLogged }: Dial
           setPushStatus("ringing");
         } else if (job.status === "in_call") {
           setPushStatus("in_call");
-          setCallStarted(true);
-          if (!callStartTime) setCallStartTime(new Date());
+          // Only start call timer once call is actually live (fix: duration was inflating from dispatch time)
+          if (!callStarted) {
+            setCallStarted(true);
+            setCallStartTime(new Date());
+          }
           toast.success("📱 Phone Companion Connected! Call is now live on SIM.");
         } else if (job.status === "completed" || job.status === "cancelled") {
           clearInterval(interval);
@@ -150,15 +152,13 @@ export function DialerCard({ lead: initialLead, onDisposed, onCallLogged }: Dial
     }, 1500);
 
     return () => clearInterval(interval);
-  }, [pushJobId, pushStatus, callStartTime]);
-
-  const telLink = buildTelLink(lead.phoneNumber);
+  }, [pushJobId, pushStatus, callStarted, callStartTime]);
 
   // Option B: Trigger call via Android phone companion
+  // Fix: Do NOT start timer here — wait until telephony confirms call is live
   async function handlePushToDial() {
     setPushStatus("dispatching");
-    setCallStarted(true);
-    setCallStartTime(new Date());
+    // Do NOT set callStarted=true here; timer only starts when status becomes "in_call"
 
     try {
       const res = await fetch("/api/telephony/push-to-dial", {
@@ -186,13 +186,6 @@ export function DialerCard({ lead: initialLead, onDisposed, onCallLogged }: Dial
       toast.error("Network error dispatching push-to-dial");
       setPushStatus("idle");
     }
-  }
-
-  // Fallback: Direct browser/softphone call
-  function handleDirectCall() {
-    setCallStarted(true);
-    setCallStartTime(new Date());
-    setPushStatus("in_call");
   }
 
   // End active call and focus on disposition
@@ -584,8 +577,8 @@ export function DialerCard({ lead: initialLead, onDisposed, onCallLogged }: Dial
         )}
 
         {/* Primary Call & WhatsApp Action Buttons */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {/* Option B: Push-to-Dial Phone Companion */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Push-to-Dial Phone Companion (Android SIM dialer) */}
           <button
             type="button"
             onClick={handlePushToDial}
@@ -602,17 +595,6 @@ export function DialerCard({ lead: initialLead, onDisposed, onCallLogged }: Dial
                 : "Push-to-Dial Phone"}
             </span>
           </button>
-
-          {/* Direct Softphone / tel: Fallback */}
-          <a
-            href={telLink}
-            onClick={handleDirectCall}
-            className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold py-3.5 px-4 rounded-xl transition text-xs shadow-sm"
-            title="Dial using computer default telephony app (tel: protocol)"
-          >
-            <Phone className="w-4 h-4 text-emerald-400" />
-            <span>Direct Call (tel:)</span>
-          </a>
 
           {/* Quick WhatsApp Template Modal */}
           <button

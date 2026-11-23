@@ -27,7 +27,7 @@ import { formatCurrency, SERVICE_INTERESTS } from "@/lib/utils";
 import { DealCard } from "@/components/pipeline/DealCard";
 import { DealModal } from "@/components/pipeline/DealModal";
 import { PaymentModal } from "@/components/payments/PaymentModal";
-import { useIsManagerOrAdmin } from "@/components/layout/SessionProvider";
+import { useIsManagerOrAdmin, useSession } from "@/components/layout/SessionProvider";
 import { toast } from "sonner";
 
 const COLUMNS = [
@@ -138,6 +138,7 @@ async function fetchDeals(): Promise<{ deals: Deal[] }> {
 export default function PipelinePage() {
   const queryClient = useQueryClient();
   const canManageDeals = useIsManagerOrAdmin();
+  const { userId: currentUserId } = useSession();
   const [showDealModal, setShowDealModal] = useState(false);
   const [editingDeal, setEditingDeal] = useState<Deal | null>(null);
   const [paymentDeal, setPaymentDeal] = useState<Deal | null>(null);
@@ -681,7 +682,7 @@ export default function PipelinePage() {
                                 <DealCard
                                   deal={deal}
                                   isDragging={snapshot.isDragging}
-                                  canEdit={canManageDeals}
+                                  canEdit={canManageDeals || deal.repId === currentUserId}
                                   canDelete={canManageDeals}
                                   onDelete={() => setDealToDelete(deal)}
                                   onClick={() => {
@@ -714,7 +715,7 @@ export default function PipelinePage() {
       {showDealModal && (
         <DealModal
           deal={editingDeal}
-          canEdit={editingDeal ? canManageDeals : true}
+          canEdit={editingDeal ? (canManageDeals || editingDeal.repId === currentUserId) : true}
           canDelete={canManageDeals}
           onClose={() => setShowDealModal(false)}
           onSaved={() => {

@@ -24,21 +24,6 @@ export async function PATCH(
     const body = await request.json();
     const { stage, closingNotes, quotedPrice, expectedClosingDate, serviceType, quantity } = body;
 
-    // Commercial and financial detail modifications are restricted to Level 2 (Manager) and Level 3 (Admin)
-    const isCommercialEdit =
-      quotedPrice !== undefined ||
-      quantity !== undefined ||
-      serviceType !== undefined ||
-      body.contactName !== undefined ||
-      body.companyName !== undefined;
-
-    if (isCommercialEdit && !isManagerOrAdmin(role)) {
-      return NextResponse.json(
-        { error: "Forbidden: Only Level 2 (Sales Manager) and Level 3 (Super Admin) can edit deal commercial details" },
-        { status: 403 }
-      );
-    }
-
     return await withClient(async (client) => {
       const dealRes = await client.query(
         "SELECT id, lead_id, rep_id, stage, closing_notes, quoted_price, expected_closing_date, service_type, quantity FROM deals WHERE id = $1 AND tenant_id = $2",
@@ -50,6 +35,26 @@ export async function PATCH(
       }
 
       const deal = dealRes.rows[0];
+
+      // Permissions: Manager/Admin can edit any deal; Executives (sales_rep) can edit their assigned deals
+      const isOwner = deal.rep_id === repId;
+      if (!isManagerOrAdmin(role) && !isOwner) {
+        return NextResponse.json(
+          { error: "Forbidden: You can only edit pipeline details for your assigned deals" },
+          { status: 403 }
+        );
+      }
+
+      // Commercial field restriction: only manager/admin can change financial fields
+      const isCommercialEdit =
+        quotedPrice !== undefined || quantity !== undefined || serviceType !== undefined;
+      if (isCommercialEdit && !isManagerOrAdmin(role)) {
+        return NextResponse.json(
+          { error: "Only managers can edit commercial/financial deal details" },
+          { status: 403 }
+        );
+      }
+
       const newStage = stage || deal.stage;
       const newPrice = quotedPrice !== undefined ? quotedPrice : deal.quoted_price;
       const newClosingDate =
@@ -295,15 +300,17 @@ export async function PATCH(
         }
       }
 
-      // Demo Scheduled calendar task
+      await client.query("ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_source TEXT DEFAULT 'dialer';").catch(() => {});
+
+      // Demo Scheduled calendar task (tagged as pipeline so it doesn't pollute follow-up agenda)
       if (newStage === "demo_scheduled" && body.demoDate && deal.lead_id) {
         const demoDateObj = new Date(body.demoDate);
         if (!isNaN(demoDateObj.getTime())) {
           await client.query(
             `INSERT INTO scheduled_tasks (
-               tenant_id, lead_id, rep_id, task_type, scheduled_time, meeting_link, notes, status, created_at, updated_at
+               tenant_id, lead_id, rep_id, task_type, scheduled_time, meeting_link, notes, status, task_source, created_at, updated_at
              )
-             VALUES ($1, $2, $3, 'product_demo', $4, $5, $6, 'pending', NOW(), NOW())`,
+             VALUES ($1, $2, $3, 'product_demo', $4, $5, $6, 'pending', 'pipeline', NOW(), NOW())`,
             [
               tenantId,
               deal.lead_id,
@@ -322,9 +329,9 @@ export async function PATCH(
         if (!isNaN(cbDateObj.getTime())) {
           await client.query(
             `INSERT INTO scheduled_tasks (
-               tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, created_at, updated_at
+               tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, task_source, created_at, updated_at
              )
-             VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', NOW(), NOW())`,
+             VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', 'pipeline', NOW(), NOW())`,
             [
               tenantId,
               deal.lead_id,
@@ -345,9 +352,9 @@ export async function PATCH(
         if (!isNaN(rcDateObj.getTime())) {
           await client.query(
             `INSERT INTO scheduled_tasks (
-               tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, created_at, updated_at
+               tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, task_source, created_at, updated_at
              )
-             VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', NOW(), NOW())`,
+             VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', 'pipeline', NOW(), NOW())`,
             [
               tenantId,
               deal.lead_id,

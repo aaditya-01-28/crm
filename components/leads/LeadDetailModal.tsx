@@ -42,7 +42,7 @@ import {
 import { MultiServiceSelect } from "@/components/common/MultiServiceSelect";
 import { AudioRecordingPlayer } from "@/components/calls/AudioRecordingPlayer";
 import { toast } from "sonner";
-import { useCanAssignLeads, useIsAdmin } from "@/components/layout/SessionProvider";
+import { useCanAssignLeads, useIsAdmin, useSession } from "@/components/layout/SessionProvider";
 
 interface LeadDetailModalProps {
   leadId: string;
@@ -79,6 +79,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
   const [submittingLog, setSubmittingLog] = useState(false);
   const canAssign = useCanAssignLeads();
   const isLevel3Admin = useIsAdmin();
+  const { role, userId } = useSession();
 
   // Delete lead state (Level 3 Super Admin only)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -127,7 +128,8 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
   });
 
   const teamReps = (teamData?.users || []).filter(
-    (u: { role: string; isActive?: boolean }) => u.role === "sales_rep" && u.isActive !== false
+    (u: { id: string; role: string; isActive?: boolean }) =>
+      u.role === "sales_rep" && u.isActive !== false && !(role === "sales_manager" && u.id === userId)
   );
 
   const lead = data?.lead;

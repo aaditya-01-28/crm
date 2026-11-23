@@ -6,9 +6,9 @@ const JWT_SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || "fallback-secret-change-in-production"
 );
 
-export const SESSION_DURATION_HOURS = 9;
-export const SESSION_DURATION_SECONDS = 9 * 60 * 60; // 32400 seconds (9 hours)
-export const JWT_SESSION_EXPIRY = "9h";
+export const SESSION_DURATION_HOURS = 720; // 30 days
+export const SESSION_DURATION_SECONDS = 30 * 24 * 60 * 60; // 2,592,000 seconds (30 days)
+export const JWT_SESSION_EXPIRY = "30d";
 
 export interface JWTPayload {
   sub: string;       // user id
@@ -23,8 +23,8 @@ export interface JWTPayload {
 }
 
 function resolveExpiry(envVal: string | undefined, defaultExpiry: string): string {
-  // Guard: If legacy env variable has "15m" or is empty, enforce user-requested 9 hours
-  if (!envVal || envVal === "15m") {
+  // Guard: If legacy env variable has "15m" or "9h" or is empty, enforce 30 days for persistent sessions
+  if (!envVal || envVal === "15m" || envVal === "9h") {
     return defaultExpiry;
   }
   return envVal;

@@ -798,15 +798,15 @@ export function DealModal({
                         : "bg-amber-50 text-amber-700 border-amber-200"
                     }`}
                   >
-                    {canEdit ? "Level 2/3 Authorized" : "View Only (Level 2/3 to Edit)"}
+                    {canEdit ? "Authorized to Edit" : "View Only"}
                   </span>
                 )}
               </div>
               <p className="text-xs text-gray-500 mt-0.5">
                 {isEdit
                   ? canEdit
-                    ? "Modify commercial values, package stages, or delete duplicate deals."
-                    : "View deal details. Core edits and deletion are reserved for Level 2 & Level 3 users."
+                    ? "Modify commercial values, package stages, or manage pipeline details."
+                    : "View deal details."
                   : "Select pipeline stage to dynamically adjust required commercial, demo, and onboarding fields."}
               </p>
             </div>

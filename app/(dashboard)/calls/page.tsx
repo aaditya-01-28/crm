@@ -47,6 +47,7 @@ interface CallLogItem {
   durationSeconds: number;
   remark: string | null;
   recordingUrl?: string | null;
+  logSource?: string | null;
   callTimestamp: string;
   lead: {
     id: string;
@@ -671,7 +672,15 @@ export default function CallLogsPage() {
                         <div className="font-semibold text-gray-900">
                           {formatDateTime(call.callTimestamp)}
                         </div>
-                        <span className="text-[10px] text-gray-400">SIM Outbound</span>
+                        {/* Log source badge — Type 1: Web Dialer, Type 2: APK Manual entry */}
+                        <span className={cn(
+                          "text-[10px] font-semibold px-1.5 py-0.5 rounded",
+                          call.logSource === "apk_manual"
+                            ? "bg-blue-50 text-blue-600 border border-blue-200"
+                            : "bg-slate-50 text-slate-500 border border-slate-200"
+                        )}>
+                          {call.logSource === "apk_manual" ? "📱 APK Entry" : "🖥 Dialer"}
+                        </span>
                       </td>
 
                       {/* Lead / Prospect */}

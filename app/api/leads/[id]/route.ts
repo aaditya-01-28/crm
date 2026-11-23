@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { can, isSalesRep, isAdmin } from "@/lib/rbac";
+import { can, isSalesRep, isAdmin, normalizeRole } from "@/lib/rbac";
 import { getSession } from "@/lib/auth";
 
 export async function GET(
@@ -172,6 +172,20 @@ export async function PATCH(
     } = body;
 
     const isLevel1 = isSalesRep(role);
+
+    // Restriction: Managers cannot assign leads to themselves
+    if (
+      normalizeRole(role) === "sales_manager" &&
+      assignedRepId !== undefined &&
+      assignedRepId !== null &&
+      assignedRepId !== "unassigned" &&
+      assignedRepId === repId
+    ) {
+      return NextResponse.json(
+        { error: "Manager restriction: You cannot assign leads to yourself. Please select another executive." },
+        { status: 400 }
+      );
+    }
 
     return await withClient(async (client) => {
       const existingRes = await client.query(

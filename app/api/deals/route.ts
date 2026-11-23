@@ -431,13 +431,15 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Demo Scheduled calendar task
+      await client.query("ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_source TEXT DEFAULT 'dialer';").catch(() => {});
+
+      // Demo Scheduled calendar task (tagged as pipeline source so it stays in pipeline and doesn't pollute agenda)
       if (primaryStage === "demo_scheduled" && firstComm.demoDate) {
         await client.query(
           `INSERT INTO scheduled_tasks (
-             tenant_id, lead_id, rep_id, task_type, scheduled_time, meeting_link, notes, status, created_at, updated_at
+             tenant_id, lead_id, rep_id, task_type, scheduled_time, meeting_link, notes, status, task_source, created_at, updated_at
            )
-           VALUES ($1, $2, $3, 'product_demo', $4, $5, $6, 'pending', NOW(), NOW())`,
+           VALUES ($1, $2, $3, 'product_demo', $4, $5, $6, 'pending', 'pipeline', NOW(), NOW())`,
           [
             tenantId,
             leadId,
@@ -456,9 +458,9 @@ export async function POST(request: NextRequest) {
       ) {
         await client.query(
           `INSERT INTO scheduled_tasks (
-             tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, created_at, updated_at
+             tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, task_source, created_at, updated_at
            )
-           VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', NOW(), NOW())`,
+           VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', 'pipeline', NOW(), NOW())`,
           [
             tenantId,
             leadId,
@@ -476,9 +478,9 @@ export async function POST(request: NextRequest) {
       if (primaryStage === "closed_lost" && firstComm.recontactDate) {
         await client.query(
           `INSERT INTO scheduled_tasks (
-             tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, created_at, updated_at
+             tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, task_source, created_at, updated_at
            )
-           VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', NOW(), NOW())`,
+           VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', 'pipeline', NOW(), NOW())`,
           [
             tenantId,
             leadId,

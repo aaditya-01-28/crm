@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
   try {
     return await withClient(async (client) => {
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
+      await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS log_source TEXT DEFAULT 'dialer_web';").catch(() => {});
       const conditions: string[] = ["c.tenant_id = $1"];
       const params: any[] = [tenantId];
 
@@ -78,6 +79,7 @@ export async function GET(request: NextRequest) {
       const callsRes = await client.query(
         `SELECT c.id, c.tenant_id as "tenantId", c.lead_id as "leadId", c.rep_id as "repId",
                 c.disposition, c.duration_seconds as "durationSeconds", c.remark, c.recording_url as "recordingUrl",
+                COALESCE(c.log_source, 'dialer_web') as "logSource",
                 c.call_timestamp as "callTimestamp",
                 l.id as "lead_id", l.phone_number as "lead_phoneNumber", l.contact_name as "lead_contactName",
                 l.company_name as "lead_companyName", l.business_vertical as "lead_businessVertical",
@@ -117,6 +119,7 @@ export async function GET(request: NextRequest) {
         durationSeconds: r.durationSeconds,
         remark: r.remark,
         recordingUrl: r.recordingUrl || null,
+        logSource: r.logSource || "dialer_web",
         callTimestamp: r.callTimestamp,
         lead: r.lead_id
           ? {
@@ -175,6 +178,8 @@ export async function POST(request: NextRequest) {
 
     return await withClient(async (client) => {
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
+      await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS log_source TEXT DEFAULT 'dialer_web';").catch(() => {});
+      await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS log_source TEXT DEFAULT 'dialer_web';").catch(() => {});
       const createdLogs = [];
 
       for (const item of items) {
@@ -214,12 +219,12 @@ export async function POST(request: NextRequest) {
         }
 
         const logRes = await client.query(
-          `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, call_timestamp)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, call_timestamp)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
            RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
                      disposition, duration_seconds as "durationSeconds", remark,
-                     recording_url as "recordingUrl", call_timestamp as "callTimestamp"`,
-          [tenantId, targetLeadId, repId, disposition, durationSeconds, remark, recordingUrl, callTimestamp]
+                     recording_url as "recordingUrl", log_source as "logSource", call_timestamp as "callTimestamp"`,
+          [tenantId, targetLeadId, repId, disposition, durationSeconds, remark, recordingUrl, item.logSource || "apk_manual", callTimestamp]
         );
 
         if (disposition === "RNR") {

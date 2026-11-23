@@ -12,6 +12,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const { searchParams } = new URL(request.url);
+  const source = searchParams.get("source");
+
   const now = new Date();
   const startOfDay = new Date(now);
   startOfDay.setHours(0, 0, 0, 0);
@@ -20,18 +23,27 @@ export async function GET(request: NextRequest) {
 
   try {
     return await withClient(async (client) => {
+      await client.query("ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_source TEXT DEFAULT 'dialer';").catch(() => {});
       const isRep = role === "sales_rep";
+
+      // Issue 6 Fix: Filter out pipeline deal updates from the Follow-Up Agenda
+      // Agenda displays only dialer callbacks/demos/follow-ups unless specifically requesting pipeline tasks
+      const sourceFilter = source
+        ? `AND t.task_source = '${source.replace(/'/g, "''")}'`
+        : "AND (t.task_source IS NULL OR t.task_source = 'dialer' OR t.task_source = 'manual')";
+
       const tasksRes = await client.query(
         `SELECT t.id, t.tenant_id as "tenantId", t.lead_id as "leadId", t.rep_id as "repId",
                 t.task_type as "taskType", t.scheduled_time as "scheduledTime", t.status,
-                t.meeting_link as "meetingLink", t.notes, t.created_at as "createdAt",
+                t.meeting_link as "meetingLink", t.notes, COALESCE(t.task_source, 'dialer') as "taskSource",
+                t.created_at as "createdAt",
                 l.phone_number as "lead_phoneNumber", l.contact_name as "lead_contactName",
                 l.company_name as "lead_companyName", l.business_vertical as "lead_businessVertical",
                 u.full_name as "rep_fullName"
          FROM scheduled_tasks t
          LEFT JOIN leads l ON t.lead_id = l.id
          LEFT JOIN users u ON t.rep_id = u.id
-         WHERE t.tenant_id = $1 AND t.status = 'pending' ${isRep ? "AND (t.rep_id = $2 OR l.assigned_rep_id = $2)" : ""}
+         WHERE t.tenant_id = $1 AND t.status = 'pending' ${sourceFilter} ${isRep ? "AND (t.rep_id = $2 OR l.assigned_rep_id = $2)" : ""}
          ORDER BY t.scheduled_time ASC NULLS LAST`,
         isRep ? [tenantId, repId] : [tenantId]
       );

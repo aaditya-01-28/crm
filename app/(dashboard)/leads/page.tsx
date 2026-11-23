@@ -38,7 +38,7 @@ import { MultiServiceSelect } from "@/components/common/MultiServiceSelect";
 import { LeadDetailModal } from "@/components/leads/LeadDetailModal";
 import { CSVImporter } from "@/components/dialer/CSVImporter";
 import { toast } from "sonner";
-import { useCanImportLeads, useCanAssignLeads, useIsAdmin } from "@/components/layout/SessionProvider";
+import { useCanImportLeads, useCanAssignLeads, useIsAdmin, useSession } from "@/components/layout/SessionProvider";
 
 interface LastCallLog {
   disposition: string;
@@ -139,6 +139,7 @@ export default function LeadsDirectoryPage() {
   const canImport = useCanImportLeads();
   const canAssign = useCanAssignLeads();
   const isLevel3Admin = useIsAdmin();
+  const { role, userId } = useSession();
   const queryClient = useQueryClient();
 
   // Deletion state (Level 3 Super Admin only)
@@ -224,6 +225,11 @@ export default function LeadsDirectoryPage() {
     (teamData?.users || []).filter(
       (u: { role: string; isActive?: boolean }) => ["sales_rep", "sales_manager"].includes(u.role) && u.isActive !== false
     );
+
+  // Managers cannot assign leads to themselves
+  const assignableReps = teamReps.filter(
+    (r) => !(role === "sales_manager" && r.id === userId)
+  );
 
   const { data, isLoading, isFetching, refetch } = useQuery<LeadsResponse>({
     queryKey: ["leads-directory", activeStatus, vertical, search, selectedRepFilter, page],
@@ -1101,9 +1107,9 @@ export default function LeadsDirectoryPage() {
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                   >
                     <option value="unassigned">⚠️ Unassigned Pool (Assign Later)</option>
-                    {teamReps.some((r) => r.role === "sales_manager") && (
+                    {assignableReps.some((r) => r.role === "sales_manager") && (
                       <optgroup label="Level 2 • Sales Managers">
-                        {teamReps
+                        {assignableReps
                           .filter((r) => r.role === "sales_manager")
                           .map((r) => (
                             <option key={r.id} value={r.id}>
@@ -1112,9 +1118,9 @@ export default function LeadsDirectoryPage() {
                           ))}
                       </optgroup>
                     )}
-                    {teamReps.some((r) => r.role === "sales_rep") && (
+                    {assignableReps.some((r) => r.role === "sales_rep") && (
                       <optgroup label="Level 1 • Sales Representatives">
-                        {teamReps
+                        {assignableReps
                           .filter((r) => r.role === "sales_rep")
                           .map((r) => (
                             <option key={r.id} value={r.id}>
@@ -1175,9 +1181,9 @@ export default function LeadsDirectoryPage() {
               className="bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-emerald-500"
             >
               <option value="">Assign To Team Member...</option>
-              {teamReps.some((r) => r.role === "sales_manager") && (
+              {assignableReps.some((r) => r.role === "sales_manager") && (
                 <optgroup label="Level 2 • Sales Managers">
-                  {teamReps
+                  {assignableReps
                     .filter((r) => r.role === "sales_manager")
                     .map((rep) => {
                       const repLangMeta = getLanguageMeta(rep.language);
@@ -1189,9 +1195,9 @@ export default function LeadsDirectoryPage() {
                     })}
                 </optgroup>
               )}
-              {teamReps.some((r) => r.role === "sales_rep") && (
+              {assignableReps.some((r) => r.role === "sales_rep") && (
                 <optgroup label="Level 1 • Sales Representatives">
-                  {teamReps
+                  {assignableReps
                     .filter((r) => r.role === "sales_rep")
                     .map((rep) => {
                       const repLangMeta = getLanguageMeta(rep.language);

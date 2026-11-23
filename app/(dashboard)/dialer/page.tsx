@@ -150,7 +150,6 @@ export default function DialerPage() {
             <DialerCard
               lead={lead}
               onDisposed={onDisposed}
-              onCallLogged={() => setSessionCalls((prev) => prev + 1)}
             />
           </div>
 

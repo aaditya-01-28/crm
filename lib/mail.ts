@@ -83,7 +83,7 @@ export async function sendPasswordResetEmail({
       await transporter.sendMail({
         from: `"Textora Engage" <${from}>`,
         to,
-        subject: "🔒 Reset Your Textora CRM Password",
+        subject: "Reset Your Textora CRM Password",
         html: emailHtml,
         text: `Hello ${fullName},\n\nReset your Textora CRM password by clicking this link:\n${resetUrl}\n\nThis link is valid for 1 hour. If you didn't request this, ignore this email.`,
       });
@@ -152,7 +152,7 @@ export async function sendPasswordResetRequestNotificationEmail({
       await transporter.sendMail({
         from: `"Textora Engage Security" <${from}>`,
         to: adminEmail,
-        subject: `🔔 Password Reset Request: ${requesterName} (${roleLabel})`,
+        subject: `Password Reset Request: ${requesterName} (${roleLabel})`,
         html: `
         <div style="font-family: sans-serif; padding: 20px; background: #f8fafc; color: #1e293b;">
           <div style="max-width: 500px; margin: 0 auto; background: #fff; padding: 24px; border-radius: 12px; border: 1px solid #e2e8f0;">
@@ -255,7 +255,7 @@ export async function sendTemporaryPasswordEmail({
 
         <div style="margin-top: 28px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
           <p style="font-size: 12px; color: #94a3b8; line-height: 1.5; margin: 0;">
-            🔒 If you did not request this password reset, please contact your systems team immediately.
+            If you did not request this password reset, please contact your systems team immediately.
           </p>
         </div>
       </div>
@@ -279,7 +279,7 @@ export async function sendTemporaryPasswordEmail({
       await transporter.sendMail({
         from: `"Textora Engage Security" <${from}>`,
         to,
-        subject: "🔐 Your Temporary Login Password — Textora Engage CRM",
+        subject: "Your Temporary Login Password — Textora Engage CRM",
         html: emailHtml,
         text: `Hello ${fullName},\n\nYour temporary password for Textora CRM is: ${tempPassword}\n\nSign in at: ${loginUrl}\nUpon login, you will be prompted to set your new permanent password.`,
       });

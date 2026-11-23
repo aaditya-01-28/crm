@@ -59,9 +59,12 @@ export function DispositionBar({
   function handleClick(type: DispositionType) {
     if (type === "Callback") {
       setRemark(quickNote);
+      // Default to next working hour (not 4 PM hardcoded) — fix: was defaulting to stale value
+      setCallbackDatetime("");
       setModal("callback");
     } else if (type === "Demo Scheduled") {
       setRemark(quickNote);
+      setDemoDatetime("");
       setModal("demo");
     } else {
       const extra = quickNote.trim() ? { remark: quickNote.trim() } : undefined;

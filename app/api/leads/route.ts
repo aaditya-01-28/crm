@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { can, isSalesRep, isAdmin } from "@/lib/rbac";
+import { can, isSalesRep, isAdmin, normalizeRole } from "@/lib/rbac";
 import { getSession } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -30,6 +30,9 @@ export async function GET(request: NextRequest) {
     return await withClient(async (client) => {
       // 1. Queue mode for Dialer Console
       if (queue) {
+        // Fix: use stable ordering — new leads first (by assignment time), then RNR retries.
+        // Ordering by rnr_count ASC was causing leads to shuffle after each RNR disposition.
+        // Now: status='new' leads are served first in insertion order, THEN rnr leads (oldest first).
         const queueRes = await client.query(
           `SELECT l.id, l.tenant_id as "tenantId", l.assigned_rep_id as "assignedRepId",
                   l.phone_number as "phoneNumber", l.contact_name as "contactName",
@@ -43,7 +46,9 @@ export async function GET(request: NextRequest) {
            LEFT JOIN users u ON l.assigned_rep_id = u.id
            WHERE l.tenant_id = $1 AND l.assigned_rep_id = $2
              AND (l.status = 'new' OR (l.status = 'rnr' AND l.rnr_count < 3))
-           ORDER BY l.rnr_count ASC, l.created_at ASC
+           ORDER BY
+             CASE WHEN l.status = 'new' THEN 0 ELSE 1 END ASC,
+             l.created_at ASC
            LIMIT 1`,
           [tenantId, repId]
         );
@@ -308,6 +313,19 @@ export async function POST(request: NextRequest) {
     if (!phoneNumber) {
       return NextResponse.json(
         { error: "Phone number is required" },
+        { status: 400 }
+      );
+    }
+
+    // Restriction: Managers cannot assign leads to themselves
+    if (
+      normalizeRole(role) === "sales_manager" &&
+      assignedRepId &&
+      assignedRepId !== "unassigned" &&
+      assignedRepId === repId
+    ) {
+      return NextResponse.json(
+        { error: "Manager restriction: You cannot assign leads to yourself. Please select another executive." },
         { status: 400 }
       );
     }

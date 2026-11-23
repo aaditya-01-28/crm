@@ -26,6 +26,7 @@ export async function PATCH(
       meetingLink,
       durationSeconds = 0,
       recordingUrl,
+      logSource = "dialer_web",
     } = body;
 
     if (!disposition) {
@@ -126,19 +127,36 @@ export async function PATCH(
         [newStatus, rnrCount, id]
       );
 
-      // Create call log
+      // Create call log — idempotency guard: skip if identical log created in last 15 seconds
+      // This prevents duplicate RNR entries from rapid double-clicks or push-to-dial webhook replay
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
-      await client.query(
-        `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, call_timestamp)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
-        [tenantId, id, repId, disposition, durationSeconds, remark || null, recordingUrl || null]
+      await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS log_source TEXT DEFAULT 'dialer_web';").catch(() => {});
+
+      const recentDupe = await client.query(
+        `SELECT id FROM call_logs
+         WHERE lead_id = $1 AND rep_id = $2 AND disposition = $3
+           AND call_timestamp > NOW() - INTERVAL '15 seconds'
+         LIMIT 1`,
+        [id, repId, disposition]
       );
 
+      if (recentDupe.rows.length === 0) {
+        await client.query(
+          `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, call_timestamp)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+          [tenantId, id, repId, disposition, durationSeconds, remark || null, recordingUrl || null, logSource]
+        );
+      }
+
       // Create scheduled task if needed
+      // task_source = 'dialer' so Agenda shows these (not 'pipeline' tasks from deal stage changes)
       if (taskToCreate) {
         await client.query(
-          `INSERT INTO scheduled_tasks (tenant_id, lead_id, rep_id, task_type, scheduled_time, meeting_link, notes, status, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW(), NOW())`,
+          `ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_source TEXT DEFAULT 'dialer';`
+        ).catch(() => {});
+        await client.query(
+          `INSERT INTO scheduled_tasks (tenant_id, lead_id, rep_id, task_type, scheduled_time, meeting_link, notes, status, task_source, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'dialer', NOW(), NOW())`,
           [
             tenantId,
             id,
@@ -220,7 +238,7 @@ export async function PATCH(
          LEFT JOIN users u ON l.assigned_rep_id = u.id
          WHERE l.tenant_id = $1 AND l.assigned_rep_id = $2 AND l.id <> $3
            AND (l.status = 'new' OR (l.status = 'rnr' AND l.rnr_count < 3))
-         ORDER BY l.rnr_count ASC, l.created_at ASC
+         ORDER BY CASE WHEN l.status = 'new' THEN 0 ELSE 1 END ASC, l.created_at ASC
          LIMIT 1`,
         [tenantId, repId, id]
       );

@@ -31,6 +31,37 @@ export async function query<T = any>(sql: string, params: unknown[] = []): Promi
   });
 }
 
+export async function queryUserById(id: string) {
+  return withClient(async (client) => {
+    const res = await client.query(
+      `SELECT u.id, u.tenant_id as "tenantId", u.full_name as "fullName",
+              u.email, u.role, u.is_active as "isActive",
+              u.avatar_url as "avatarUrl",
+              COALESCE(u.must_change_password, false) as "mustChangePassword",
+              u.last_login_at as "lastLoginAt",
+              o.name as "tenantName"
+       FROM users u
+       JOIN organizations o ON u.tenant_id = o.id
+       WHERE u.id = $1 LIMIT 1`,
+      [id]
+    );
+    if (res.rows.length === 0) return null;
+    const r = res.rows[0];
+    return {
+      id: r.id,
+      tenantId: r.tenantId,
+      fullName: r.fullName,
+      email: r.email,
+      role: r.role,
+      isActive: r.isActive,
+      avatarUrl: r.avatarUrl || null,
+      mustChangePassword: Boolean(r.mustChangePassword),
+      lastLoginAt: r.lastLoginAt ? new Date(r.lastLoginAt).toISOString() : null,
+      tenant: { name: r.tenantName },
+    };
+  });
+}
+
 export async function queryUserByEmail(email: string) {
   return withClient(async (client) => {
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;`).catch(() => {});
