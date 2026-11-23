@@ -149,7 +149,10 @@ export async function GET(request: NextRequest) {
       );
 
       const callCountsRes = await client.query(
-        `SELECT COUNT(id)::int as "totalCalls", COUNT(DISTINCT lead_id)::int as "uniqueDials"
+        `SELECT COUNT(id)::int as "totalCalls",
+                COUNT(DISTINCT lead_id)::int as "uniqueDials",
+                COUNT(CASE WHEN duration_seconds > 0 OR disposition = 'Connected' THEN 1 END)::int as "connectedCalls",
+                COALESCE(SUM(duration_seconds), 0)::int as "totalDuration"
          FROM call_logs
          WHERE ${callWhereClause}`,
         callParams
@@ -157,8 +160,8 @@ export async function GET(request: NextRequest) {
 
       const totalCalls = callCountsRes.rows[0]?.totalCalls || 0;
       const uniqueDials = callCountsRes.rows[0]?.uniqueDials || 0;
-      let totalDurationSeconds = 0;
-      let connectedCalls = 0;
+      const totalDurationSeconds = callCountsRes.rows[0]?.totalDuration || 0;
+      let connectedCalls = callCountsRes.rows[0]?.connectedCalls || 0;
 
       const dispositionMap: Record<string, number> = {
         Connected: 0,
@@ -174,15 +177,7 @@ export async function GET(request: NextRequest) {
       };
 
       callAggRes.rows.forEach((c: { disposition: string; count: number; duration: number }) => {
-        const disp = c.disposition;
-        const count = c.count;
-        totalDurationSeconds += c.duration;
-
-        if (disp.toLowerCase().includes("connect") || disp.toLowerCase().includes("demo")) {
-          connectedCalls += count;
-        }
-
-        dispositionMap[disp] = count;
+        dispositionMap[c.disposition] = c.count;
       });
 
       const connectRate = totalCalls > 0 ? Math.round((connectedCalls / totalCalls) * 100) : 0;

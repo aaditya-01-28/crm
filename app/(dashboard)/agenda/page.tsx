@@ -50,7 +50,6 @@ async function fetchAgenda(): Promise<AgendaData> {
 
 export default function AgendaPage() {
   const queryClient = useQueryClient();
-  const notifiedIds = useRef(new Set<string>());
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
 
   const { data, isLoading, refetch, isFetching } = useQuery({
@@ -67,45 +66,6 @@ export default function AgendaPage() {
       toast.error("Failed to refresh agenda");
     }
   };
-
-  // 5-minute pre-notification for today's tasks
-  useEffect(() => {
-    if (!data?.today) return;
-    const now = Date.now();
-    const fiveMin = 5 * 60 * 1000;
-
-    data.today.forEach((task) => {
-      if (!task.scheduledTime) return;
-      const taskTime = new Date(task.scheduledTime).getTime();
-      const msBefore = taskTime - now;
-      if (msBefore > 0 && msBefore <= fiveMin && !notifiedIds.current.has(task.id)) {
-        notifiedIds.current.add(task.id);
-        const delay = Math.max(0, msBefore - fiveMin);
-        setTimeout(() => {
-          toast.warning(
-            `⏰ ${task.taskType === "product_demo" ? "Demo" : "Callback"} in 5 min — ${
-              task.lead.companyName || task.lead.phoneNumber
-            }`,
-            { duration: 10000 }
-          );
-          if ("Notification" in window && Notification.permission === "granted") {
-            new Notification("Textora Engage — Upcoming Task", {
-              body: `${task.taskType === "product_demo" ? "Demo" : "Callback"} at ${formatDateTime(
-                task.scheduledTime
-              )} with ${task.lead.companyName || task.lead.phoneNumber}`,
-            });
-          }
-        }, delay);
-      }
-    });
-  }, [data]);
-
-  // Request notification permission
-  useEffect(() => {
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
-    }
-  }, []);
 
   const completeMutation = useMutation({
     mutationFn: async (taskId: string) => {

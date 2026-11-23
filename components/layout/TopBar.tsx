@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { JWTPayload } from "@/lib/auth";
 import { useSidebar } from "./SidebarContext";
+import { NotificationBell } from "./NotificationBell";
 
 const ROLE_LABELS: Record<string, string> = {
   super_admin: "Super Admin",
@@ -163,6 +164,9 @@ export default function TopBar({ user }: { user: JWTPayload }) {
             </span>
           </div>
         </div>
+
+        {/* Agenda Notification Bell & Live Reminders */}
+        <NotificationBell />
 
         <Link
           href="/profile"

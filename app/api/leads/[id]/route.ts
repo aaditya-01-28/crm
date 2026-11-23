@@ -27,7 +27,9 @@ export async function GET(
                 l.phone_number as "phoneNumber", l.contact_name as "contactName",
                 l.company_name as "companyName", l.website_url as "websiteUrl",
                 l.business_vertical as "businessVertical", l.service_type as "serviceType",
-                l.source, l.status, l.rnr_count as "rnrCount", l.custom_metadata as "customMetadata",
+                l.source, l.status,
+                COALESCE((SELECT COUNT(*)::int FROM call_logs WHERE lead_id = l.id AND disposition = 'RNR'), l.rnr_count, 0) as "rnrCount",
+                l.custom_metadata as "customMetadata",
                 l.created_at as "createdAt", l.updated_at as "updatedAt",
                 ar.id as "arId", ar.full_name as "arFullName", ar.email as "arEmail",
                 far.id as "farId", far.full_name as "farFullName", far.email as "farEmail"

@@ -97,7 +97,7 @@ export async function GET(request: NextRequest) {
       const countRes = await client.query(
         `SELECT COUNT(c.id)::int as total,
                 COALESCE(SUM(c.duration_seconds), 0)::int as "totalDuration",
-                COUNT(CASE WHEN c.disposition = 'Connected' THEN 1 END)::int as "connectedCount"
+                COUNT(CASE WHEN c.duration_seconds > 0 OR c.disposition = 'Connected' THEN 1 END)::int as "connectedCount"
          FROM call_logs c
          LEFT JOIN leads l ON c.lead_id = l.id
          WHERE ${whereClause}`,
@@ -272,14 +272,14 @@ export async function POST(request: NextRequest) {
           );
           finalLog = updatedRes.rows[0];
 
-          if (disposition === "RNR" && existing.disposition !== "RNR") {
-            await client.query(
-              "UPDATE leads SET rnr_count = rnr_count + 1, updated_at = NOW() WHERE id = $1",
-              [targetLeadId]
-            );
-          } else {
-            await client.query("UPDATE leads SET updated_at = NOW() WHERE id = $1", [targetLeadId]);
-          }
+          // Synchronize lead rnr_count exactly to count of RNR call logs
+          await client.query(
+            `UPDATE leads
+             SET rnr_count = (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $1 AND disposition = 'RNR'),
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [targetLeadId]
+          );
         } else {
           const logRes = await client.query(
             `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, call_timestamp)
@@ -291,14 +291,14 @@ export async function POST(request: NextRequest) {
           );
           finalLog = logRes.rows[0];
 
-          if (disposition === "RNR") {
-            await client.query(
-              "UPDATE leads SET rnr_count = rnr_count + 1, updated_at = NOW() WHERE id = $1",
-              [targetLeadId]
-            );
-          } else {
-            await client.query("UPDATE leads SET updated_at = NOW() WHERE id = $1", [targetLeadId]);
-          }
+          // Synchronize lead rnr_count exactly to count of RNR call logs
+          await client.query(
+            `UPDATE leads
+             SET rnr_count = (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $1 AND disposition = 'RNR'),
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [targetLeadId]
+          );
         }
 
         createdLogs.push(finalLog);

@@ -121,12 +121,6 @@ export async function PATCH(
           break;
       }
 
-      // Update lead
-      await client.query(
-        "UPDATE leads SET status = $1, rnr_count = $2, updated_at = NOW() WHERE id = $3",
-        [newStatus, rnrCount, id]
-      );
-
       // Create or update call log: if a call log was recently recorded (e.g. from SIM dialer/telephony),
       // update it with the executive's authoritative disposition and remarks, avoiding duplicate entries.
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
@@ -159,6 +153,16 @@ export async function PATCH(
           [tenantId, id, repId, disposition, durationSeconds, remark || null, recordingUrl || null, logSource]
         );
       }
+
+      // Synchronize lead status and exact rnr_count from call_logs
+      await client.query(
+        `UPDATE leads
+         SET status = $1,
+             rnr_count = (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $2 AND disposition = 'RNR'),
+             updated_at = NOW()
+         WHERE id = $2`,
+        [newStatus, id]
+      );
 
       // Create scheduled task if needed
       // task_source = 'dialer' so Agenda shows these (not 'pipeline' tasks from deal stage changes)

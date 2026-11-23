@@ -5,6 +5,7 @@ import Sidebar from "@/components/layout/Sidebar";
 import TopBar from "@/components/layout/TopBar";
 import { SessionProvider } from "@/components/layout/SessionProvider";
 import { SidebarProvider } from "@/components/layout/SidebarContext";
+import { AgendaNotificationListener } from "@/components/agenda/AgendaNotificationListener";
 
 export default async function DashboardLayout({
   children,
@@ -46,6 +47,7 @@ export default async function DashboardLayout({
             <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
           </div>
         </div>
+        <AgendaNotificationListener />
       </SidebarProvider>
     </SessionProvider>
   );

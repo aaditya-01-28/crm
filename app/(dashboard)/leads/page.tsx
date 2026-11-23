@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Contact,
@@ -199,6 +199,48 @@ export default function LeadsDirectoryPage() {
   const [selectedRepFilter, setSelectedRepFilter] = useState("all");
   const [bulkTargetRepId, setBulkTargetRepId] = useState("");
   const [assigningBulk, setAssigningBulk] = useState(false);
+
+  // Draggable / shiftable status tabs
+  const [statusTabs, setStatusTabs] = useState(STATUS_FILTERS);
+  const [draggedTabKey, setDraggedTabKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("textora_web_leads_tabs_order");
+      if (saved) {
+        const order = JSON.parse(saved) as string[];
+        const map = new Map(STATUS_FILTERS.map((t) => [t.key, t]));
+        const reordered: typeof STATUS_FILTERS = [];
+        for (const k of order) {
+          const tab = map.get(k);
+          if (tab) {
+            reordered.push(tab);
+            map.delete(k);
+          }
+        }
+        for (const tab of map.values()) {
+          reordered.push(tab);
+        }
+        setStatusTabs(reordered);
+      }
+    } catch {}
+  }, []);
+
+  const handleTabDrop = (targetKey: string) => {
+    if (!draggedTabKey || draggedTabKey === targetKey) return;
+    const oldIdx = statusTabs.findIndex((t) => t.key === draggedTabKey);
+    const newIdx = statusTabs.findIndex((t) => t.key === targetKey);
+    if (oldIdx === -1 || newIdx === -1) return;
+
+    const next = [...statusTabs];
+    const [moved] = next.splice(oldIdx, 1);
+    next.splice(newIdx, 0, moved);
+    setStatusTabs(next);
+    setDraggedTabKey(null);
+    try {
+      localStorage.setItem("textora_web_leads_tabs_order", JSON.stringify(next.map((t) => t.key)));
+    } catch {}
+  };
 
   // New Lead Modal state
   const [newPhone, setNewPhone] = useState("");
@@ -545,12 +587,17 @@ export default function LeadsDirectoryPage() {
           </button>
         )}
 
-        {STATUS_FILTERS.map((tab) => {
+        {statusTabs.map((tab) => {
           const count = stats[tab.key] ?? 0;
           const active = activeStatus === tab.key && selectedRepFilter !== "unassigned";
           return (
             <button
               key={tab.key}
+              draggable
+              onDragStart={() => setDraggedTabKey(tab.key)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => handleTabDrop(tab.key)}
+              title="Click to filter • Drag to reorder tab"
               onClick={() => {
                 setActiveStatus(tab.key);
                 if (selectedRepFilter === "unassigned") setSelectedRepFilter("all");
@@ -558,7 +605,7 @@ export default function LeadsDirectoryPage() {
                 setSelectedLeadIds([]);
               }}
               className={cn(
-                "px-3.5 py-2 rounded-xl text-xs font-semibold shrink-0 transition flex items-center gap-1.5 border",
+                "px-3.5 py-2 rounded-xl text-xs font-semibold shrink-0 transition flex items-center gap-1.5 border cursor-grab active:cursor-grabbing",
                 active
                   ? "bg-emerald-600 text-white border-emerald-600 shadow-xs"
                   : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
