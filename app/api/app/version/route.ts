@@ -5,15 +5,15 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   return NextResponse.json(
     {
-      version: "1.1.0",
-      buildNumber: 2,
+      version: "1.2.0",
+      buildNumber: 3,
       downloadUrl: "https://crm.textorasms.com/downloads/textora-dialer.apk",
       releaseNotes: [
-        "Added 'Last Month' and 'Custom Date Range' filters to the performance dashboard",
-        "Role-level stats: Sales Rep vs Organization analytics",
-        "Theme enhancements: Complete Light & Dark mode support across Lead Dossier and dialogs",
-        "In-app auto-update engine: Instant updates without manual APK installs in the future",
-        "Performance and stability improvements"
+        "Mandatory non-dismissible post-call disposition dialog",
+        "Added Callback & Demo Scheduled date/time/details pickers",
+        "Dynamic personalized WhatsApp intro pitch matching rep profile",
+        "Already Using toggle: Our Service vs Other Company Service",
+        "Reliability enhancements for background call tracking"
       ],
       isMandatory: false,
       minSupportedBuild: 1,
