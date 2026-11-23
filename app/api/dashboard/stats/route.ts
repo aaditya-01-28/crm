@@ -179,6 +179,7 @@ export async function GET(request: NextRequest) {
       callAggRes.rows.forEach((c: { disposition: string; count: number; duration: number }) => {
         dispositionMap[c.disposition] = c.count;
       });
+      dispositionMap.Connected = connectedCalls;
 
       const connectRate = totalCalls > 0 ? Math.round((connectedCalls / totalCalls) * 100) : 0;
       const talkTimeMins = Math.round(totalDurationSeconds / 60);

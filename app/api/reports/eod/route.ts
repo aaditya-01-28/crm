@@ -123,7 +123,7 @@ export async function GET(request: NextRequest) {
         const repCalls = callStats.filter((c: any) => c.rep_id === rep.id);
         const totalCalls = repCalls.reduce((sum: number, c: any) => sum + Number(c.count), 0);
         const connected = repCalls
-          .filter((c: any) => c.disposition === "Connected")
+          .filter((c: any) => Number(c.duration || 0) > 0 || c.disposition === "Connected" || c.disposition === "Contacted")
           .reduce((sum: number, c: any) => sum + Number(c.count), 0);
         const talkTimeSecs = repCalls.reduce(
           (sum: number, c: any) => sum + Number(c.duration || 0),

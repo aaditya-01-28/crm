@@ -91,6 +91,12 @@ const DISPOSITION_BADGES: Record<
     text: "text-emerald-700",
     border: "border-emerald-200",
   },
+  "Connected Call": {
+    label: "Connected Call",
+    bg: "bg-emerald-50",
+    text: "text-emerald-700",
+    border: "border-emerald-200",
+  },
   RNR: {
     label: "Ringing No Response",
     bg: "bg-amber-50",

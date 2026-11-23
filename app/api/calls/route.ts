@@ -68,7 +68,21 @@ export async function GET(request: NextRequest) {
       }
 
       if (disposition && disposition !== "all") {
-        if (
+        if (disposition === "Connected" || disposition === "connected") {
+          conditions.push(
+            `(c.duration_seconds > 0 OR c.disposition = 'Connected' OR c.disposition ILIKE '%Connected%' OR c.disposition = 'Contacted' OR c.disposition = 'Answered')`
+          );
+        } else if (
+          disposition === "RNR" ||
+          disposition === "Ringing No Response" ||
+          disposition === "Ring No Response"
+        ) {
+          conditions.push(
+            `(c.duration_seconds = 0 AND (c.disposition = 'RNR' OR c.disposition ILIKE '%Ringing%' OR c.disposition ILIKE '%No Response%' OR c.disposition ILIKE '%No Answer%'))`
+          );
+        } else if (disposition === "Callback" || disposition === "Callback Requested") {
+          conditions.push(`(c.disposition = 'Callback' OR c.disposition ILIKE '%Callback%')`);
+        } else if (
           disposition === "Already Using Our Service" ||
           disposition === "Already Using" ||
           disposition === "Using Our Service"
@@ -82,7 +96,15 @@ export async function GET(request: NextRequest) {
         ) {
           conditions.push(`(c.disposition ILIKE '%Other%' OR c.disposition ILIKE '%Purchased%')`);
         } else if (disposition === "Demo Done" || disposition === "Demo Completed") {
-          conditions.push(`(c.disposition = 'Demo Done' OR c.disposition = 'Demo Completed')`);
+          conditions.push(`(c.disposition = 'Demo Done' OR c.disposition = 'Demo Completed' OR c.disposition ILIKE '%Demo Done%' OR c.disposition ILIKE '%Demo Completed%')`);
+        } else if (disposition === "Demo Scheduled") {
+          conditions.push(`(c.disposition = 'Demo Scheduled' OR c.disposition ILIKE '%Demo Scheduled%')`);
+        } else if (disposition === "Not Interested") {
+          conditions.push(`(c.disposition = 'Not Interested' OR c.disposition ILIKE '%Not Interested%')`);
+        } else if (disposition === "Future Requirement") {
+          conditions.push(`(c.disposition = 'Future Requirement' OR c.disposition ILIKE '%Future%')`);
+        } else if (disposition === "Invalid") {
+          conditions.push(`(c.disposition = 'Invalid' OR c.disposition ILIKE '%Invalid%')`);
         } else {
           conditions.push(`c.disposition = $${params.push(disposition)}`);
         }
@@ -134,7 +156,7 @@ export async function GET(request: NextRequest) {
       const countRes = await client.query(
         `SELECT COUNT(c.id)::int as total,
                 COALESCE(SUM(c.duration_seconds), 0)::int as "totalDuration",
-                COUNT(CASE WHEN c.duration_seconds > 0 OR c.disposition = 'Connected' THEN 1 END)::int as "connectedCount"
+                COUNT(CASE WHEN c.duration_seconds > 0 OR c.disposition ILIKE '%Connected%' OR c.disposition = 'Contacted' THEN 1 END)::int as "connectedCount"
          FROM call_logs c
          LEFT JOIN leads l ON c.lead_id = l.id
          WHERE ${whereClause}`,
