@@ -227,18 +227,22 @@ export function DispositionBar({
             type="button"
             onClick={() => handleClick("Already Using Our Service")}
             disabled={disabled}
-            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-all disabled:opacity-50 cursor-pointer"
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+            title="Customer is already using our (Textora) service"
           >
-            Already Using
+            <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Using Our Service</span>
           </button>
 
           <button
             type="button"
             onClick={() => handleClick("Already Purchased or Using Other Company Service")}
             disabled={disabled}
-            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-orange-50 hover:bg-orange-100 text-orange-800 border border-orange-200 transition-all disabled:opacity-50 cursor-pointer"
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-orange-50 hover:bg-orange-100 text-orange-800 border border-orange-200 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+            title="Customer is using a competitor / other company's service"
           >
-            Already with Competitor
+            <AlertCircle className="w-3.5 h-3.5 text-orange-600" />
+            <span>Using Other Company</span>
           </button>
 
           <button

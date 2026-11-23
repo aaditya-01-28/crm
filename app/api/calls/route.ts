@@ -46,6 +46,8 @@ export async function GET(request: NextRequest) {
           disposition === "Already Using"
         ) {
           conditions.push(`(c.disposition = 'Already Using Our Service' OR c.disposition = 'Already Using')`);
+        } else if (disposition === "Demo Done" || disposition === "Demo Completed") {
+          conditions.push(`(c.disposition = 'Demo Done' OR c.disposition = 'Demo Completed')`);
         } else {
           conditions.push(`c.disposition = $${params.push(disposition)}`);
         }

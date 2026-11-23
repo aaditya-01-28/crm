@@ -804,8 +804,8 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                       <option value="Demo Done">Demo Done</option>
                       <option value="RNR">RNR (Ringing No Response)</option>
                       <option value="Not Interested">Not Interested</option>
-                      <option value="Already Using Our Service">Already Using Our Service</option>
-                      <option value="Already Purchased or Using Other Company Service">Already Purchased or Using Other Company Service</option>
+                      <option value="Already Using Our Service">Already Using: Our Service</option>
+                      <option value="Already Purchased or Using Other Company Service">Already Using: Other Company Service</option>
                       <option value="Future Requirement">Future Requirement</option>
                     </select>
                   </div>

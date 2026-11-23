@@ -71,13 +71,30 @@ export async function PATCH(
           newStatus = "invalid";
           break;
         case "Already Using Our Service":
-        case "Already Using":
+        case "Already Using: Our Service":
+        case "Using Our Service":
+        case "Our Service":
           newStatus = "already_using";
+          break;
+        case "Already Using":
+          if (remark && /other|competitor|another|different|rival|compny/i.test(remark)) {
+            newStatus = "already_purchased";
+          } else {
+            newStatus = "already_using";
+          }
           break;
         case "Already Purchased":
         case "Already Purchased or Using Other Company Service":
         case "Already Purchased / Using Other Company Service":
         case "Already Purchased / Other Company":
+        case "Already Using Other Company Service":
+        case "Already Using Other Company":
+        case "Already Using Other Service":
+        case "Already Using: Other Company Service":
+        case "Using Other Service":
+        case "Using Other Company":
+        case "Other Service":
+        case "Other Company":
           newStatus = "already_purchased";
           break;
         case "Future Requirement":
@@ -126,33 +143,117 @@ export async function PATCH(
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS log_source TEXT DEFAULT 'dialer_web';").catch(() => {});
 
-      const recentLog = await client.query(
-        `SELECT id, duration_seconds FROM call_logs
-         WHERE lead_id = $1 AND rep_id = $2
-           AND call_timestamp > NOW() - INTERVAL '3 minutes'
-         ORDER BY call_timestamp DESC
-         LIMIT 1`,
-        [id, repId]
-      );
+      // If disposition is "Demo Done" or "Demo Completed", check if there is an existing "Demo Scheduled" call log
+      // for this lead. If so, update that log to "Demo Done" so call logs shows ONE at a time instead of duplicate logs!
+      let handledDemoLog = false;
+      if (disposition === "Demo Done" || disposition === "Demo Completed") {
+        const existingDemoScheduled = await client.query(
+          `SELECT id, duration_seconds FROM call_logs
+           WHERE lead_id = $1 AND disposition = 'Demo Scheduled'
+           ORDER BY call_timestamp DESC
+           LIMIT 1`,
+          [id]
+        );
 
-      if (recentLog.rows.length > 0) {
-        await client.query(
-          `UPDATE call_logs
-           SET disposition = $1,
-               duration_seconds = GREATEST(duration_seconds, $2),
-               remark = COALESCE($3, remark),
-               recording_url = COALESCE($4, recording_url),
-               log_source = $5
-           WHERE id = $6`,
-          [disposition, durationSeconds, remark || null, recordingUrl || null, logSource, recentLog.rows[0].id]
-        );
-      } else {
-        await client.query(
-          `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, call_timestamp)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
-          [tenantId, id, repId, disposition, durationSeconds, remark || null, recordingUrl || null, logSource]
-        );
+        if (existingDemoScheduled.rows.length > 0) {
+          await client.query(
+            `UPDATE call_logs
+             SET disposition = 'Demo Done',
+                 duration_seconds = GREATEST(duration_seconds, $1),
+                 remark = COALESCE($2, 'Product demo completed and moved to pipeline.'),
+                 recording_url = COALESCE($3, recording_url),
+                 log_source = $4,
+                 call_timestamp = NOW()
+             WHERE id = $5`,
+            [durationSeconds, remark || null, recordingUrl || null, logSource, existingDemoScheduled.rows[0].id]
+          );
+          handledDemoLog = true;
+        }
       }
+
+      if (!handledDemoLog) {
+        const recentLog = await client.query(
+          `SELECT id, duration_seconds FROM call_logs
+           WHERE lead_id = $1 AND rep_id = $2
+             AND call_timestamp > NOW() - INTERVAL '3 minutes'
+           ORDER BY call_timestamp DESC
+           LIMIT 1`,
+          [id, repId]
+        );
+
+        if (recentLog.rows.length > 0) {
+          await client.query(
+            `UPDATE call_logs
+             SET disposition = $1,
+                 duration_seconds = GREATEST(duration_seconds, $2),
+                 remark = COALESCE($3, remark),
+                 recording_url = COALESCE($4, recording_url),
+                 log_source = $5
+             WHERE id = $6`,
+            [disposition, durationSeconds, remark || null, recordingUrl || null, logSource, recentLog.rows[0].id]
+          );
+        } else {
+          await client.query(
+            `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, call_timestamp)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+            [tenantId, id, repId, disposition, durationSeconds, remark || null, recordingUrl || null, logSource]
+          );
+        }
+      }
+
+      // Record stage transition into persistent lead_stage_history table
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS lead_stage_history (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          tenant_id UUID NOT NULL,
+          lead_id UUID NOT NULL,
+          rep_id UUID,
+          stage_name VARCHAR(100) NOT NULL,
+          stage_type VARCHAR(50) NOT NULL,
+          notes TEXT,
+          metadata JSONB DEFAULT '{}',
+          created_at TIMESTAMPTZ(6) DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_lead_stage_history_lead ON lead_stage_history(lead_id, created_at DESC);
+      `).catch(() => {});
+
+      let stageType = "status";
+      let stageName = disposition;
+      if (disposition === "Demo Scheduled") {
+        stageType = "demo";
+        stageName = "Demo Scheduled";
+      } else if (disposition === "Demo Done" || disposition === "Demo Completed") {
+        stageType = "demo";
+        stageName = "Demo Done";
+      } else if (disposition === "Callback") {
+        stageType = "callback";
+        stageName = "Callback Requested";
+      } else if (newStatus === "already_using") {
+        stageName = "Already Using Our Service";
+      } else if (newStatus === "already_purchased") {
+        stageName = "Using Other Company Service";
+      }
+
+      await client.query(
+        `INSERT INTO lead_stage_history (tenant_id, lead_id, rep_id, stage_name, stage_type, notes, metadata, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+        [
+          tenantId,
+          id,
+          repId,
+          stageName,
+          stageType,
+          remark || null,
+          JSON.stringify({
+            previousStatus: lead.status,
+            newStatus,
+            demoDatetime: demoDatetime || null,
+            callbackDatetime: callbackDatetime || null,
+            decisionMakerName: decisionMakerName || null,
+            meetingLink: meetingLink || null,
+          }),
+        ]
+      ).catch(() => {});
 
       // Synchronize lead status and exact rnr_count from call_logs
       await client.query(

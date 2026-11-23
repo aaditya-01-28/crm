@@ -109,6 +109,18 @@ const DISPOSITION_BADGES: Record<
     text: "text-purple-700",
     border: "border-purple-200",
   },
+  "Demo Done": {
+    label: "Demo Completed",
+    bg: "bg-teal-50",
+    text: "text-teal-700",
+    border: "border-teal-200",
+  },
+  "Demo Completed": {
+    label: "Demo Completed",
+    bg: "bg-teal-50",
+    text: "text-teal-700",
+    border: "border-teal-200",
+  },
   "Not Interested": {
     label: "Not Interested",
     bg: "bg-gray-100",
@@ -543,6 +555,7 @@ export default function CallLogsPage() {
               <option value="RNR">RNR (Ringing No Response)</option>
               <option value="Callback">Callback</option>
               <option value="Demo Scheduled">Demo Scheduled</option>
+              <option value="Demo Done">Demo Done</option>
               <option value="Not Interested">Not Interested</option>
               <option value="Already Using Our Service">Already Using Our Service</option>
               <option value="Already Purchased or Using Other Company Service">Already Purchased or Using Other Company Service</option>
