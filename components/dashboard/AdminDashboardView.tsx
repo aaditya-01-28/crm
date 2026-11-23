@@ -322,11 +322,16 @@ export function AdminDashboardView({
                       </td>
 
                       <td className="px-4 py-3.5 text-gray-600 font-medium">
-                        {rep.talkTimeMins} mins
+                        {rep.talkTimeFormatted || (rep.talkTimeMins ? `${rep.talkTimeMins} mins` : "0m 0s")}
                       </td>
 
                       <td className="px-4 py-3.5 text-purple-700 font-semibold">
-                        {rep.demosBooked}
+                        <span>{rep.demosBooked}</span>
+                        {rep.demosDone > 0 && (
+                          <span className="text-[11px] text-teal-700 ml-1.5 font-normal">
+                            ({rep.demosDone} done)
+                          </span>
+                        )}
                       </td>
 
                       <td className="px-4 py-3.5 text-emerald-700 font-semibold">

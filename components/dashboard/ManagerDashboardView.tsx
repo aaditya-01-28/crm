@@ -263,11 +263,18 @@ export function ManagerDashboardView({
                       </td>
 
                       <td className="px-4 py-3.5 text-gray-600">
-                        <span className="font-semibold text-gray-800">{rep.talkTimeMins}m</span>
+                        <span className="font-semibold text-gray-800">
+                          {rep.talkTimeFormatted || `${rep.talkTimeMins || 0}m`}
+                        </span>
                       </td>
 
                       <td className="px-4 py-3.5 text-purple-700 font-semibold">
-                        {rep.demosBooked}
+                        <span>{rep.demosBooked}</span>
+                        {rep.demosDone > 0 && (
+                          <span className="text-[11px] text-teal-700 ml-1.5 font-normal">
+                            ({rep.demosDone} done)
+                          </span>
+                        )}
                       </td>
 
                       <td className="px-4 py-3.5 text-emerald-700 font-semibold">

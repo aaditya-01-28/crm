@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { formatDuration } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
   const session = await getSession();
@@ -45,6 +46,8 @@ export async function GET(request: NextRequest) {
             uniqueDialed: 0,
             connectedCalls: 0,
             talkTimeMins: 0,
+            talkTimeSecs: 0,
+            talkTimeFormatted: "0m 0s",
             demosBooked: 0,
             demosCompleted: 0,
             quotesSent: 0,
@@ -80,16 +83,28 @@ export async function GET(request: NextRequest) {
             `SELECT rep_id, COUNT(id)::int as count
              FROM scheduled_tasks
              WHERE tenant_id = $1 AND rep_id = ANY($2::uuid[])
-               AND task_type = 'product_demo' AND created_at >= $3 AND created_at <= $4
+               AND task_type = 'product_demo'
+               AND status = 'pending'
+               AND (
+                 (scheduled_time >= $3 AND scheduled_time <= $4)
+                 OR (created_at >= $3 AND created_at <= $4)
+               )
              GROUP BY rep_id`,
             [tenantId, repIds, startOfDay, endOfDay]
           ),
           client.query(
-            `SELECT rep_id, COUNT(id)::int as count
-             FROM scheduled_tasks
-             WHERE tenant_id = $1 AND rep_id = ANY($2::uuid[])
-               AND task_type = 'product_demo' AND status = 'completed'
-               AND updated_at >= $3 AND updated_at <= $4
+            `SELECT rep_id, COUNT(DISTINCT lead_id)::int as count
+             FROM (
+               SELECT rep_id, lead_id FROM scheduled_tasks
+               WHERE tenant_id = $1 AND rep_id = ANY($2::uuid[])
+                 AND task_type = 'product_demo' AND status = 'completed'
+                 AND updated_at >= $3 AND updated_at <= $4
+               UNION
+               SELECT rep_id, lead_id FROM call_logs
+               WHERE tenant_id = $1 AND rep_id = ANY($2::uuid[])
+                 AND (disposition = 'Demo Done' OR disposition = 'Demo Completed')
+                 AND call_timestamp >= $3 AND call_timestamp <= $4
+             ) done_demos
              GROUP BY rep_id`,
             [tenantId, repIds, startOfDay, endOfDay]
           ),
@@ -142,6 +157,8 @@ export async function GET(request: NextRequest) {
           uniqueDialed: uniqueCount,
           connectedCalls: connected,
           talkTimeMins: Math.round(talkTimeSecs / 60),
+          talkTimeSecs,
+          talkTimeFormatted: formatDuration(talkTimeSecs),
           demosBooked: demosB,
           demosCompleted: demosC,
           quotesSent: deals?.count || 0,
@@ -151,32 +168,22 @@ export async function GET(request: NextRequest) {
         };
       });
 
-      const totals = metrics.reduce(
-        (acc, m) => ({
-          totalCalls: acc.totalCalls + m.totalCalls,
-          uniqueDialed: acc.uniqueDialed + m.uniqueDialed,
-          connectedCalls: acc.connectedCalls + m.connectedCalls,
-          talkTimeMins: acc.talkTimeMins + m.talkTimeMins,
-          demosBooked: acc.demosBooked + m.demosBooked,
-          demosCompleted: acc.demosCompleted + m.demosCompleted,
-          quotesSent: acc.quotesSent + m.quotesSent,
-          totalQuotedValue: acc.totalQuotedValue + m.totalQuotedValue,
-          paymentsCollected: acc.paymentsCollected + m.paymentsCollected,
-          revenueCollected: acc.revenueCollected + m.revenueCollected,
-        }),
-        {
-          totalCalls: 0,
-          uniqueDialed: 0,
-          connectedCalls: 0,
-          talkTimeMins: 0,
-          demosBooked: 0,
-          demosCompleted: 0,
-          quotesSent: 0,
-          totalQuotedValue: 0,
-          paymentsCollected: 0,
-          revenueCollected: 0,
-        }
-      );
+      const totalTalkTimeSecs = metrics.reduce((sum, m) => sum + (m.talkTimeSecs || 0), 0);
+
+      const totals = {
+        totalCalls: metrics.reduce((sum, m) => sum + m.totalCalls, 0),
+        uniqueDialed: metrics.reduce((sum, m) => sum + m.uniqueDialed, 0),
+        connectedCalls: metrics.reduce((sum, m) => sum + m.connectedCalls, 0),
+        talkTimeMins: Math.round(totalTalkTimeSecs / 60),
+        talkTimeSecs: totalTalkTimeSecs,
+        talkTimeFormatted: formatDuration(totalTalkTimeSecs),
+        demosBooked: metrics.reduce((sum, m) => sum + m.demosBooked, 0),
+        demosCompleted: metrics.reduce((sum, m) => sum + m.demosCompleted, 0),
+        quotesSent: metrics.reduce((sum, m) => sum + m.quotesSent, 0),
+        totalQuotedValue: metrics.reduce((sum, m) => sum + m.totalQuotedValue, 0),
+        paymentsCollected: metrics.reduce((sum, m) => sum + m.paymentsCollected, 0),
+        revenueCollected: metrics.reduce((sum, m) => sum + m.revenueCollected, 0),
+      };
 
       return NextResponse.json({
         date: dateFromStr === dateToStr ? dateFromStr : `${dateFromStr} to ${dateToStr}`,

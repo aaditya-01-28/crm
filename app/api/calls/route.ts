@@ -360,6 +360,51 @@ export async function POST(request: NextRequest) {
           );
         }
 
+        // Synchronize lead status and demo scheduled/completed tasks
+        if (disposition === "Demo Done" || disposition === "Demo Completed") {
+          // 1. Mark pending product_demo tasks completed so scheduled count decrements
+          const taskUpdate = await client.query(
+            "UPDATE scheduled_tasks SET status = 'completed', updated_at = NOW() WHERE lead_id = $1 AND task_type = 'product_demo' AND status = 'pending' RETURNING id",
+            [targetLeadId]
+          );
+          if ((taskUpdate.rowCount || 0) === 0) {
+            await client.query(
+              `INSERT INTO scheduled_tasks (tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, task_source, created_at, updated_at)
+               VALUES ($1, $2, $3, 'product_demo', $4, 'Product demo completed', 'completed', 'dialer', $4, $4)`,
+              [tenantId, targetLeadId, repId, callTimestamp]
+            ).catch(() => {});
+          }
+
+          // 2. Advance lead status to demo_done
+          await client.query(
+            "UPDATE leads SET status = 'demo_done', updated_at = NOW() WHERE id = $1",
+            [targetLeadId]
+          );
+
+          // 3. Sync deal stage to demo_done
+          const dealCheck = await client.query(
+            "SELECT id FROM deals WHERE lead_id = $1 AND tenant_id = $2 LIMIT 1",
+            [targetLeadId, tenantId]
+          );
+          if (dealCheck.rows.length > 0) {
+            await client.query(
+              "UPDATE deals SET stage = 'demo_done', updated_at = NOW() WHERE id = $1",
+              [dealCheck.rows[0].id]
+            );
+          } else {
+            await client.query(
+              `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes, created_at, updated_at)
+               VALUES ($1, $2, $3, 'WhatsApp API', 10000, 0, 'demo_done', 'Product demo completed', NOW(), NOW())`,
+              [tenantId, targetLeadId, repId]
+            ).catch(() => {});
+          }
+        } else if (disposition === "Demo Scheduled") {
+          await client.query(
+            "UPDATE leads SET status = 'demo_scheduled', updated_at = NOW() WHERE id = $1",
+            [targetLeadId]
+          );
+        }
+
         createdLogs.push(finalLog);
       }
 

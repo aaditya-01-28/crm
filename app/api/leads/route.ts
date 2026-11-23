@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
 
       if (isSalesRep(role)) {
         baseConditions.push(`l.assigned_rep_id = $${baseParams.push(repId)}`);
-      } else if (filterRepId) {
+      } else if (filterRepId && filterRepId !== "all") {
         if (filterRepId === "unassigned") {
           baseConditions.push("l.assigned_rep_id IS NULL");
         } else {
@@ -104,7 +104,7 @@ export async function GET(request: NextRequest) {
         conditions.push(`l.status = $${params.push(status)}`);
       }
 
-      if (vertical && vertical !== "all") {
+      if (vertical && vertical !== "all" && vertical !== "All Verticals") {
         conditions.push(`l.business_vertical = $${params.push(vertical)}`);
       }
 
@@ -181,14 +181,23 @@ export async function GET(request: NextRequest) {
       );
       const total = countRes.rows[0]?.total || 0;
 
-      // Compute status tab counts across the tenant (or scoped to the rep if sales_rep).
-      // We decouple this from filterRepId / search / vertical so top-level status navigation tabs
-      // never get wiped out to 0 when inspecting the unassigned pool or filtering by a specific rep.
+      // Compute status tab counts across the active filter (scoped to selected rep and vertical).
+      // This ensures tab counters (New, Callback, Won, etc.) exactly match the leads shown in that view.
       const statusBaseConditions: string[] = ["l.tenant_id = $1"];
       const statusBaseParams: any[] = [tenantId];
 
       if (isSalesRep(role)) {
         statusBaseConditions.push(`l.assigned_rep_id = $${statusBaseParams.push(repId)}`);
+      } else if (filterRepId && filterRepId !== "all") {
+        if (filterRepId === "unassigned") {
+          statusBaseConditions.push("l.assigned_rep_id IS NULL");
+        } else {
+          statusBaseConditions.push(`l.assigned_rep_id = $${statusBaseParams.push(filterRepId)}`);
+        }
+      }
+
+      if (vertical && vertical !== "all" && vertical !== "All Verticals") {
+        statusBaseConditions.push(`l.business_vertical = $${statusBaseParams.push(vertical)}`);
       }
 
       const statusWhereClause = statusBaseConditions.join(" AND ");
@@ -199,9 +208,14 @@ export async function GET(request: NextRequest) {
 
       let unassignedTotal = 0;
       if (role !== "sales_rep") {
+        const unassignedParams: any[] = [tenantId];
+        let unassignedCondition = "tenant_id = $1 AND assigned_rep_id IS NULL";
+        if (vertical && vertical !== "all" && vertical !== "All Verticals") {
+          unassignedCondition += ` AND business_vertical = $${unassignedParams.push(vertical)}`;
+        }
         const unassignedRes = await client.query(
-          "SELECT COUNT(id)::int as count FROM leads WHERE tenant_id = $1 AND assigned_rep_id IS NULL",
-          [tenantId]
+          `SELECT COUNT(id)::int as count FROM leads WHERE ${unassignedCondition}`,
+          unassignedParams
         );
         unassignedTotal = unassignedRes.rows[0]?.count || 0;
       }
@@ -212,6 +226,7 @@ export async function GET(request: NextRequest) {
         rnr: 0,
         callback: 0,
         demo_scheduled: 0,
+        demo_done: 0,
         deal_created: 0,
         won: 0,
         lost: 0,

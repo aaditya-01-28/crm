@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { normalizeRole, isManagerOrAdmin, isSalesRep } from "@/lib/rbac";
 import { getSession } from "@/lib/auth";
+import { formatDuration } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
@@ -183,6 +184,7 @@ export async function GET(request: NextRequest) {
 
       const connectRate = totalCalls > 0 ? Math.round((connectedCalls / totalCalls) * 100) : 0;
       const talkTimeMins = Math.round(totalDurationSeconds / 60);
+      const talkTimeFormatted = formatDuration(totalDurationSeconds);
 
       // 3. Scheduled Tasks (Agenda, Callbacks, Demos)
       const taskWhereClause = targetUserId ? "t.tenant_id = $1 AND t.rep_id = $2" : "t.tenant_id = $1";
@@ -228,8 +230,9 @@ export async function GET(request: NextRequest) {
       const taskStatsRes = await client.query(
         `SELECT
            COUNT(CASE WHEN status = 'pending' AND scheduled_time < $2 THEN 1 END)::int as "overdueTasksCount",
-           COUNT(CASE WHEN task_type = 'callback' AND scheduled_time >= $3 AND scheduled_time <= $4 THEN 1 END)::int as "todayCallbacksCount",
-           COUNT(CASE WHEN task_type = 'product_demo' AND scheduled_time >= $3 AND scheduled_time <= $4 THEN 1 END)::int as "todayDemosCount"
+           COUNT(CASE WHEN task_type = 'callback' AND status = 'pending' AND scheduled_time >= $3 AND scheduled_time <= $4 THEN 1 END)::int as "todayCallbacksCount",
+           COUNT(CASE WHEN task_type = 'product_demo' AND status = 'pending' AND scheduled_time >= $3 AND scheduled_time <= $4 THEN 1 END)::int as "todayDemosCount",
+           COUNT(CASE WHEN task_type = 'product_demo' AND status = 'completed' AND updated_at >= $3 AND updated_at <= $4 THEN 1 END)::int as "todayDemosDoneCount"
          FROM scheduled_tasks
          WHERE ${targetUserId ? "tenant_id = $1 AND rep_id = $5" : "tenant_id = $1"}`,
         targetUserId
@@ -240,6 +243,7 @@ export async function GET(request: NextRequest) {
       const overdueTasksCount = taskStatsRes.rows[0]?.overdueTasksCount || 0;
       const todayCallbacksCount = taskStatsRes.rows[0]?.todayCallbacksCount || 0;
       const todayDemosCount = taskStatsRes.rows[0]?.todayDemosCount || 0;
+      const todayDemosDoneCount = taskStatsRes.rows[0]?.todayDemosDoneCount || 0;
 
       // 4. Deals & Pipeline
       const dealWhereClause = targetUserId ? "d.tenant_id = $1 AND d.rep_id = $2" : "d.tenant_id = $1";
@@ -489,7 +493,9 @@ export async function GET(request: NextRequest) {
         connectedCalls: number;
         connectRate: number;
         talkTimeMins: number;
+        talkTimeFormatted?: string;
         demosBooked: number;
+        demosDone: number;
         wonDeals: number;
         wonRevenue: number;
         allTimeWonDeals: number;
@@ -501,14 +507,16 @@ export async function GET(request: NextRequest) {
           `SELECT u.id as "repId", u.full_name as "repName", u.role as "repRole",
                   COALESCE(cl.total_calls, 0)::int as "totalCalls",
                   COALESCE(cl.talk_time, 0)::int as "talkTimeMins",
+                  COALESCE(cl.talk_time_secs, 0)::int as "talkTimeSecs",
                   COALESCE(st.demos_booked, 0)::int as "demosBooked",
+                  COALESCE(dd_agg.demos_done, 0)::int as "demosDone",
                   COALESCE(dl.won_deals, 0)::int as "wonDeals",
                   COALESCE(dl.won_revenue, 0)::numeric as "wonRevenue",
                   COALESCE(dl_all.all_won_deals, 0)::int as "allTimeWonDeals",
                   COALESCE(dl_all.all_won_revenue, 0)::numeric as "allTimeWonRevenue"
            FROM users u
            LEFT JOIN (
-             SELECT rep_id, COUNT(id) as total_calls, ROUND(SUM(duration_seconds) / 60) as talk_time
+             SELECT rep_id, COUNT(id) as total_calls, ROUND(SUM(duration_seconds) / 60) as talk_time, COALESCE(SUM(duration_seconds), 0) as talk_time_secs
              FROM call_logs
              WHERE tenant_id = $1 AND call_timestamp >= $2 AND call_timestamp <= $3
              GROUP BY rep_id
@@ -516,9 +524,20 @@ export async function GET(request: NextRequest) {
            LEFT JOIN (
              SELECT rep_id, COUNT(id) as demos_booked
              FROM scheduled_tasks
-             WHERE tenant_id = $1 AND task_type = 'product_demo' AND created_at >= $2 AND created_at <= $3
+             WHERE tenant_id = $1 AND task_type = 'product_demo' AND status = 'pending' AND scheduled_time >= $2 AND scheduled_time <= $3
              GROUP BY rep_id
            ) st ON u.id = st.rep_id
+           LEFT JOIN (
+             SELECT rep_id, COUNT(DISTINCT lead_id) as demos_done
+             FROM (
+               SELECT rep_id, lead_id FROM scheduled_tasks
+               WHERE tenant_id = $1 AND task_type = 'product_demo' AND status = 'completed' AND updated_at >= $2 AND updated_at <= $3
+               UNION
+               SELECT rep_id, lead_id FROM call_logs
+               WHERE tenant_id = $1 AND (disposition = 'Demo Done' OR disposition = 'Demo Completed') AND call_timestamp >= $2 AND call_timestamp <= $3
+             ) dd
+             GROUP BY rep_id
+           ) dd_agg ON u.id = dd_agg.rep_id
            LEFT JOIN (
              SELECT rep_id, COUNT(id) as won_deals, SUM(quoted_price) as won_revenue
              FROM deals
@@ -546,7 +565,9 @@ export async function GET(request: NextRequest) {
             connectedCalls: Math.round(calls * 0.42),
             connectRate: calls > 0 ? 42 : 0,
             talkTimeMins: r.talkTimeMins || 0,
+            talkTimeFormatted: formatDuration(r.talkTimeSecs || 0),
             demosBooked: r.demosBooked || 0,
+            demosDone: r.demosDone || 0,
             wonDeals: r.wonDeals || 0,
             wonRevenue: Number(r.wonRevenue || 0),
             allTimeWonDeals: r.allTimeWonDeals || 0,
@@ -573,6 +594,7 @@ export async function GET(request: NextRequest) {
         connectedCalls,
         connectRate,
         talkTimeMins,
+        talkTimeFormatted,
         totalDurationSeconds,
         dispositionMap,
         // Queue & Agenda
@@ -580,6 +602,7 @@ export async function GET(request: NextRequest) {
         unassignedLeadsCount,
         todayCallbacksCount,
         todayDemosCount,
+        todayDemosDoneCount,
         overdueTasksCount,
         todayAgenda,
         // Pipeline & Revenue

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { BarChart3, Download, RefreshCw, TrendingUp, Calendar } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatDuration } from "@/lib/utils";
 
 type ReportPeriod = "today" | "yesterday" | "week" | "month" | "custom";
 
@@ -44,6 +44,8 @@ interface RepMetrics {
   uniqueDialed: number;
   connectedCalls: number;
   talkTimeMins: number;
+  talkTimeSecs?: number;
+  talkTimeFormatted?: string;
   demosBooked: number;
   demosCompleted: number;
   quotesSent: number;
@@ -79,7 +81,7 @@ const METRICS_CONFIG: {
   { key: "totalCalls", label: "Total Calls", icon: "📞", color: "text-blue-700 bg-blue-50" },
   { key: "uniqueDialed", label: "Unique Dialed", icon: "📱", color: "text-indigo-700 bg-indigo-50" },
   { key: "connectedCalls", label: "Connected", icon: "🤝", color: "text-green-700 bg-green-50" },
-  { key: "talkTimeMins", label: "Talk Time (min)", icon: "⏱️", color: "text-teal-700 bg-teal-50" },
+  { key: "talkTimeFormatted" as any, label: "Talk Time", icon: "⏱️", color: "text-teal-700 bg-teal-50" },
   { key: "demosBooked", label: "Demos Booked", icon: "📅", color: "text-purple-700 bg-purple-50" },
   { key: "demosCompleted", label: "Demos Done", icon: "✅", color: "text-violet-700 bg-violet-50" },
   { key: "quotesSent", label: "Quotes Sent", icon: "📄", color: "text-yellow-700 bg-yellow-50" },
@@ -121,7 +123,7 @@ export default function ReportsPage() {
       "Total Calls",
       "Unique Dialed",
       "Connected",
-      "Talk Time (min)",
+      "Talk Time (min & sec)",
       "Demos Booked",
       "Demos Done",
       "Quotes Sent",
@@ -134,7 +136,7 @@ export default function ReportsPage() {
       r.totalCalls,
       r.uniqueDialed,
       r.connectedCalls,
-      r.talkTimeMins,
+      r.talkTimeFormatted || formatDuration((r.talkTimeMins || 0) * 60),
       r.demosBooked,
       r.demosCompleted,
       r.quotesSent,
@@ -294,7 +296,7 @@ export default function ReportsPage() {
                       <th className="px-3 py-3 text-center font-semibold">Calls</th>
                       <th className="px-3 py-3 text-center font-semibold">Unique</th>
                       <th className="px-3 py-3 text-center font-semibold">Connected</th>
-                      <th className="px-3 py-3 text-center font-semibold">Talk (min)</th>
+                      <th className="px-3 py-3 text-center font-semibold">Talk Time</th>
                       <th className="px-3 py-3 text-center font-semibold">Demos 📅</th>
                       <th className="px-3 py-3 text-center font-semibold">Done ✅</th>
                       <th className="px-3 py-3 text-center font-semibold">Quotes</th>
@@ -321,7 +323,9 @@ export default function ReportsPage() {
                           <td className="px-3 py-3 text-center">
                             <span className="font-medium text-green-700">{rep.connectedCalls}</span>
                           </td>
-                          <td className="px-3 py-3 text-center text-gray-600">{rep.talkTimeMins}</td>
+                          <td className="px-3 py-3 text-center text-gray-600 font-medium">
+                            {rep.talkTimeFormatted || formatDuration((rep.talkTimeMins || 0) * 60)}
+                          </td>
                           <td className="px-3 py-3 text-center">
                             <span className="font-medium text-purple-700">{rep.demosBooked}</span>
                           </td>
@@ -359,7 +363,7 @@ function MetricCard({
 }: {
   icon: string;
   label: string;
-  value: number;
+  value: number | string | undefined;
   isCurrency?: boolean;
   color: string;
 }) {
@@ -370,7 +374,11 @@ function MetricCard({
         <span className="text-base">{icon}</span>
       </div>
       <p className={`text-xl font-bold ${text}`}>
-        {isCurrency ? formatCurrency(value) : value.toLocaleString("en-IN")}
+        {isCurrency && typeof value === "number"
+          ? formatCurrency(value)
+          : typeof value === "number"
+          ? value.toLocaleString("en-IN")
+          : value ?? 0}
       </p>
       <p className="text-xs text-gray-500 mt-0.5">{label}</p>
     </div>

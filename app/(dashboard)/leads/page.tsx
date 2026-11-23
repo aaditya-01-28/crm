@@ -157,8 +157,9 @@ export default function LeadsDirectoryPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to delete lead");
       toast.success("Lead permanently deleted ✅");
-      refetch();
+      queryClient.invalidateQueries({ queryKey: ["leads-directory"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      refetch();
       setDeletingLead(null);
     } catch (err: any) {
       toast.error(err.message || "Failed to delete lead");
@@ -180,8 +181,9 @@ export default function LeadsDirectoryPage() {
       if (!res.ok) throw new Error(data.error || "Failed to delete leads");
       toast.success(`Permanently deleted ${data.count || selectedLeadIds.length} leads ✅`);
       setSelectedLeadIds([]);
-      refetch();
+      queryClient.invalidateQueries({ queryKey: ["leads-directory"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      refetch();
       setShowBulkDeleteConfirm(false);
     } catch (err: any) {
       toast.error(err.message || "Failed to delete leads");
@@ -393,6 +395,8 @@ export default function LeadsDirectoryPage() {
 
       toast.success(result.message || "Leads assigned successfully! ✅");
       setSelectedLeadIds([]);
+      queryClient.invalidateQueries({ queryKey: ["leads-directory"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
       refetch();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to assign leads";
@@ -434,6 +438,8 @@ export default function LeadsDirectoryPage() {
       setNewServices(["WhatsApp API"]);
       setNewLanguage("");
       setNewAssignedRepId("unassigned");
+      queryClient.invalidateQueries({ queryKey: ["leads-directory"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
       refetch();
     } catch {
       toast.error("Failed to create lead");
@@ -1044,7 +1050,11 @@ export default function LeadsDirectoryPage() {
         <LeadDetailModal
           leadId={selectedLeadId}
           onClose={() => setSelectedLeadId(null)}
-          onLeadUpdated={() => refetch()}
+          onLeadUpdated={() => {
+            queryClient.invalidateQueries({ queryKey: ["leads-directory"] });
+            queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+            refetch();
+          }}
         />
       )}
 
@@ -1054,6 +1064,8 @@ export default function LeadsDirectoryPage() {
           onClose={() => setShowImporter(false)}
           onImported={() => {
             setShowImporter(false);
+            queryClient.invalidateQueries({ queryKey: ["leads-directory"] });
+            queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
             refetch();
             toast.success("Leads imported successfully!");
           }}
