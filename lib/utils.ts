@@ -43,8 +43,59 @@ export function normalizePhone(raw: string): string {
   return digits;
 }
 
-export function buildWALink(phone: string, text: string): string {
+export interface WAPitchOptions {
+  repName?: string | null;
+  repEmail?: string | null;
+  repPhone?: string | null;
+  contactName?: string | null;
+}
+
+export function buildWAPitch(options?: WAPitchOptions): string {
+  const name = (options?.repName || "").trim() || "Aaditya";
+  const email = (options?.repEmail || "").trim() || "aaditya@textorasms.com";
+  let phone = (options?.repPhone || "").trim();
+  if (phone) {
+    phone = normalizePhone(phone);
+  }
+  if (!phone) {
+    phone = "9902101007";
+  }
+  const greetingTarget = (options?.contactName || "").trim() || "Sir";
+
+  return `Hello ${greetingTarget} 👋
+This is ${name} from Textora Technologies Pvt Ltd.
+
+Looking to grow your business faster and reach more customers instantly? 🚀
+We offer smart messaging solutions to boost sales, engagement, and brand visibility 📈
+
+✨ Our Services:
+📲 Business WhatsApp API – Official & automated messaging
+💬 Virtual WhatsApp – Bulk & personalised campaigns
+📩 RCS Messaging – Rich, interactive messages
+🔐 Transactional SMS – OTPs, alerts & notifications
+📢 Promotional SMS – Offers, campaigns & branding
+📞 Voice SMS – Automated voice calls at scale
+🌐Website development: Build Premium Websites That Grow Your Business
+
+📢 Reach customers instantly | Improve response rate | Increase conversions
+
+📞 For details & free demo:
+${name}
+📧 ${email}
+https://textorasms.com
+📱 ${phone}
+
+Reply YES to get started 👍`;
+}
+
+/** Textora standard WhatsApp greeting pitch */
+export const WA_PITCH = buildWAPitch();
+
+export function buildWALink(phone: string, textOrOptions?: string | WAPitchOptions): string {
   const normalized = normalizePhone(phone);
+  const text = typeof textOrOptions === "string"
+    ? textOrOptions
+    : buildWAPitch(textOrOptions);
   return `https://wa.me/91${normalized}?text=${encodeURIComponent(text)}`;
 }
 
@@ -52,30 +103,6 @@ export function buildTelLink(phone: string): string {
   const normalized = normalizePhone(phone);
   return `tel:+91${normalized}`;
 }
-
-/** Textora standard WhatsApp greeting pitch */
-export const WA_PITCH = `Hello Sir,
-This is Aaditya from Textora Technologies Pvt Ltd.
-
-Looking to grow your business faster and reach more customers instantly?
-We offer smart messaging solutions to boost sales, engagement, and brand visibility.
-
-Our Services:
-- Business WhatsApp API - Official & automated messaging
-- Virtual WhatsApp - Bulk & personalised campaigns
-- RCS Messaging - Rich, interactive messages
-- Transactional SMS - OTPs, alerts & notifications
-- Promotional SMS - Offers, campaigns & branding
-- Voice SMS - Automated voice calls at scale
-
-Reach customers instantly | Improve response rate | Increase conversions
-
-For details & free demo:
-Aaditya
-Email: aaditya@textorasms.com
-Mobile: 9902101007
-
-Reply YES to get started.`;
 
 export function calculateGST(baseAmount: number): {
   base: number;

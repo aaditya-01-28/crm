@@ -7,23 +7,31 @@ interface SessionContextValue {
   role: string;
   userId: string;
   userName?: string;
+  userEmail?: string;
+  userPhone?: string;
 }
 
 const SessionContext = createContext<SessionContextValue>({
   role: "sales_rep",
   userId: "",
   userName: "User",
+  userEmail: "aaditya@textorasms.com",
+  userPhone: "9902101007",
 });
 
 export function SessionProvider({
   role,
   userId,
   userName,
+  userEmail,
+  userPhone,
   children,
 }: {
   role: string;
   userId: string;
   userName?: string;
+  userEmail?: string;
+  userPhone?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -32,6 +40,8 @@ export function SessionProvider({
         role: normalizeRole(role),
         userId,
         userName: userName || "User",
+        userEmail: userEmail || "aaditya@textorasms.com",
+        userPhone: userPhone || "9902101007",
       }}
     >
       {children}

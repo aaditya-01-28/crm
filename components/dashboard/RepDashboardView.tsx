@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { KpiCard } from "./KpiCard";
 import { formatCurrency, formatDateTime, buildTelLink, buildWALink, WA_PITCH } from "@/lib/utils";
+import { useSession } from "@/components/layout/SessionProvider";
 import { toast } from "sonner";
 
 interface RepDashboardViewProps {
@@ -29,6 +30,7 @@ interface RepDashboardViewProps {
 }
 
 export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardViewProps) {
+  const { userName, userEmail, userPhone } = useSession();
   const {
     queueRemainingCount = 0,
     totalCalls = 0,
@@ -222,7 +224,12 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
                 <div className="divide-y divide-gray-100">
                   {todayAgenda.map((task: any) => {
                     const telLink = buildTelLink(task.lead?.phoneNumber || "");
-                    const waLink = buildWALink(task.lead?.phoneNumber || "", WA_PITCH);
+                    const waLink = buildWALink(task.lead?.phoneNumber || "", {
+                      repName: userName,
+                      repEmail: userEmail,
+                      repPhone: userPhone,
+                      contactName: task.lead?.contactName,
+                    });
                     const targetLeadId = task.leadId || task.lead?.id;
 
                     return (
@@ -377,7 +384,12 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
               <div className="divide-y divide-gray-100">
                 {recentWonDeals.map((deal: any) => {
                   const targetLeadId = deal.leadId;
-                  const waLink = buildWALink(deal.phoneNumber, WA_PITCH);
+                  const waLink = buildWALink(deal.phoneNumber, {
+                    repName: userName,
+                    repEmail: userEmail,
+                    repPhone: userPhone,
+                    contactName: deal.contactName,
+                  });
 
                   return (
                     <div key={deal.id} className="py-3 first:pt-0 last:pb-0 flex items-center justify-between gap-3">

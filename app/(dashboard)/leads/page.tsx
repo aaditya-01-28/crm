@@ -139,7 +139,7 @@ export default function LeadsDirectoryPage() {
   const canImport = useCanImportLeads();
   const canAssign = useCanAssignLeads();
   const isLevel3Admin = useIsAdmin();
-  const { role, userId } = useSession();
+  const { role, userId, userName, userEmail, userPhone } = useSession();
   const queryClient = useQueryClient();
 
   // Deletion state (Level 3 Super Admin only)
@@ -810,7 +810,12 @@ export default function LeadsDirectoryPage() {
                     color: "bg-gray-100 text-gray-700 border-gray-200",
                   };
                   const telLink = buildTelLink(lead.phoneNumber);
-                  const waLink = buildWALink(lead.phoneNumber, WA_PITCH);
+                  const waLink = buildWALink(lead.phoneNumber, {
+                    repName: userName,
+                    repEmail: userEmail,
+                    repPhone: userPhone,
+                    contactName: lead.contactName,
+                  });
                   const isSelected = selectedLeadIds.includes(lead.id);
 
                   return (

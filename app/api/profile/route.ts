@@ -24,6 +24,7 @@ export async function GET(request: NextRequest) {
                 o.id as "orgId", o.name as "orgName", o.plan_tier as "orgPlanTier",
                 (SELECT COUNT(*)::int FROM leads WHERE assigned_rep_id = u.id) as "assignedLeadsCount",
                 (SELECT COUNT(*)::int FROM call_logs WHERE rep_id = u.id) as "callLogsCount",
+                (SELECT COUNT(*)::int FROM call_logs WHERE rep_id = u.id AND (duration_seconds > 0 OR disposition ILIKE '%Connected%' OR disposition = 'Contacted')) as "connectedCallsCount",
                 (SELECT COUNT(*)::int FROM deals WHERE rep_id = u.id) as "dealsCount"
          FROM users u
          JOIN organizations o ON u.tenant_id = o.id
@@ -56,6 +57,7 @@ export async function GET(request: NextRequest) {
         _count: {
           assignedLeads: r.assignedLeadsCount,
           callLogs: r.callLogsCount,
+          connectedCalls: r.connectedCallsCount,
           deals: r.dealsCount,
         },
       };

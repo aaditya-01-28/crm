@@ -3,14 +3,18 @@
 import { useState } from "react";
 import { X, Send, Copy, Check, MessageSquare, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
-import { WA_PITCH } from "@/lib/utils";
+import { WA_PITCH, buildWAPitch } from "@/lib/utils";
+import { useSession } from "@/components/layout/SessionProvider";
 
 export interface WhatsAppTemplate {
   id: string;
   name: string;
   category: string;
   badge: string;
-  text: (lead: { contactName?: string | null; companyName?: string | null; phoneNumber: string }) => string;
+  text: (
+    lead: { contactName?: string | null; companyName?: string | null; phoneNumber: string },
+    rep?: { name?: string; email?: string; phone?: string }
+  ) => string;
 }
 
 export const WA_PREAPPROVED_TEMPLATES: WhatsAppTemplate[] = [
@@ -19,7 +23,13 @@ export const WA_PREAPPROVED_TEMPLATES: WhatsAppTemplate[] = [
     name: "Textora Services Pitch (Standard)",
     category: "Introduction",
     badge: "Direct Pitch",
-    text: () => WA_PITCH,
+    text: (lead, rep) =>
+      buildWAPitch({
+        repName: rep?.name,
+        repEmail: rep?.email,
+        repPhone: rep?.phone,
+        contactName: lead.contactName || lead.companyName,
+      }),
   },
   {
     id: "brochure",
@@ -66,20 +76,27 @@ interface WhatsAppTemplateModalProps {
 }
 
 export function WhatsAppTemplateModal({ lead, onClose }: WhatsAppTemplateModalProps) {
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("brochure");
+  const session = useSession();
+  const repInfo = {
+    name: session.userName,
+    email: session.userEmail,
+    phone: session.userPhone,
+  };
+
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("standard_pitch");
   const [copied, setCopied] = useState(false);
 
   const selectedTemplate =
     WA_PREAPPROVED_TEMPLATES.find((t) => t.id === selectedTemplateId) ||
     WA_PREAPPROVED_TEMPLATES[0];
 
-  const [customText, setCustomText] = useState(selectedTemplate.text(lead));
+  const [customText, setCustomText] = useState(selectedTemplate.text(lead, repInfo));
 
   function handleSelectTemplate(tId: string) {
     setSelectedTemplateId(tId);
     const tmpl = WA_PREAPPROVED_TEMPLATES.find((t) => t.id === tId);
     if (tmpl) {
-      setCustomText(tmpl.text(lead));
+      setCustomText(tmpl.text(lead, repInfo));
     }
   }
 

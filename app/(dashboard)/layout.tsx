@@ -22,23 +22,38 @@ export default async function DashboardLayout({
   }
 
   let enrichedUser = session;
-  if (!session.lastLoginAt && !session.loginAt) {
-    try {
-      const userRes = await query<{ lastLoginAt: Date | null }>(
-        `SELECT last_login_at as "lastLoginAt" FROM users WHERE id = $1`,
-        [session.sub]
-      );
-      if (userRes[0]?.lastLoginAt) {
+  let userPhone: string | null = session.phoneNumber || null;
+  let userEmail: string | null = session.email || null;
+
+  try {
+    const userRes = await query<{ lastLoginAt: Date | null; phoneNumber: string | null; email: string | null }>(
+      `SELECT last_login_at as "lastLoginAt", phone_number as "phoneNumber", email FROM users WHERE id = $1`,
+      [session.sub]
+    );
+    if (userRes[0]) {
+      if (userRes[0].lastLoginAt && !session.lastLoginAt && !session.loginAt) {
         enrichedUser = {
           ...session,
           lastLoginAt: new Date(userRes[0].lastLoginAt).toISOString(),
         };
       }
-    } catch {}
-  }
+      if (userRes[0].phoneNumber) {
+        userPhone = userRes[0].phoneNumber;
+      }
+      if (userRes[0].email) {
+        userEmail = userRes[0].email;
+      }
+    }
+  } catch {}
 
   return (
-    <SessionProvider role={session.role} userId={session.sub} userName={session.fullName}>
+    <SessionProvider
+      role={session.role}
+      userId={session.sub}
+      userName={session.fullName}
+      userEmail={userEmail || session.email}
+      userPhone={userPhone || session.phoneNumber || undefined}
+    >
       <SidebarProvider>
         <div className="flex h-screen overflow-hidden bg-slate-50">
           <Sidebar role={session.role} />

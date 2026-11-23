@@ -70,6 +70,7 @@ export async function POST(request: NextRequest) {
       mustChangePassword,
       lastLoginAt: previousLoginTimestamp,
       loginAt: loginTimestamp,
+      phoneNumber: user.phoneNumber || null,
     };
 
     const accessToken = await signAccessToken(jwtPayload);
@@ -85,6 +86,7 @@ export async function POST(request: NextRequest) {
         avatarUrl: user.avatarUrl ?? null,
         mustChangePassword,
         lastLoginAt: previousLoginTimestamp,
+        phoneNumber: user.phoneNumber || null,
       },
       mustChangePassword,
       accessToken,

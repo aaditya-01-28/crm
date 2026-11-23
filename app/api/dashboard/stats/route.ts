@@ -152,7 +152,7 @@ export async function GET(request: NextRequest) {
       const callCountsRes = await client.query(
         `SELECT COUNT(id)::int as "totalCalls",
                 COUNT(DISTINCT lead_id)::int as "uniqueDials",
-                COUNT(CASE WHEN duration_seconds > 0 OR disposition = 'Connected' THEN 1 END)::int as "connectedCalls",
+                COUNT(CASE WHEN duration_seconds > 0 OR disposition ILIKE '%Connected%' OR disposition = 'Contacted' THEN 1 END)::int as "connectedCalls",
                 COALESCE(SUM(duration_seconds), 0)::int as "totalDuration"
          FROM call_logs
          WHERE ${callWhereClause}`,
@@ -506,6 +506,7 @@ export async function GET(request: NextRequest) {
         const boardRes = await client.query(
           `SELECT u.id as "repId", u.full_name as "repName", u.role as "repRole",
                   COALESCE(cl.total_calls, 0)::int as "totalCalls",
+                  COALESCE(cl.connected_calls, 0)::int as "connectedCalls",
                   COALESCE(cl.talk_time, 0)::int as "talkTimeMins",
                   COALESCE(cl.talk_time_secs, 0)::int as "talkTimeSecs",
                   COALESCE(st.demos_booked, 0)::int as "demosBooked",
@@ -516,7 +517,11 @@ export async function GET(request: NextRequest) {
                   COALESCE(dl_all.all_won_revenue, 0)::numeric as "allTimeWonRevenue"
            FROM users u
            LEFT JOIN (
-             SELECT rep_id, COUNT(id) as total_calls, ROUND(SUM(duration_seconds) / 60) as talk_time, COALESCE(SUM(duration_seconds), 0) as talk_time_secs
+             SELECT rep_id,
+                    COUNT(id) as total_calls,
+                    COUNT(CASE WHEN duration_seconds > 0 OR disposition ILIKE '%Connected%' OR disposition = 'Contacted' THEN 1 END) as connected_calls,
+                    ROUND(SUM(duration_seconds) / 60) as talk_time,
+                    COALESCE(SUM(duration_seconds), 0) as talk_time_secs
              FROM call_logs
              WHERE tenant_id = $1 AND call_timestamp >= $2 AND call_timestamp <= $3
              GROUP BY rep_id
@@ -562,8 +567,8 @@ export async function GET(request: NextRequest) {
             repName: r.repName,
             repRole: r.repRole,
             totalCalls: calls,
-            connectedCalls: Math.round(calls * 0.42),
-            connectRate: calls > 0 ? 42 : 0,
+            connectedCalls: r.connectedCalls || 0,
+            connectRate: calls > 0 ? Math.round(((r.connectedCalls || 0) / calls) * 100) : 0,
             talkTimeMins: r.talkTimeMins || 0,
             talkTimeFormatted: formatDuration(r.talkTimeSecs || 0),
             demosBooked: r.demosBooked || 0,

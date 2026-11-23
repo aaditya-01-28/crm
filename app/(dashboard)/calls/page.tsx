@@ -166,7 +166,7 @@ const DISPOSITION_BADGES: Record<
 };
 
 export default function CallLogsPage() {
-  const { role } = useSession();
+  const { role, userName, userEmail, userPhone } = useSession();
   const isManagerOrAdmin = role === "super_admin" || role === "sales_manager";
 
   // Filter state
@@ -679,7 +679,12 @@ export default function CallLogsPage() {
                     border: "border-gray-200",
                   };
                   const telLink = buildTelLink(call.lead.phoneNumber);
-                  const waLink = buildWALink(call.lead.phoneNumber, WA_PITCH);
+                  const waLink = buildWALink(call.lead.phoneNumber, {
+                    repName: userName,
+                    repEmail: userEmail,
+                    repPhone: userPhone,
+                    contactName: call.lead.contactName,
+                  });
 
                   return (
                     <tr

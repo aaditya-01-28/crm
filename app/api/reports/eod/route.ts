@@ -63,17 +63,20 @@ export async function GET(request: NextRequest) {
       const [callStatsRes, uniqueDialedRes, demosBookedRes, demosCompletedRes, dealStatsRes, paymentStatsRes] =
         await Promise.all([
           client.query(
-            `SELECT rep_id, disposition, COUNT(id)::int as count, COALESCE(SUM(duration_seconds), 0)::int as duration
+            `SELECT rep_id,
+                    COUNT(id)::int as total_calls,
+                    COUNT(CASE WHEN duration_seconds > 0 OR disposition ILIKE '%Connected%' OR disposition = 'Contacted' THEN 1 END)::int as connected_calls,
+                    COALESCE(SUM(duration_seconds), 0)::int as total_duration
              FROM call_logs
              WHERE tenant_id = $1 AND rep_id = ANY($2::uuid[])
                AND call_timestamp >= $3 AND call_timestamp <= $4
-             GROUP BY rep_id, disposition`,
+             GROUP BY rep_id`,
             [tenantId, repIds, startOfDay, endOfDay]
           ),
           client.query(
-            `SELECT cl.rep_id, COUNT(DISTINCT l.phone_number)::int as unique_count
+            `SELECT cl.rep_id, COUNT(DISTINCT COALESCE(l.phone_number, cl.lead_id::text))::int as unique_count
              FROM call_logs cl
-             JOIN leads l ON cl.lead_id = l.id
+             LEFT JOIN leads l ON cl.lead_id = l.id
              WHERE cl.tenant_id = $1 AND cl.rep_id = ANY($2::uuid[])
                AND cl.call_timestamp >= $3 AND cl.call_timestamp <= $4
              GROUP BY cl.rep_id`,
@@ -135,15 +138,10 @@ export async function GET(request: NextRequest) {
       const paymentStats = paymentStatsRes.rows;
 
       const metrics = reps.map((rep) => {
-        const repCalls = callStats.filter((c: any) => c.rep_id === rep.id);
-        const totalCalls = repCalls.reduce((sum: number, c: any) => sum + Number(c.count), 0);
-        const connected = repCalls
-          .filter((c: any) => Number(c.duration || 0) > 0 || c.disposition === "Connected" || c.disposition === "Contacted")
-          .reduce((sum: number, c: any) => sum + Number(c.count), 0);
-        const talkTimeSecs = repCalls.reduce(
-          (sum: number, c: any) => sum + Number(c.duration || 0),
-          0
-        );
+        const repCallStats = callStats.find((c: any) => c.rep_id === rep.id);
+        const totalCalls = Number(repCallStats?.total_calls || 0);
+        const connected = Number(repCallStats?.connected_calls || 0);
+        const talkTimeSecs = Number(repCallStats?.total_duration || 0);
         const uniqueCount = Number(uniqueDialed.find((u: any) => u.rep_id === rep.id)?.unique_count || 0);
         const demosB = demosBooked.find((d: any) => d.rep_id === rep.id)?.count || 0;
         const demosC = demosCompleted.find((d: any) => d.rep_id === rep.id)?.count || 0;

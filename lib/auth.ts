@@ -20,6 +20,7 @@ export interface JWTPayload {
   mustChangePassword?: boolean;
   lastLoginAt?: string | null;
   loginAt?: string | null;
+  phoneNumber?: string | null;
 }
 
 function resolveExpiry(envVal: string | undefined, defaultExpiry: string): string {
