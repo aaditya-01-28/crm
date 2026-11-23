@@ -24,6 +24,7 @@ import {
   UserCheck,
   Trash2,
   Smartphone,
+  ExternalLink,
 } from "lucide-react";
 import {
   buildTelLink,
@@ -329,6 +330,224 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
 
   const telLink = buildTelLink(lead.phoneNumber);
   const waLink = buildWALink(lead.phoneNumber, WA_PITCH);
+
+  // Construct unified lifecycle stages and interaction history
+  const timelineItems = (() => {
+    if (!lead) return [];
+    const items: Array<{
+      id: string;
+      type: "demo_scheduled" | "demo_done" | "callback" | "deal_stage" | "status_change" | "call";
+      badge: string;
+      badgeColor: string;
+      iconColor: string;
+      timestamp: string;
+      title: string;
+      repName?: string;
+      notes?: string | null;
+      recordingUrl?: string | null;
+      durationSeconds?: number;
+      meetingLink?: string | null;
+      scheduledTime?: string | null;
+    }> = [];
+
+    // 1. Stage History records (from persistent lead_stage_history table)
+    if (Array.isArray(lead.stageHistory)) {
+      lead.stageHistory.forEach((h: any) => {
+        let badgeColor = "bg-purple-100 text-purple-800 border-purple-200";
+        let iconColor = "bg-purple-600 ring-purple-100";
+        let type: any = "status_change";
+
+        if (h.stageName === "Demo Scheduled") {
+          type = "demo_scheduled";
+          badgeColor = "bg-purple-100 text-purple-800 border-purple-200";
+          iconColor = "bg-purple-600 ring-purple-100";
+        } else if (h.stageName === "Demo Done" || h.stageName === "Demo Completed") {
+          type = "demo_done";
+          badgeColor = "bg-emerald-100 text-emerald-800 border-emerald-200";
+          iconColor = "bg-emerald-600 ring-emerald-100";
+        } else if (h.stageName === "Callback Requested" || h.stageName === "Callback") {
+          type = "callback";
+          badgeColor = "bg-blue-100 text-blue-800 border-blue-200";
+          iconColor = "bg-blue-600 ring-blue-100";
+        } else if (h.stageName.includes("Our Service")) {
+          type = "status_change";
+          badgeColor = "bg-emerald-100 text-emerald-800 border-emerald-200";
+          iconColor = "bg-emerald-600 ring-emerald-100";
+        } else if (h.stageName.includes("Other Company") || h.stageName.includes("Competitor")) {
+          type = "status_change";
+          badgeColor = "bg-orange-100 text-orange-800 border-orange-200";
+          iconColor = "bg-orange-600 ring-orange-100";
+        }
+
+        const meta = typeof h.metadata === "object" ? h.metadata : {};
+        items.push({
+          id: `stage-${h.id}`,
+          type,
+          badge: h.stageName,
+          badgeColor,
+          iconColor,
+          timestamp: h.createdAt,
+          title: h.stageName,
+          repName: h.rep?.fullName || "Representative",
+          notes: h.notes,
+          meetingLink: meta?.meetingLink || null,
+          scheduledTime: meta?.demoDatetime || meta?.callbackDatetime || null,
+        });
+      });
+    }
+
+    // 2. Demo & Callback tasks from scheduled_tasks
+    if (Array.isArray(lead.tasks)) {
+      lead.tasks.forEach((t: any) => {
+        if (t.taskType === "product_demo") {
+          // Demo Scheduled event
+          items.push({
+            id: `task-sched-${t.id}`,
+            type: "demo_scheduled",
+            badge: "Demo Scheduled",
+            badgeColor: "bg-purple-100 text-purple-800 border-purple-200",
+            iconColor: "bg-purple-600 ring-purple-100",
+            timestamp: t.createdAt || t.scheduledTime,
+            title: "Product Demo Scheduled",
+            repName: t.rep?.fullName,
+            notes: t.notes,
+            meetingLink: t.meetingLink,
+            scheduledTime: t.scheduledTime,
+          });
+
+          // If completed, Demo Done event
+          if (t.status === "completed") {
+            items.push({
+              id: `task-done-${t.id}`,
+              type: "demo_done",
+              badge: "Demo Completed",
+              badgeColor: "bg-emerald-100 text-emerald-800 border-emerald-200",
+              iconColor: "bg-emerald-600 ring-emerald-100",
+              timestamp: t.updatedAt || t.createdAt,
+              title: "Product Demo Completed",
+              repName: t.rep?.fullName,
+              notes: t.notes || "Product demo conducted and completed.",
+            });
+          }
+        } else if (t.taskType === "callback") {
+          items.push({
+            id: `task-cb-${t.id}`,
+            type: "callback",
+            badge: "Callback Scheduled",
+            badgeColor: "bg-blue-100 text-blue-800 border-blue-200",
+            iconColor: "bg-blue-600 ring-blue-100",
+            timestamp: t.createdAt || t.scheduledTime,
+            title: "Callback Scheduled",
+            repName: t.rep?.fullName,
+            notes: t.notes,
+            scheduledTime: t.scheduledTime,
+          });
+        }
+      });
+    }
+
+    // 3. Deals pipeline progression
+    if (Array.isArray(lead.deals)) {
+      lead.deals.forEach((d: any) => {
+        if (d.stage !== "demo_scheduled" && d.stage !== "demo_done") {
+          const stageLabel = d.stage.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+          let badgeColor = "bg-indigo-100 text-indigo-800 border-indigo-200";
+          let iconColor = "bg-indigo-600 ring-indigo-100";
+          if (d.stage === "closed_won") {
+            badgeColor = "bg-emerald-100 text-emerald-800 border-emerald-200";
+            iconColor = "bg-emerald-600 ring-emerald-100";
+          } else if (d.stage === "closed_lost") {
+            badgeColor = "bg-rose-100 text-rose-800 border-rose-200";
+            iconColor = "bg-rose-600 ring-rose-100";
+          }
+          items.push({
+            id: `deal-${d.id}`,
+            type: "deal_stage",
+            badge: `Deal: ${stageLabel}`,
+            badgeColor,
+            iconColor,
+            timestamp: d.updatedAt || d.createdAt,
+            title: `Deal Stage: ${stageLabel}`,
+            repName: d.rep?.fullName,
+            notes: d.closingNotes || `${d.serviceType} (${d.quantity} credits / units)`,
+          });
+        }
+      });
+    }
+
+    // 4. Call logs
+    if (Array.isArray(lead.callLogs)) {
+      lead.callLogs.forEach((log: any) => {
+        let badgeColor = "bg-gray-100 text-gray-800 border-gray-200";
+        let iconColor = "bg-emerald-600 ring-emerald-100";
+        let type: any = "call";
+
+        if (log.disposition === "Demo Scheduled") {
+          type = "demo_scheduled";
+          badgeColor = "bg-purple-100 text-purple-800 border-purple-200";
+          iconColor = "bg-purple-600 ring-purple-100";
+        } else if (log.disposition === "Demo Done" || log.disposition === "Demo Completed") {
+          type = "demo_done";
+          badgeColor = "bg-emerald-100 text-emerald-800 border-emerald-200";
+          iconColor = "bg-emerald-600 ring-emerald-100";
+        } else if (log.disposition === "Already Using Our Service") {
+          type = "status_change";
+          badgeColor = "bg-emerald-100 text-emerald-800 border-emerald-200";
+          iconColor = "bg-emerald-600 ring-emerald-100";
+        } else if (log.disposition.includes("Other") || log.disposition.includes("Purchased")) {
+          type = "status_change";
+          badgeColor = "bg-orange-100 text-orange-800 border-orange-200";
+          iconColor = "bg-orange-600 ring-orange-100";
+        } else if (log.disposition === "RNR") {
+          badgeColor = "bg-amber-100 text-amber-800 border-amber-200";
+          iconColor = "bg-amber-600 ring-amber-100";
+        }
+
+        items.push({
+          id: `call-${log.id}`,
+          type,
+          badge: log.disposition,
+          badgeColor,
+          iconColor,
+          timestamp: log.callTimestamp,
+          title: log.disposition,
+          repName: log.rep?.fullName || "System",
+          notes: log.remark,
+          durationSeconds: log.durationSeconds,
+          recordingUrl: log.recordingUrl,
+        });
+      });
+    }
+
+    // Deduplicate close duplicates (e.g. stage-record and call-record created for the same event within 2 mins)
+    const deduped: typeof items = [];
+    const seen = new Set<string>();
+
+    // Sort descending by timestamp first
+    items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    items.forEach((item) => {
+      const timeWindow = Math.floor(new Date(item.timestamp).getTime() / (1000 * 90)); // 90s bucket
+      const key = `${item.type}-${item.badge}-${timeWindow}`;
+      if (seen.has(key)) {
+        const prev = deduped.find(
+          (d) => `${d.type}-${d.badge}-${Math.floor(new Date(d.timestamp).getTime() / (1000 * 90))}` === key
+        );
+        if (prev) {
+          if (!prev.meetingLink && item.meetingLink) prev.meetingLink = item.meetingLink;
+          if (!prev.scheduledTime && item.scheduledTime) prev.scheduledTime = item.scheduledTime;
+          if (!prev.recordingUrl && item.recordingUrl) prev.recordingUrl = item.recordingUrl;
+          if ((!prev.durationSeconds || prev.durationSeconds === 0) && item.durationSeconds) prev.durationSeconds = item.durationSeconds;
+          if (!prev.notes && item.notes) prev.notes = item.notes;
+        }
+        return;
+      }
+      seen.add(key);
+      deduped.push(item);
+    });
+
+    return deduped;
+  })();
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex justify-end backdrop-blur-xs transition-opacity animate-in fade-in duration-200">
@@ -699,7 +918,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
             )}
           >
             <Clock className="w-4 h-4" />
-            {canAssign ? "Call Logs & Timeline" : "My Logged History"} ({lead.callLogs.length})
+            {canAssign ? "Stages & Activity History" : "My Lead History"} ({timelineItems.length})
           </button>
           <button
             onClick={() => setActiveTab("tasks")}
@@ -918,13 +1137,13 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                 </form>
               )}
 
-              {lead.callLogs.length === 0 ? (
+              {timelineItems.length === 0 ? (
                 <div className="space-y-4">
                   <div className="text-center py-10 text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200">
-                    <Phone className="w-8 h-8 mx-auto mb-2 opacity-40 text-gray-400" />
+                    <Clock className="w-8 h-8 mx-auto mb-2 opacity-40 text-gray-400" />
                     <p className="text-sm font-medium">
                       {canAssign
-                        ? "No calls or activities logged yet"
+                        ? "No stages, calls, or activities logged yet"
                         : "You have not logged any calls or activities for this lead yet"}
                     </p>
                     <p className="text-xs mt-0.5">Use the dialer or &quot;Log Activity Note&quot; above</p>
@@ -956,39 +1175,75 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                 </div>
               ) : (
                 <div className="relative border-l-2 border-gray-200 ml-3 space-y-5 py-2">
-                  {lead.callLogs.map((log: any) => (
-                    <div key={log.id} className="relative pl-6">
+                  {timelineItems.map((item) => (
+                    <div key={item.id} className="relative pl-6">
                       {/* Timeline dot */}
-                      <div className="absolute -left-1.5 top-1 w-3 h-3 rounded-full bg-emerald-600 border-2 border-white ring-2 ring-emerald-100" />
-                      <div className="bg-gray-50 border border-gray-200 rounded-xl p-3.5 space-y-1.5">
+                      <div className={cn("absolute -left-1.5 top-1.5 w-3 h-3 rounded-full border-2 border-white ring-2", item.iconColor)} />
+                      <div className="bg-gray-50 border border-gray-200 rounded-xl p-3.5 space-y-2">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-white border border-gray-200 text-gray-800">
-                            {log.disposition}
-                          </span>
-                          <span className="text-xs text-gray-400">
-                            {formatDateTime(log.callTimestamp)}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={cn("text-xs font-bold px-2.5 py-0.5 rounded-full border shadow-2xs flex items-center gap-1", item.badgeColor)}>
+                              {item.type === "demo_scheduled" && <Calendar className="w-3 h-3 text-purple-600" />}
+                              {item.type === "demo_done" && <CheckCircle2 className="w-3 h-3 text-emerald-600" />}
+                              {item.type === "callback" && <Clock className="w-3 h-3 text-blue-600" />}
+                              {item.type === "deal_stage" && <DollarSign className="w-3 h-3 text-indigo-600" />}
+                              {item.type === "status_change" && <Tag className="w-3 h-3 text-orange-600" />}
+                              {item.type === "call" && <Phone className="w-3 h-3 text-emerald-600" />}
+                              <span>{item.badge}</span>
+                            </span>
+                            {item.scheduledTime && (
+                              <span className="text-[11px] font-medium text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200 flex items-center gap-1">
+                                <Clock className="w-2.5 h-2.5 text-purple-500" />
+                                Meeting: {formatDateTime(item.scheduledTime)}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-xs text-gray-400 shrink-0">
+                            {formatDateTime(item.timestamp)}
                           </span>
                         </div>
-                        {log.remark ? (
+
+                        {/* Meeting Link for Demo Scheduled */}
+                        {item.meetingLink && (
+                          <div className="flex items-center gap-1.5 text-xs bg-purple-50/80 border border-purple-200 px-3 py-1.5 rounded-lg text-purple-800">
+                            <Video className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                            <span className="font-semibold shrink-0">Meeting Link:</span>
+                            <a
+                              href={item.meetingLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-purple-700 hover:text-purple-900 underline truncate inline-flex items-center gap-1"
+                            >
+                              {item.meetingLink}
+                              <ExternalLink className="w-3 h-3 shrink-0" />
+                            </a>
+                          </div>
+                        )}
+
+                        {item.notes ? (
                           <p className="text-xs text-gray-700 bg-white p-2.5 rounded-lg border border-gray-100">
-                            {log.remark}
+                            {item.notes}
                           </p>
                         ) : (
-                          <p className="text-xs text-gray-400 italic">No remark entered</p>
+                          item.type === "call" ? (
+                            <p className="text-xs text-gray-400 italic">No remark entered</p>
+                          ) : null
                         )}
-                        {log.recordingUrl && (
+
+                        {item.recordingUrl && (
                           <div className="pt-1">
                             <AudioRecordingPlayer
-                              recordingUrl={log.recordingUrl}
-                              durationSeconds={log.durationSeconds}
+                              recordingUrl={item.recordingUrl}
+                              durationSeconds={item.durationSeconds || 0}
                             />
                           </div>
                         )}
+
                         <div className="flex items-center justify-between text-[11px] text-gray-500 pt-1">
-                          <span>Logged by: {log.rep?.fullName || "System"}</span>
-                          {log.durationSeconds > 0 && (
-                            <span>Talk time: {log.durationSeconds}s</span>
-                          )}
+                          <span>By: {item.repName || "System"}</span>
+                          {item.durationSeconds && item.durationSeconds > 0 ? (
+                            <span>Talk time: {item.durationSeconds}s</span>
+                          ) : null}
                         </div>
                       </div>
                     </div>
