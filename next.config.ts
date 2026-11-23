@@ -25,6 +25,15 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async redirects() {
+    return [
+      {
+        source: "/downloads/app-release.apk",
+        destination: "/downloads/textora-dialer.apk",
+        permanent: false,
+      },
+    ];
+  },
   experimental: {
     agentUpgrade: "security",
   },
