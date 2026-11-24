@@ -31,6 +31,7 @@ import {
   buildWALink,
   WA_PITCH,
   formatDateTime,
+  toUtcIsoString,
   formatCurrency,
   cn,
   SERVICE_INTERESTS,
@@ -41,6 +42,7 @@ import {
   parseServices,
 } from "@/lib/utils";
 import { MultiServiceSelect } from "@/components/common/MultiServiceSelect";
+import { MultiLanguageSelect } from "@/components/common/MultiLanguageSelect";
 import { AudioRecordingPlayer } from "@/components/calls/AudioRecordingPlayer";
 import { toast } from "sonner";
 import { useCanAssignLeads, useIsAdmin, useSession } from "@/components/layout/SessionProvider";
@@ -142,7 +144,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
   const [editVertical, setEditVertical] = useState("");
   const [editAddress, setEditAddress] = useState("");
   const [editServices, setEditServices] = useState<string[]>([]);
-  const [editLanguage, setEditLanguage] = useState("");
+  const [editLanguages, setEditLanguages] = useState<string[]>([]);
   const [editAssignedRepId, setEditAssignedRepId] = useState("");
   const [savingInfo, setSavingInfo] = useState(false);
   const [isDialing, setIsDialing] = useState(false);
@@ -182,7 +184,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
       setEditVertical(lead.businessVertical || "");
       setEditAddress((lead.customMetadata as any)?.address || "");
       setEditServices(lead.serviceType ? parseServices(lead.serviceType) : []);
-      setEditLanguage(lead.preferredLanguage || "");
+      setEditLanguages(lead.preferredLanguage ? lead.preferredLanguage.split(",").map((s: string) => s.trim()).filter(Boolean) : []);
       setEditAssignedRepId(lead.assignedRep?.id || "");
     }
   }, [lead]);
@@ -231,7 +233,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
           businessVertical: editVertical.trim() || null,
           address: editAddress.trim() || null,
           serviceType: editServices.join(", ") || null,
-          preferredLanguage: editLanguage || null,
+          preferredLanguage: editLanguages.join(", ") || null,
           ...(canAssign ? { assignedRepId: editAssignedRepId || null } : {}),
         }),
       });
@@ -288,8 +290,8 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
           durationSeconds: 0,
           forceNewLog: true,
           isManualNote: true,
-          callbackDatetime: callbackDatetime || undefined,
-          demoDatetime: demoDatetime || undefined,
+          callbackDatetime: callbackDatetime ? toUtcIsoString(callbackDatetime) : undefined,
+          demoDatetime: demoDatetime ? toUtcIsoString(demoDatetime) : undefined,
           decisionMakerName: decisionMakerName || undefined,
           meetingLink: meetingLink || undefined,
         }),
@@ -839,22 +841,13 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                 />
               </div>
 
-              <div>
-                <label className="text-xs font-medium text-slate-700 block mb-0.5">
-                  Customer Preferred Language
-                </label>
-                <select
-                  value={editLanguage}
-                  onChange={(e) => setEditLanguage(e.target.value)}
-                  className="w-full text-xs px-3 py-2 bg-white border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900 cursor-pointer"
-                >
-                  <option value="">Unspecified (Any Representative)</option>
-                  {LEAD_LANGUAGES.map((lang) => (
-                    <option key={lang.code} value={lang.code}>
-                      {lang.flag} {lang.label}
-                    </option>
-                  ))}
-                </select>
+              <div className="sm:col-span-2">
+                <MultiLanguageSelect
+                  selectedLanguages={editLanguages}
+                  onChange={setEditLanguages}
+                  label="Customer Preferred Languages (Multiple Selection)"
+                  placeholder="+ Add preferred language..."
+                />
               </div>
 
               {canAssign && (
@@ -863,9 +856,9 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                     <label className="text-xs font-medium text-slate-700 block">
                       Assigned Representative
                     </label>
-                    {editLanguage && (
+                    {editLanguages.length > 0 && (
                       <span className="text-[10px] text-emerald-700 font-semibold">
-                        Matching reps with {getLanguageMeta(editLanguage)?.label || editLanguage} marked
+                        Matching reps marked ⭐
                       </span>
                     )}
                   </div>
@@ -877,7 +870,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                     <option value="">Unassigned Pool</option>
                     {teamReps.map((rep: { id: string; fullName: string; role?: string; language?: string }) => {
                       const repLanguagesLabel = formatLanguageLabels(rep.language);
-                      const isMatch = hasLanguageMatch(rep.language, editLanguage);
+                      const isMatch = hasLanguageMatch(rep.language, editLanguages.join(", "));
                       const roleTag = rep.role === "sales_manager" ? "Manager" : rep.role === "super_admin" ? "Admin" : "Rep";
                       const isSelf = rep.id === userId;
                       return (

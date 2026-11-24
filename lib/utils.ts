@@ -35,6 +35,67 @@ export function formatDateTime(date?: string | Date | null): string {
   }).format(d);
 }
 
+/**
+ * Converts any local datetime-local string (e.g. "2026-11-24T18:25")
+ * or Date object to an unambiguous UTC ISO-8601 string (ending in 'Z').
+ * Prevents timezone double-offset bugs between client browsers and server environments.
+ */
+export function toUtcIsoString(input?: string | Date | null): string | null {
+  if (!input) return null;
+  if (input instanceof Date) {
+    return isNaN(input.getTime()) ? null : input.toISOString();
+  }
+  const str = typeof input === "string" ? input.trim() : String(input).trim();
+  if (!str) return null;
+
+  // If already has explicit UTC or offset (Z or +05:30), parse directly
+  if (str.endsWith("Z") || /[+-]\d{2}(:?\d{2})?$/.test(str)) {
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+
+  // Bare datetime-local format from HTML input: "YYYY-MM-DDTHH:mm"
+  // In client browser, new Date(str) interprets in local user timezone
+  const localParsed = new Date(str);
+  if (!isNaN(localParsed.getTime())) {
+    return localParsed.toISOString();
+  }
+
+  return null;
+}
+
+/**
+ * Universal server/client date parser for scheduled tasks and meetings.
+ * If given a bare local string without timezone offset (e.g. "2026-11-24T18:25"),
+ * safely treats it as Indian Standard Time (IST, UTC+05:30) rather than server UTC,
+ * preventing local meeting times from shifting forward by 5h 30m.
+ */
+export function parseScheduledDateTime(input?: string | Date | null): Date | null {
+  if (!input) return null;
+  if (input instanceof Date) {
+    return isNaN(input.getTime()) ? null : input;
+  }
+  const str = typeof input === "string" ? input.trim() : String(input).trim();
+  if (!str) return null;
+
+  // If already has explicit UTC or offset (Z or +05:30)
+  if (str.endsWith("Z") || /[+-]\d{2}(:?\d{2})?$/.test(str)) {
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  // If bare local string like "2026-11-24T18:25" or "2026-11-24 18:25"
+  if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?/.test(str)) {
+    const normalized = str.replace(" ", "T");
+    const withOffset = normalized.length === 16 ? `${normalized}:00+05:30` : `${normalized}+05:30`;
+    const d = new Date(withOffset);
+    if (!isNaN(d.getTime())) return d;
+  }
+
+  const fallback = new Date(str);
+  return isNaN(fallback.getTime()) ? null : fallback;
+}
+
 export function normalizePhone(raw: string): string {
   // Strip all non-digits
   const digits = raw.replace(/\D/g, "");
@@ -167,13 +228,18 @@ export const LEAD_LANGUAGES = [
   { code: "ur", label: "Urdu (اردو)", flag: "🇮🇳" },
 ];
 
-export function getLanguageMeta(code?: string | null) {
-  if (!code) return null;
+export function getLanguageMeta(codeOrName?: string | null) {
+  if (!codeOrName) return null;
+  const clean = codeOrName.trim().toLowerCase();
   const match = LEAD_LANGUAGES.find(
-    (l) => l.code.toLowerCase() === code.toLowerCase()
+    (l) =>
+      l.code.toLowerCase() === clean ||
+      l.label.toLowerCase().includes(clean) ||
+      clean.includes(l.code.toLowerCase()) ||
+      clean.includes(l.label.toLowerCase().split(" ")[0])
   );
   if (match) return match;
-  return { code, label: code.toUpperCase(), flag: "🌐" };
+  return { code: codeOrName, label: codeOrName.toUpperCase(), flag: "🌐" };
 }
 
 export function parseLanguages(langStr?: string | null): string[] {

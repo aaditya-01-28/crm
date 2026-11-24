@@ -33,6 +33,7 @@ import {
   parseServices,
 } from "@/lib/utils";
 import { MultiServiceSelect } from "@/components/common/MultiServiceSelect";
+import { MultiLanguageSelect } from "@/components/common/MultiLanguageSelect";
 import { DispositionBar } from "./DispositionBar";
 import { WhatsAppTemplateModal } from "./WhatsAppTemplateModal";
 import { toast } from "sonner";
@@ -88,7 +89,9 @@ export function DialerCard({ lead: initialLead, onDisposed, onCallLogged }: Dial
   const [editServices, setEditServices] = useState<string[]>(
     lead.serviceType ? parseServices(lead.serviceType) : []
   );
-  const [editLanguage, setEditLanguage] = useState(lead.preferredLanguage || "");
+  const [editLanguages, setEditLanguages] = useState<string[]>(
+    lead.preferredLanguage ? lead.preferredLanguage.split(",").map((s) => s.trim()).filter(Boolean) : []
+  );
   const [isSavingLead, setIsSavingLead] = useState(false);
 
   // Reset when queue moves to next lead
@@ -98,7 +101,7 @@ export function DialerCard({ lead: initialLead, onDisposed, onCallLogged }: Dial
     setEditCompanyName(initialLead.companyName || "");
     setEditVertical(initialLead.businessVertical || "");
     setEditServices(initialLead.serviceType ? parseServices(initialLead.serviceType) : []);
-    setEditLanguage(initialLead.preferredLanguage || "");
+    setEditLanguages(initialLead.preferredLanguage ? initialLead.preferredLanguage.split(",").map((s) => s.trim()).filter(Boolean) : []);
     setIsEditingLead(false);
     setCallStarted(false);
     setCallStartTime(null);
@@ -215,7 +218,7 @@ export function DialerCard({ lead: initialLead, onDisposed, onCallLogged }: Dial
           companyName: editCompanyName.trim() || null,
           businessVertical: editVertical.trim() || null,
           serviceType: editServices.join(", ") || null,
-          preferredLanguage: editLanguage || null,
+          preferredLanguage: editLanguages.join(", ") || null,
         }),
       });
       const data = await res.json();
@@ -229,7 +232,7 @@ export function DialerCard({ lead: initialLead, onDisposed, onCallLogged }: Dial
         companyName: editCompanyName.trim() || null,
         businessVertical: editVertical.trim() || null,
         serviceType: editServices.join(", ") || null,
-        preferredLanguage: editLanguage || null,
+        preferredLanguage: editLanguages.join(", ") || null,
       }));
       setIsEditingLead(false);
       toast.success("Lead details updated ✅");
@@ -431,22 +434,13 @@ export function DialerCard({ lead: initialLead, onDisposed, onCallLogged }: Dial
               />
             </div>
 
-            <div>
-              <label className="text-xs font-medium text-slate-700 block mb-0.5">
-                Customer Preferred Language
-              </label>
-              <select
-                value={editLanguage}
-                onChange={(e) => setEditLanguage(e.target.value)}
-                className="w-full text-xs px-3 py-2 bg-white border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
-              >
-                <option value="">Unspecified (Any Rep)</option>
-                {LEAD_LANGUAGES.map((lang) => (
-                  <option key={lang.code} value={lang.code}>
-                    {lang.flag} {lang.label}
-                  </option>
-                ))}
-              </select>
+            <div className="sm:col-span-2">
+              <MultiLanguageSelect
+                selectedLanguages={editLanguages}
+                onChange={setEditLanguages}
+                label="Customer Preferred Languages (Multiple Selection)"
+                placeholder="+ Add preferred language..."
+              />
             </div>
 
             <div className="sm:col-span-2">

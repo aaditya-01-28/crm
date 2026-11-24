@@ -283,17 +283,22 @@ export async function PATCH(
 
       const updateRes = await client.query(
         `UPDATE leads
-         SET contact_name = COALESCE($1, contact_name),
-             company_name = COALESCE($2, company_name),
-             phone_number = COALESCE($3, phone_number),
-             website_url = COALESCE($4, website_url),
-             business_vertical = COALESCE($5, business_vertical),
-             service_type = COALESCE($6, service_type),
-             status = CASE WHEN $13 THEN 'new' ELSE COALESCE($7, status) END,
+         SET contact_name = $1,
+             company_name = $2,
+             phone_number = $3,
+             website_url = $4,
+             business_vertical = $5,
+             service_type = $6,
+             status = CASE WHEN $13 THEN 'new' ELSE $7 END,
              rnr_count = CASE WHEN $13 THEN 0 ELSE rnr_count END,
              custom_metadata = $8,
              assigned_rep_id = $9,
-             assigned_at = CASE WHEN $9 IS NOT NULL AND $9 != '' THEN NOW() WHEN $9 IS NULL THEN NULL ELSE assigned_at END,
+             assigned_at = CASE 
+               WHEN $13 THEN NOW() 
+               WHEN $9 IS NOT NULL AND assigned_at IS NULL THEN NOW() 
+               WHEN $9 IS NULL THEN NULL 
+               ELSE assigned_at 
+             END,
              first_assigned_rep_id = $10,
              first_assigned_at = $11,
              updated_at = NOW()
@@ -307,13 +312,13 @@ export async function PATCH(
                    source, status, rnr_count as "rnrCount", custom_metadata as "customMetadata",
                    created_at as "createdAt", updated_at as "updatedAt"`,
         [
-          contactName !== undefined ? contactName : null,
-          companyName !== undefined ? companyName : null,
-          phoneNumber !== undefined ? phoneNumber : null,
-          websiteUrl !== undefined ? websiteUrl : null,
-          businessVertical !== undefined ? businessVertical : null,
-          serviceType !== undefined ? serviceType : null,
-          status !== undefined ? status : null,
+          contactName !== undefined ? contactName : existing.contact_name,
+          companyName !== undefined ? companyName : existing.company_name,
+          phoneNumber !== undefined && phoneNumber.trim() !== "" ? phoneNumber.trim() : existing.phone_number,
+          websiteUrl !== undefined ? websiteUrl : existing.website_url,
+          businessVertical !== undefined ? businessVertical : existing.business_vertical,
+          serviceType !== undefined ? serviceType : existing.service_type,
+          status !== undefined ? status : existing.status,
           JSON.stringify(newMetadata),
           finalAssignedRepId,
           finalFirstAssignedRepId,
@@ -390,7 +395,8 @@ export async function PATCH(
           ...updated,
           firstAssignedRepId: isLevel1 ? null : updated.firstAssignedRepId,
           firstAssignedAt: isLevel1 ? null : updated.firstAssignedAt,
-          preferredLanguage: preferredLanguage || null,
+          preferredLanguage: (newMetadata.preferredLanguage as string) || null,
+          customMetadata: newMetadata,
         },
       });
     });

@@ -19,7 +19,7 @@ import {
   Phone,
   MessageCircle,
 } from "lucide-react";
-import { formatDateTime, cn } from "@/lib/utils";
+import { formatDateTime, toUtcIsoString, cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
 import { LeadDetailModal } from "@/components/leads/LeadDetailModal";
@@ -482,6 +482,16 @@ function TaskOutcomeModal({
 
   if (!task) return null;
 
+  function setPresetMinutes(minutesFromNow: number) {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() + minutesFromNow);
+    d.setSeconds(0, 0);
+    const isoLocal = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+      .toISOString()
+      .slice(0, 16);
+    setScheduledDatetime(isoLocal);
+  }
+
   function setPresetTime(hoursFromNow: number) {
     const d = new Date();
     d.setHours(d.getHours() + hoursFromNow);
@@ -512,13 +522,16 @@ function TaskOutcomeModal({
         finalAction = "demo_done";
       }
 
+      // Convert local browser datetime to exact UTC ISO string to prevent timezone offset shifts
+      const utcTime = scheduledDatetime ? toUtcIsoString(scheduledDatetime) : null;
+
       const res = await fetch(`/api/tasks/${task.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: finalAction,
           status: outcome === "completed" || outcome === "not_interested" ? "completed" : "pending",
-          scheduledTime: scheduledDatetime || null,
+          scheduledTime: utcTime,
           remark: remark.trim() || undefined,
         }),
       });
@@ -686,6 +699,20 @@ function TaskOutcomeModal({
                 <span className="text-[10px] text-gray-400 font-medium">Quick Retry:</span>
                 <button
                   type="button"
+                  onClick={() => setPresetMinutes(25)}
+                  className="px-2 py-0.5 rounded bg-white hover:bg-amber-100 text-[10px] font-semibold text-gray-700 hover:text-amber-800 border border-gray-200 transition cursor-pointer"
+                >
+                  +25 Min
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPresetTime(1)}
+                  className="px-2 py-0.5 rounded bg-white hover:bg-amber-100 text-[10px] font-semibold text-gray-700 hover:text-amber-800 border border-gray-200 transition cursor-pointer"
+                >
+                  +1 Hour
+                </button>
+                <button
+                  type="button"
                   onClick={() => setPresetTime(2)}
                   className="px-2 py-0.5 rounded bg-white hover:bg-amber-100 text-[10px] font-semibold text-gray-700 hover:text-amber-800 border border-gray-200 transition cursor-pointer"
                 >
@@ -731,6 +758,20 @@ function TaskOutcomeModal({
                 <span className="text-[10px] text-gray-400 font-medium">Quick Reschedule:</span>
                 <button
                   type="button"
+                  onClick={() => setPresetMinutes(25)}
+                  className="px-2 py-0.5 rounded bg-white hover:bg-blue-100 text-[10px] font-semibold text-gray-700 hover:text-blue-800 border border-gray-200 transition cursor-pointer"
+                >
+                  +25 Min
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPresetTime(1)}
+                  className="px-2 py-0.5 rounded bg-white hover:bg-blue-100 text-[10px] font-semibold text-gray-700 hover:text-blue-800 border border-gray-200 transition cursor-pointer"
+                >
+                  +1 Hour
+                </button>
+                <button
+                  type="button"
                   onClick={() => setPresetTime(2)}
                   className="px-2 py-0.5 rounded bg-white hover:bg-blue-100 text-[10px] font-semibold text-gray-700 hover:text-blue-800 border border-gray-200 transition cursor-pointer"
                 >
@@ -773,6 +814,20 @@ function TaskOutcomeModal({
               />
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-[10px] text-gray-400 font-medium">Quick Preset:</span>
+                <button
+                  type="button"
+                  onClick={() => setPresetMinutes(25)}
+                  className="px-2 py-0.5 rounded bg-white hover:bg-emerald-100 text-[10px] font-semibold text-gray-700 hover:text-emerald-800 border border-gray-200 transition cursor-pointer"
+                >
+                  +25 Min
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPresetTime(1)}
+                  className="px-2 py-0.5 rounded bg-white hover:bg-emerald-100 text-[10px] font-semibold text-gray-700 hover:text-emerald-800 border border-gray-200 transition cursor-pointer"
+                >
+                  +1 Hour
+                </button>
                 <button
                   type="button"
                   onClick={() => setPresetTime(2)}
