@@ -289,20 +289,20 @@ export async function PATCH(
              website_url = $4,
              business_vertical = $5,
              service_type = $6,
-             status = CASE WHEN $13 THEN 'new' ELSE $7 END,
-             rnr_count = CASE WHEN $13 THEN 0 ELSE rnr_count END,
-             custom_metadata = $8,
-             assigned_rep_id = $9,
+             status = CASE WHEN $13::boolean THEN 'new' ELSE $7 END,
+             rnr_count = CASE WHEN $13::boolean THEN 0 ELSE rnr_count END,
+             custom_metadata = $8::jsonb,
+             assigned_rep_id = $9::uuid,
              assigned_at = CASE 
-               WHEN $13 THEN NOW() 
-               WHEN $9 IS NOT NULL AND assigned_at IS NULL THEN NOW() 
-               WHEN $9 IS NULL THEN NULL 
+               WHEN $13::boolean THEN NOW() 
+               WHEN $9::uuid IS NOT NULL AND assigned_at IS NULL THEN NOW() 
+               WHEN $9::uuid IS NULL THEN NULL 
                ELSE assigned_at 
              END,
-             first_assigned_rep_id = $10,
-             first_assigned_at = $11,
+             first_assigned_rep_id = $10::uuid,
+             first_assigned_at = $11::timestamptz,
              updated_at = NOW()
-         WHERE id = $12
+         WHERE id = $12::uuid
          RETURNING id, tenant_id as "tenantId", assigned_rep_id as "assignedRepId",
                    COALESCE(assigned_at, first_assigned_at, (CASE WHEN assigned_rep_id IS NOT NULL THEN created_at ELSE NULL END)) as "assignedAt",
                    first_assigned_rep_id as "firstAssignedRepId", first_assigned_at as "firstAssignedAt",
@@ -312,19 +312,19 @@ export async function PATCH(
                    source, status, rnr_count as "rnrCount", custom_metadata as "customMetadata",
                    created_at as "createdAt", updated_at as "updatedAt"`,
         [
-          contactName !== undefined ? contactName : existing.contact_name,
-          companyName !== undefined ? companyName : existing.company_name,
+          contactName !== undefined ? (contactName || null) : existing.contact_name,
+          companyName !== undefined ? (companyName || null) : existing.company_name,
           phoneNumber !== undefined && phoneNumber.trim() !== "" ? phoneNumber.trim() : existing.phone_number,
-          websiteUrl !== undefined ? websiteUrl : existing.website_url,
-          businessVertical !== undefined ? businessVertical : existing.business_vertical,
-          serviceType !== undefined ? serviceType : existing.service_type,
-          status !== undefined ? status : existing.status,
+          websiteUrl !== undefined ? (websiteUrl || null) : existing.website_url,
+          businessVertical !== undefined ? (businessVertical || null) : existing.business_vertical,
+          serviceType !== undefined ? (serviceType || null) : existing.service_type,
+          status !== undefined && status !== null && status !== "" ? status : (existing.status || "new"),
           JSON.stringify(newMetadata),
-          finalAssignedRepId,
-          finalFirstAssignedRepId,
-          finalFirstAssignedAt,
+          finalAssignedRepId || null,
+          finalFirstAssignedRepId || null,
+          finalFirstAssignedAt || null,
           id,
-          isReassigned,
+          Boolean(isReassigned),
         ]
       );
 
@@ -356,30 +356,34 @@ export async function PATCH(
           [id, tenantId]
         );
 
-        if (dealCheck.rows.length > 0) {
-          await client.query(
-            "UPDATE deals SET stage = $1, rep_id = COALESCE(rep_id, $2), updated_at = NOW() WHERE id = $3",
-            [targetStage, updated.assignedRepId || repId, dealCheck.rows[0].id]
-          );
-        } else {
-          await client.query(
-            `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, 10000, 0, $5, $6, NOW(), NOW())`,
-            [
-              tenantId,
-              id,
-              updated.assignedRepId || repId,
-              updated.serviceType || "WhatsApp API",
-              targetStage,
-              targetStage === "closed_won"
-                ? "Lead converted to Closed Won"
-                : targetStage === "closed_lost"
-                ? "Lead closed lost"
-                : targetStage === "demo_done"
-                ? "Product demo completed"
-                : "Product demo scheduled",
-            ]
-          );
+        const dealRepId = updated.assignedRepId || repId || existing.assigned_rep_id || null;
+
+        if (dealRepId) {
+          if (dealCheck.rows.length > 0) {
+            await client.query(
+              "UPDATE deals SET stage = $1, rep_id = COALESCE(rep_id, $2), updated_at = NOW() WHERE id = $3",
+              [targetStage, dealRepId, dealCheck.rows[0].id]
+            );
+          } else {
+            await client.query(
+              `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes, created_at, updated_at)
+               VALUES ($1, $2, $3, $4, 10000, 0, $5, $6, NOW(), NOW())`,
+              [
+                tenantId,
+                id,
+                dealRepId,
+                updated.serviceType || "WhatsApp API",
+                targetStage,
+                targetStage === "closed_won"
+                  ? "Lead converted to Closed Won"
+                  : targetStage === "closed_lost"
+                  ? "Lead closed lost"
+                  : targetStage === "demo_done"
+                  ? "Product demo completed"
+                  : "Product demo scheduled",
+              ]
+            );
+          }
         }
 
         if (status === "demo_done" || status === "won" || status === "closed_won") {
@@ -400,9 +404,9 @@ export async function PATCH(
         },
       });
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[LEAD PATCH]", error);
-    return NextResponse.json({ error: "Failed to update lead" }, { status: 500 });
+    return NextResponse.json({ error: error?.message || "Failed to update lead" }, { status: 500 });
   }
 }
 

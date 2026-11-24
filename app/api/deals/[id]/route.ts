@@ -158,7 +158,7 @@ export async function PATCH(
              SET contact_name = COALESCE($1, contact_name),
                  company_name = COALESCE($2, company_name),
                  service_type = COALESCE($3, service_type),
-                 custom_metadata = $4,
+                 custom_metadata = $4::jsonb,
                  updated_at = NOW()
              WHERE id = $5`,
             [

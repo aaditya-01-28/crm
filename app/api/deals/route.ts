@@ -219,7 +219,7 @@ export async function POST(request: NextRequest) {
              SET contact_name = COALESCE($1, contact_name),
                  company_name = COALESCE($2, company_name),
                  service_type = COALESCE($3, service_type),
-                 custom_metadata = $4,
+                 custom_metadata = $4::jsonb,
                  status = 'deal_created',
                  updated_at = NOW()
              WHERE id = $5`,
@@ -243,7 +243,7 @@ export async function POST(request: NextRequest) {
                phone_number, contact_name, company_name, service_type,
                source, status, custom_metadata, created_at, updated_at
              )
-             VALUES ($1, $2, $2, NOW(), $3, $4, $5, $6, 'Pipeline Manual Entry', 'deal_created', $7, NOW(), NOW())
+             VALUES ($1, $2, $2, NOW(), $3, $4, $5, $6, 'Pipeline Manual Entry', 'deal_created', $7::jsonb, NOW(), NOW())
              RETURNING id`,
             [
               tenantId,
@@ -276,7 +276,7 @@ export async function POST(request: NextRequest) {
              SET contact_name = COALESCE($1, contact_name),
                  company_name = COALESCE($2, company_name),
                  service_type = COALESCE($3, service_type),
-                 custom_metadata = $4,
+                 custom_metadata = $4::jsonb,
                  status = 'deal_created',
                  updated_at = NOW()
              WHERE id = $5`,

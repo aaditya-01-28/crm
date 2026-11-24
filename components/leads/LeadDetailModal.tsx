@@ -237,14 +237,17 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
           ...(canAssign ? { assignedRepId: editAssignedRepId || null } : {}),
         }),
       });
-      if (!res.ok) throw new Error("Failed to update lead");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to update lead");
+      }
       toast.success("Lead details updated ✅");
       setIsEditingInfo(false);
       queryClient.invalidateQueries({ queryKey: ["lead-detail", leadId] });
       queryClient.invalidateQueries({ queryKey: ["leads-directory"] });
       onLeadUpdated?.();
-    } catch {
-      toast.error("Failed to update lead details");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to update lead details");
     } finally {
       setSavingInfo(false);
     }
