@@ -93,6 +93,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const tenantId = session.tenantId;
+  const { searchParams } = new URL(request.url);
 
   const callLogId = searchParams.get("callLogId");
   const leadId = searchParams.get("leadId");

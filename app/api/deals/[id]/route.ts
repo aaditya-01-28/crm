@@ -13,13 +13,12 @@ export async function PATCH(
 ) {
   const { id } = await params;
   const session = await getSession(request);
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
-  const role = request.headers.get("x-user-role") || session?.role || "";
-
-  if (!tenantId) {
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const repId = session.sub;
+  const role = session.role;
 
   try {
     const body = await request.json();
@@ -402,8 +401,11 @@ export async function DELETE(
 ) {
   const { id } = await params;
   const session = await getSession(request);
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const role = request.headers.get("x-user-role") || session?.role || "";
+  if (!session?.tenantId || !session?.sub) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const tenantId = session.tenantId;
+  const role = session.role;
 
   if (!isManagerOrAdmin(role)) {
     return NextResponse.json(

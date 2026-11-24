@@ -33,12 +33,11 @@ async function ensurePushTable(client: any) {
  */
 export async function POST(request: NextRequest) {
   const session = await getSession(request);
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
-
-  if (!tenantId || !repId) {
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const repId = session.sub;
 
   try {
     const body = await request.json();
@@ -105,13 +104,12 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
-  const { searchParams } = new URL(request.url);
-
-  if (!tenantId || !repId) {
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const repId = session.sub;
+  const { searchParams } = new URL(request.url);
 
   const jobId = searchParams.get("jobId");
   const isPolling = searchParams.get("poll") === "true";
@@ -144,12 +142,12 @@ export async function GET(request: NextRequest) {
                   phone_number as "phoneNumber", contact_name as "contactName",
                   company_name as "companyName", status, created_at as "createdAt"
            FROM push_to_dial_jobs
-           WHERE rep_id = $1 
+           WHERE rep_id = $1 AND tenant_id = $2
              AND status = 'pending' 
              AND created_at >= NOW() - INTERVAL '3 minutes'
            ORDER BY created_at DESC
            LIMIT 1`,
-          [repId]
+          [repId, tenantId]
         );
 
         return NextResponse.json({
@@ -164,10 +162,10 @@ export async function GET(request: NextRequest) {
                 phone_number as "phoneNumber", contact_name as "contactName",
                 company_name as "companyName", status, created_at as "createdAt"
          FROM push_to_dial_jobs
-         WHERE rep_id = $1
+         WHERE rep_id = $1 AND tenant_id = $2
          ORDER BY created_at DESC
          LIMIT 10`,
-        [repId]
+        [repId, tenantId]
       );
 
       return NextResponse.json({ jobs: res.rows });
@@ -187,12 +185,11 @@ export async function GET(request: NextRequest) {
  */
 export async function PATCH(request: NextRequest) {
   const session = await getSession(request);
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
-
-  if (!tenantId || !repId) {
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const repId = session.sub;
 
   try {
     const body = await request.json();

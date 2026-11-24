@@ -8,13 +8,12 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await getSession();
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const currentUserId = session?.sub || request.headers.get("x-user-id") || "";
-
-  if (!tenantId) {
+  const session = await getSession(request);
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const currentUserId = session.sub;
 
   try {
     const body = await request.json();

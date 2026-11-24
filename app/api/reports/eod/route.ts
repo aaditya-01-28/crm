@@ -4,15 +4,14 @@ import { getSession } from "@/lib/auth";
 import { formatDuration } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
-  const session = await getSession();
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
-  const role = request.headers.get("x-user-role") || session?.role || "";
-  const { searchParams } = new URL(request.url);
-
-  if (!tenantId) {
+  const session = await getSession(request);
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const repId = session.sub;
+  const role = session.role;
+  const { searchParams } = new URL(request.url);
 
   const todayStr = new Date().toISOString().split("T")[0];
   const dateFromStr = searchParams.get("dateFrom") || searchParams.get("startDate") || searchParams.get("date") || todayStr;

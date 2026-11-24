@@ -3,14 +3,13 @@ import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
-  const session = await getSession();
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const role = request.headers.get("x-user-role") || session?.role || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
-
-  if (!tenantId) {
+  const session = await getSession(request);
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const role = session.role;
+  const repId = session.sub;
 
   const { searchParams } = new URL(request.url);
   const opsStatus = searchParams.get("status") || "pending_verification";
@@ -106,13 +105,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getSession();
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
-
-  if (!tenantId || !repId) {
+  const session = await getSession(request);
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const repId = session.sub;
 
   try {
     const body = await request.json();

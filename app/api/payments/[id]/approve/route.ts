@@ -7,10 +7,13 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await getSession();
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const approverId = request.headers.get("x-user-id") || session?.sub || "";
-  const role = request.headers.get("x-user-role") || session?.role || "";
+  const session = await getSession(request);
+  if (!session?.tenantId || !session?.sub) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const tenantId = session.tenantId;
+  const approverId = session.sub;
+  const role = session.role;
 
   if (!["super_admin", "accounts_ops", "sales_manager"].includes(role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -35,9 +38,9 @@ export async function PATCH(
       const updateRes = await client.query(
         `UPDATE payments
          SET ops_approval_status = $1, approved_by = $2, credits_provisioned = $3
-         WHERE id = $4
+         WHERE id = $4 AND tenant_id = $5
          RETURNING *`,
-        [status, approverId, status === "approved", id]
+        [status, approverId, status === "approved", id, tenantId]
       );
 
       if (status === "approved") {

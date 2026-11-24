@@ -4,14 +4,13 @@ import { getSession } from "@/lib/auth";
 import { parseScheduledDateTime } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
-  const session = await getSession();
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
-  const role = request.headers.get("x-user-role") || session?.role || "";
-
-  if (!tenantId) {
+  const session = await getSession(request);
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const repId = session.sub;
+  const role = session.role;
 
   const { searchParams } = new URL(request.url);
   const source = searchParams.get("source");
@@ -34,9 +33,16 @@ export async function GET(request: NextRequest) {
 
       // Issue 6 Fix: Filter out pipeline deal updates from the Follow-Up Agenda
       // Agenda displays only dialer callbacks/demos/follow-ups unless specifically requesting pipeline tasks
-      const sourceFilter = source
-        ? `AND t.task_source = '${source.replace(/'/g, "''")}'`
-        : "AND (t.task_source IS NULL OR t.task_source = 'dialer' OR t.task_source = 'manual')";
+      const queryParams: any[] = [tenantId];
+      let sourceFilter = "AND (t.task_source IS NULL OR t.task_source = 'dialer' OR t.task_source = 'manual')";
+      if (source) {
+        sourceFilter = `AND t.task_source = $${queryParams.push(source)}`;
+      }
+      let repFilter = "";
+      if (isRep) {
+        const pRep = queryParams.push(repId);
+        repFilter = `AND (t.rep_id = $${pRep} OR l.assigned_rep_id = $${pRep})`;
+      }
 
       const tasksRes = await client.query(
         `SELECT t.id, t.tenant_id as "tenantId", t.lead_id as "leadId", t.rep_id as "repId",
@@ -49,9 +55,9 @@ export async function GET(request: NextRequest) {
          FROM scheduled_tasks t
          LEFT JOIN leads l ON t.lead_id = l.id
          LEFT JOIN users u ON t.rep_id = u.id
-         WHERE t.tenant_id = $1 AND t.status = 'pending' ${sourceFilter} ${isRep ? "AND (t.rep_id = $2 OR l.assigned_rep_id = $2)" : ""}
+         WHERE t.tenant_id = $1 AND t.status = 'pending' ${sourceFilter} ${repFilter}
          ORDER BY t.scheduled_time ASC NULLS LAST`,
-        isRep ? [tenantId, repId] : [tenantId]
+        queryParams
       );
 
       const tasks = tasksRes.rows.map((r) => ({
@@ -93,13 +99,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getSession();
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
-
-  if (!tenantId || !repId) {
+  const session = await getSession(request);
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const repId = session.sub;
 
   try {
     const body = await request.json();

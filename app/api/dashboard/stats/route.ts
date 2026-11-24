@@ -6,18 +6,13 @@ import { formatDuration } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
-  const headerTenantId = request.headers.get("x-tenant-id");
-  const headerRole = request.headers.get("x-user-role");
-  const headerUserId = request.headers.get("x-user-id");
-
-  const tenantId = headerTenantId || session?.tenantId;
-  const rawRole = headerRole || session?.role;
-  const currentUserId = headerUserId || session?.sub;
-  const role = normalizeRole(rawRole);
-
-  if (!tenantId || !currentUserId) {
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const tenantId = session.tenantId;
+  const currentUserId = session.sub;
+  const role = normalizeRole(session.role);
 
   const { searchParams } = new URL(request.url);
   const period = searchParams.get("period") || "today"; // "all" | "today" | "yesterday" | "week" | "month" | "this_month" | "last_month" | "custom"

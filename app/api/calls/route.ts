@@ -4,14 +4,13 @@ import { getSession } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
-  const role = request.headers.get("x-user-role") || session?.role || "";
-  const { searchParams } = new URL(request.url);
-
-  if (!tenantId) {
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const repId = session.sub;
+  const role = session.role;
+  const { searchParams } = new URL(request.url);
 
   const leadId = searchParams.get("leadId");
   const filterRepId = searchParams.get("repId");
