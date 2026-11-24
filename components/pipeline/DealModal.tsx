@@ -73,6 +73,11 @@ interface Deal {
     opsApprovalStatus?: string;
     createdAt?: string;
   } | null;
+  demoTask?: {
+    scheduledTime: string;
+    meetingLink?: string | null;
+    notes?: string | null;
+  } | null;
 }
 
 interface LeadOption {
@@ -147,6 +152,14 @@ const STAGES = [
   { value: "closed_won", label: "Closed Won 🏆", icon: Trophy, color: "text-emerald-700 bg-emerald-50 border-emerald-300" },
   { value: "closed_lost", label: "Closed Lost", icon: AlertOctagon, color: "text-rose-600 bg-rose-50 border-rose-200" },
 ];
+
+function formatForDateTimeLocal(dateStr?: string | Date | null): string {
+  if (!dateStr) return "";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 function getDefaultNextDayFollowup(): string {
   const d = new Date();
@@ -299,11 +312,22 @@ export function DealModal({
           ? deal.expectedClosingDate.split("T")[0]
           : "",
         notes: parsedDossier ? (parsedDossier.notes || "") : (deal?.closingNotes || ""),
-        contactBackDate: parsedDossier?.contactBackDate || getDefaultNextDayFollowup(),
-        demoDate: parsedDossier?.demoDate || getDefaultTomorrowDemo(),
-        meetingLink: parsedDossier?.meetingLink || "",
+        contactBackDate: parsedDossier?.contactBackDate ? formatForDateTimeLocal(parsedDossier.contactBackDate) : getDefaultNextDayFollowup(),
+        demoDate:
+          deal?.demoTask?.scheduledTime
+            ? formatForDateTimeLocal(deal.demoTask.scheduledTime)
+            : parsedDossier?.demoDate
+            ? formatForDateTimeLocal(parsedDossier.demoDate)
+            : getDefaultTomorrowDemo(),
+        meetingLink:
+          deal?.demoTask?.meetingLink ||
+          parsedDossier?.meetingLink ||
+          "",
         decisionMakerName: parsedDossier?.decisionMakerName || "",
-        demoNotes: parsedDossier?.demoNotes || "",
+        demoNotes:
+          deal?.demoTask?.notes ||
+          parsedDossier?.demoNotes ||
+          "",
         followupChannel: parsedDossier?.followupChannel || "phone",
         demoFeedback: parsedDossier?.demoFeedback || "",
         paymentDueDate: parsedDossier?.paymentDueDate || "",
@@ -1203,7 +1227,7 @@ export function DealModal({
                             </label>
                             <input
                               type="datetime-local"
-                              value={item.demoDate || getDefaultTomorrowDemo()}
+                              value={item.demoDate || ""}
                               onChange={(e) => updateCommercial(idx, "demoDate", e.target.value)}
                               required
                               disabled={!canEdit}

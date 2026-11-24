@@ -20,6 +20,7 @@ interface TaskItem {
     contactName?: string | null;
     companyName?: string | null;
   };
+  rep?: { fullName: string };
 }
 
 export function NotificationBell() {
@@ -172,9 +173,16 @@ export function NotificationBell() {
                           </span>
                           <span className="text-xs font-semibold text-slate-900 truncate">{targetName}</span>
                         </div>
-                        <div className="flex items-center gap-1 text-[11px] text-slate-500 mt-0.5">
-                          <Clock className="w-3 h-3 text-slate-400 shrink-0" />
-                          <span>{task.scheduledTime ? formatDateTime(task.scheduledTime) : "No time set"}</span>
+                        <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-0.5 flex-wrap">
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-slate-400 shrink-0" />
+                            {task.scheduledTime ? formatDateTime(task.scheduledTime) : "No time set"}
+                          </span>
+                          {task.rep?.fullName && (
+                            <span className="text-[10px] text-slate-700 font-semibold bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                              Rep: {task.rep.fullName}
+                            </span>
+                          )}
                         </div>
                       </div>
 

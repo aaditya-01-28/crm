@@ -306,20 +306,34 @@ export async function PATCH(
       if (newStage === "demo_scheduled" && body.demoDate && deal.lead_id) {
         const demoDateObj = new Date(body.demoDate);
         if (!isNaN(demoDateObj.getTime())) {
-          await client.query(
-            `INSERT INTO scheduled_tasks (
-               tenant_id, lead_id, rep_id, task_type, scheduled_time, meeting_link, notes, status, task_source, created_at, updated_at
-             )
-             VALUES ($1, $2, $3, 'product_demo', $4, $5, $6, 'pending', 'pipeline', NOW(), NOW())`,
-            [
-              tenantId,
-              deal.lead_id,
-              session?.sub || repId,
-              demoDateObj,
-              body.meetingLink || null,
-              body.demoNotes || newNotes || null,
-            ]
+          const existingTaskRes = await client.query(
+            "SELECT id FROM scheduled_tasks WHERE lead_id = $1 AND task_type = 'product_demo' AND status = 'pending' ORDER BY scheduled_time DESC LIMIT 1",
+            [deal.lead_id]
           );
+
+          if (existingTaskRes.rows.length > 0) {
+            await client.query(
+              `UPDATE scheduled_tasks
+               SET scheduled_time = $1, meeting_link = COALESCE($2, meeting_link), notes = COALESCE($3, notes), updated_at = NOW()
+               WHERE id = $4`,
+              [demoDateObj, body.meetingLink || null, body.demoNotes || newNotes || null, existingTaskRes.rows[0].id]
+            );
+          } else {
+            await client.query(
+              `INSERT INTO scheduled_tasks (
+                 tenant_id, lead_id, rep_id, task_type, scheduled_time, meeting_link, notes, status, task_source, created_at, updated_at
+               )
+               VALUES ($1, $2, $3, 'product_demo', $4, $5, $6, 'pending', 'pipeline', NOW(), NOW())`,
+              [
+                tenantId,
+                deal.lead_id,
+                session?.sub || repId,
+                demoDateObj,
+                body.meetingLink || null,
+                body.demoNotes || newNotes || null,
+              ]
+            );
+          }
         }
       }
 

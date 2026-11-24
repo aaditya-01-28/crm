@@ -57,11 +57,21 @@ export async function GET(request: NextRequest) {
                 pay.gstin as "payment_gstin",
                 pay.screenshot_url as "payment_screenshotUrl",
                 pay.ops_approval_status as "payment_opsApprovalStatus",
-                pay.created_at as "payment_createdAt"
+                pay.created_at as "payment_createdAt",
+                demo_task.scheduled_time as "demoTask_scheduledTime",
+                demo_task.meeting_link as "demoTask_meetingLink",
+                demo_task.notes as "demoTask_notes"
          FROM deals d
          LEFT JOIN leads l ON d.lead_id = l.id
          LEFT JOIN users u ON d.rep_id = u.id
          LEFT JOIN users rep_lead ON l.assigned_rep_id = rep_lead.id
+         LEFT JOIN LATERAL (
+           SELECT st.scheduled_time, st.meeting_link, st.notes
+           FROM scheduled_tasks st
+           WHERE st.lead_id = d.lead_id AND st.task_type = 'product_demo' AND st.status = 'pending'
+           ORDER BY st.scheduled_time DESC
+           LIMIT 1
+         ) demo_task ON true
          LEFT JOIN LATERAL (
            SELECT p.id,
                   p.user_type,
@@ -142,6 +152,13 @@ export async function GET(request: NextRequest) {
                 screenshotUrl: r.payment_screenshotUrl,
                 opsApprovalStatus: r.payment_opsApprovalStatus,
                 createdAt: r.payment_createdAt,
+              }
+            : null,
+          demoTask: r.demoTask_scheduledTime
+            ? {
+                scheduledTime: r.demoTask_scheduledTime,
+                meetingLink: r.demoTask_meetingLink,
+                notes: r.demoTask_notes,
               }
             : null,
         };

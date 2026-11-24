@@ -113,6 +113,11 @@ interface Deal {
     opsApprovalStatus?: string;
     createdAt?: string;
   } | null;
+  demoTask?: {
+    scheduledTime: string;
+    meetingLink?: string | null;
+    notes?: string | null;
+  } | null;
   createdAt?: string;
   updatedAt?: string;
 }

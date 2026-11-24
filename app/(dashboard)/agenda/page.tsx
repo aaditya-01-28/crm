@@ -9,6 +9,7 @@ import {
   CheckCircle,
   RefreshCw,
   ArrowRight,
+  User,
 } from "lucide-react";
 import { formatDateTime, cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -315,15 +316,24 @@ function TaskRow({
           </span>
         </div>
 
-        {task.scheduledTime ? (
-          <p className="text-xs text-gray-500 mt-1">
-            🕒 {formatDateTime(task.scheduledTime)}
-          </p>
-        ) : (
-          <p className="text-xs text-amber-700 font-semibold mt-1 flex items-center gap-1">
-            ⚠️ Date & Time: TBD (Client yet to confirm)
-          </p>
-        )}
+        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+          {task.scheduledTime ? (
+            <span className="text-xs text-gray-600 flex items-center gap-1 font-medium">
+              🕒 {formatDateTime(task.scheduledTime)}
+            </span>
+          ) : (
+            <span className="text-xs text-amber-700 font-semibold flex items-center gap-1">
+              ⚠️ Date & Time: TBD (Client yet to confirm)
+            </span>
+          )}
+
+          {task.rep?.fullName && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+              <User className="w-3 h-3 text-emerald-600" />
+              <span>Assigned: {task.rep.fullName}</span>
+            </span>
+          )}
+        </div>
 
         {task.notes && (
           <p className="text-xs text-gray-600 mt-1 line-clamp-2">{task.notes}</p>

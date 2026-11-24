@@ -344,6 +344,23 @@ export async function PATCH(
         };
         const targetStage = stageMap[newStatus] || newStatus;
 
+        let closingNotesContent: string;
+        if (targetStage === "demo_scheduled") {
+          closingNotesContent = JSON.stringify({
+            demoDate: taskToCreate?.scheduledTime ? new Date(taskToCreate.scheduledTime).toISOString() : null,
+            meetingLink: taskToCreate?.meetingLink || null,
+            notes: taskToCreate?.notes || remark || "Product demo scheduled",
+          });
+        } else if (targetStage === "closed_won") {
+          closingNotesContent = "Deal closed won via disposition";
+        } else if (targetStage === "closed_lost") {
+          closingNotesContent = "Deal marked closed lost via disposition";
+        } else if (targetStage === "demo_done") {
+          closingNotesContent = "Product demo completed";
+        } else {
+          closingNotesContent = "Pipeline deal created";
+        }
+
         const dealCheck = await client.query(
           "SELECT id FROM deals WHERE lead_id = $1 AND tenant_id = $2 LIMIT 1",
           [id, tenantId]
@@ -351,8 +368,13 @@ export async function PATCH(
 
         if (dealCheck.rows.length > 0) {
           await client.query(
-            "UPDATE deals SET stage = $1, rep_id = COALESCE(rep_id, $2), updated_at = NOW() WHERE id = $3",
-            [targetStage, lead.assigned_rep_id || repId, dealCheck.rows[0].id]
+            `UPDATE deals
+             SET stage = $1,
+                 rep_id = COALESCE(rep_id, $2),
+                 closing_notes = CASE WHEN $1 = 'demo_scheduled' THEN $3 ELSE closing_notes END,
+                 updated_at = NOW()
+             WHERE id = $4`,
+            [targetStage, lead.assigned_rep_id || repId, closingNotesContent, dealCheck.rows[0].id]
           );
         } else {
           await client.query(
@@ -364,13 +386,7 @@ export async function PATCH(
               lead.assigned_rep_id || repId,
               lead.service_type || "WhatsApp API",
               targetStage,
-              targetStage === "closed_won"
-                ? "Deal closed won via disposition"
-                : targetStage === "closed_lost"
-                ? "Deal marked closed lost via disposition"
-                : targetStage === "demo_done"
-                ? "Product demo completed"
-                : "Product demo scheduled",
+              closingNotesContent,
             ]
           );
         }

@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   const search = searchParams.get("search")?.trim();
   const filterRepId = searchParams.get("repId");
   const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
-  const limit = Math.min(1000, Math.max(1, parseInt(searchParams.get("limit") || "25")));
+  const limit = Math.min(10000, Math.max(1, parseInt(searchParams.get("limit") || "25")));
   const queue = searchParams.get("queue") === "true";
   const allIds = searchParams.get("allIds") === "true";
 
@@ -169,7 +169,7 @@ export async function GET(request: NextRequest) {
          LEFT JOIN users ar ON l.assigned_rep_id = ar.id
          LEFT JOIN users far ON l.first_assigned_rep_id = far.id
          WHERE ${whereClause}
-         ORDER BY l.updated_at DESC
+         ORDER BY l.updated_at DESC, l.created_at ASC, l.id ASC
          LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
         params
       );
