@@ -29,6 +29,8 @@ export async function PATCH(
       logSource = "dialer_web",
       callTimestamp,
       callLogId,
+      forceNewLog = false,
+      isManualNote = false,
     } = body;
 
     if (!disposition) {
@@ -162,27 +164,23 @@ export async function PATCH(
         }
       }
 
-      if (!targetCallId) {
-        const parsedTimestamp = callTimestamp ? new Date(callTimestamp) : null;
-        const validTimestamp = parsedTimestamp && !isNaN(parsedTimestamp.getTime()) ? parsedTimestamp : null;
-
+      if (!targetCallId && !forceNewLog && !isManualNote) {
         const candidateLogs = await client.query(
           `SELECT id, duration_seconds, remark, log_source, call_timestamp
            FROM call_logs
            WHERE lead_id = $1 AND rep_id = $2 AND tenant_id = $3
+             AND call_timestamp >= NOW() - INTERVAL '30 minutes'
              AND (
-               -- Case A: Un-disposed SIM capture waiting for disposition (up to 30 minutes)
-               (call_timestamp >= NOW() - INTERVAL '30 minutes' AND (remark = 'Captured from SIM dialer' OR log_source IN ('dialer_connected', 'apk_connected')))
-               -- Case B: Close timestamp proximity (+/- 5 minutes)
-               OR ($4::TIMESTAMPTZ IS NOT NULL AND call_timestamp >= ($4::TIMESTAMPTZ - INTERVAL '5 minutes') AND call_timestamp <= ($4::TIMESTAMPTZ + INTERVAL '5 minutes'))
-               -- Case C: Matching duration within last 15 minutes
-               OR (call_timestamp >= NOW() - INTERVAL '15 minutes' AND ABS(duration_seconds - $5) <= 3)
-               -- Case D: Recent log within 10 minutes not yet finalized
-               OR (call_timestamp >= NOW() - INTERVAL '10 minutes' AND (log_source != 'apk_manual' OR remark = 'Captured from SIM dialer' OR remark IS NULL OR remark = 'na' OR remark = ''))
+               -- Only match un-disposed SIM captures waiting for disposition
+               remark = 'Captured from SIM dialer'
+               OR log_source IN ('dialer_connected', 'apk_connected')
+               OR remark IS NULL
+               OR remark = 'na'
+               OR remark = ''
              )
            ORDER BY call_timestamp DESC
            LIMIT 1`,
-          [id, repId, tenantId, validTimestamp, durationSeconds]
+          [id, repId, tenantId]
         );
 
         if (candidateLogs.rows.length > 0) {
@@ -256,15 +254,18 @@ export async function PATCH(
         stageName = "Using Other Company Service";
       }
 
-      // Deduplicate/Update recent stage history record within 5 minutes instead of inserting redundant duplicates
-      const recentStage = await client.query(
-        `SELECT id FROM lead_stage_history
-         WHERE lead_id = $1 AND rep_id = $2 AND tenant_id = $3
-           AND created_at >= NOW() - INTERVAL '5 minutes'
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [id, repId, tenantId]
-      ).catch(() => ({ rows: [] }));
+      // Update recent stage history only if it was an empty unfinalized draft within 30 seconds (never overwrite existing user notes or different stages)
+      const recentStage = (!forceNewLog && !isManualNote)
+        ? await client.query(
+            `SELECT id FROM lead_stage_history
+             WHERE lead_id = $1 AND rep_id = $2 AND tenant_id = $3
+               AND created_at >= NOW() - INTERVAL '30 seconds'
+               AND (notes IS NULL OR notes = '' OR notes = 'na' OR notes = 'Captured from SIM dialer')
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [id, repId, tenantId]
+          ).catch(() => ({ rows: [] }))
+        : { rows: [] };
 
       const stageMeta = JSON.stringify({
         previousStatus: lead.status,

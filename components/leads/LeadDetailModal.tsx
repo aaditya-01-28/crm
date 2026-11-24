@@ -286,6 +286,8 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
           disposition,
           remark,
           durationSeconds: 0,
+          forceNewLog: true,
+          isManualNote: true,
           callbackDatetime: callbackDatetime || undefined,
           demoDatetime: demoDatetime || undefined,
           decisionMakerName: decisionMakerName || undefined,
@@ -551,29 +553,20 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
       const itemStage = normalizeStage(item.badge);
       const itemNotes = (item.notes || "").trim().toLowerCase();
 
-      // Look for an existing match in deduped within 10 minutes
+      // Look for an existing companion record created simultaneously (within 5 seconds) for the exact same event
       const matchIndex = deduped.findIndex((prev) => {
         const prevTime = new Date(prev.timestamp).getTime();
         const timeDiff = Math.abs(prevTime - itemTime);
-        if (timeDiff > 10 * 60 * 1000) return false; // More than 10 minutes apart: distinct interaction
+        if (timeDiff > 5 * 1000) return false; // Distinct events: keep separate
 
         const prevStage = normalizeStage(prev.badge);
         const prevNotes = (prev.notes || "").trim().toLowerCase();
 
-        // Condition 1: Same stage/disposition within 10 minutes
+        // Condition 1: Same stage/disposition within 5 seconds (companion records)
         if (prevStage === itemStage && prevStage !== "") return true;
 
-        // Condition 2: Identical notes within 10 minutes
+        // Condition 2: Identical notes within 5 seconds
         if (prevNotes !== "" && prevNotes === itemNotes) return true;
-
-        // Condition 3: One is call and one is status_change within 3 minutes for this lead
-        if (
-          ((prev.type === "call" && item.type === "status_change") ||
-           (prev.type === "status_change" && item.type === "call")) &&
-          timeDiff <= 3 * 60 * 1000
-        ) {
-          return true;
-        }
 
         return false;
       });
