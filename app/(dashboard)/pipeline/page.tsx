@@ -117,8 +117,9 @@ interface Deal {
   updatedAt?: string;
 }
 
-async function fetchDeals(): Promise<{ deals: Deal[] }> {
-  const res = await fetch("/api/deals", { cache: "no-store" });
+async function fetchDeals(repId?: string): Promise<{ deals: Deal[] }> {
+  const url = repId && repId !== "all" ? `/api/deals?repId=${encodeURIComponent(repId)}` : "/api/deals";
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {
     let errMsg = `Failed to fetch deals (${res.status})`;
     try {
@@ -152,9 +153,20 @@ export default function PipelinePage() {
   const [repFilter, setRepFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
 
+  // Fetch Team members for Manager & Admin rep filter
+  const { data: teamData } = useQuery({
+    queryKey: ["team-list"],
+    queryFn: async () => {
+      const res = await fetch("/api/team");
+      if (!res.ok) return { users: [] };
+      return res.json();
+    },
+    enabled: canManageDeals,
+  });
+
   const { data, isLoading, isError, error, isRefetching, refetch } = useQuery({
-    queryKey: ["deals"],
-    queryFn: fetchDeals,
+    queryKey: ["deals", repFilter],
+    queryFn: () => fetchDeals(repFilter),
     retry: 2,
     staleTime: 5000,
   });
@@ -242,15 +254,24 @@ export default function PipelinePage() {
 
   // All distinct Rep options for Manager / Admin filtering
   const repOptions = useMemo(() => {
-    const map = new Map<string, string>();
+    const list: Array<{ id: string; name: string }> = [];
+    if (teamData?.users && Array.isArray(teamData.users)) {
+      teamData.users.forEach((u: any) => {
+        const roleLabel = u.role === "sales_rep" ? "Rep" : u.role === "sales_manager" ? "Manager" : "Admin";
+        list.push({
+          id: u.id,
+          name: `${u.fullName} (${roleLabel})`,
+        });
+      });
+    }
     deals.forEach((d) => {
-      const key = d.repId || d.rep?.fullName;
-      if (key && d.rep?.fullName) {
-        map.set(key, d.rep.fullName);
+      const id = d.repId || d.rep?.fullName;
+      if (id && d.rep?.fullName && !list.some((r) => r.id === id || r.name.startsWith(d.rep!.fullName))) {
+        list.push({ id, name: d.rep.fullName });
       }
     });
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [deals]);
+    return list;
+  }, [teamData, deals]);
 
   // Active filters count
   const activeFiltersCount =
@@ -497,9 +518,9 @@ export default function PipelinePage() {
           )}
 
           {/* Representative Filter (Manager / Admin) */}
-          {canManageDeals && repOptions.length > 0 && (
-            <div className="relative min-w-[150px]">
-              <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-indigo-600">
+          {canManageDeals && (
+            <div className="relative min-w-[160px]">
+              <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-emerald-600">
                 <User className="w-3.5 h-3.5" />
               </div>
               <select
@@ -507,7 +528,7 @@ export default function PipelinePage() {
                 onChange={(e) => setRepFilter(e.target.value)}
                 className="w-full pl-8 pr-7 py-1.5 bg-slate-50/80 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100/70 focus:outline-none focus:ring-1.5 focus:ring-emerald-500 focus:bg-white transition cursor-pointer appearance-none"
               >
-                <option value="all">All Team Reps</option>
+                <option value="all">All Team Members</option>
                 {repOptions.map((rep) => (
                   <option key={rep.id} value={rep.id}>
                     {rep.name}

@@ -14,6 +14,7 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const opsStatus = searchParams.get("status") || "pending_verification";
+  const filterRepId = searchParams.get("repId");
 
   try {
     return await withClient(async (client) => {
@@ -31,6 +32,11 @@ export async function GET(request: NextRequest) {
         // Ops/Manager/Admin see payments filtered by exact status tab — no cross-tab bleed
         whereClause = "p.tenant_id = $1 AND p.ops_approval_status = $2";
         params = [tenantId, opsStatus];
+
+        if (filterRepId && filterRepId !== "all") {
+          params.push(filterRepId);
+          whereClause += ` AND p.rep_id = $${params.length}`;
+        }
       }
 
       const paymentsRes = await client.query(

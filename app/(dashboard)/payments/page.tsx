@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { CreditCard, CheckCircle2, XCircle, Clock, ExternalLink } from "lucide-react";
+import { CreditCard, CheckCircle2, XCircle, Clock, ExternalLink, User } from "lucide-react";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
+import { useIsManagerOrAdmin } from "@/components/layout/SessionProvider";
 import { toast } from "sonner";
 
 interface Payment {
@@ -27,8 +28,12 @@ interface Payment {
   approver: { fullName: string } | null;
 }
 
-async function fetchPayments(status: string): Promise<{ payments: Payment[] }> {
-  const res = await fetch(`/api/payments?status=${status}`);
+async function fetchPayments(status: string, repId?: string): Promise<{ payments: Payment[] }> {
+  let url = `/api/payments?status=${status}`;
+  if (repId && repId !== "all") {
+    url += `&repId=${encodeURIComponent(repId)}`;
+  }
+  const res = await fetch(url);
   if (!res.ok) throw new Error("Failed to fetch payments");
   return res.json();
 }
@@ -41,11 +46,39 @@ const STATUS_CONFIG = {
 
 export default function PaymentsPage() {
   const queryClient = useQueryClient();
+  const canManagePayments = useIsManagerOrAdmin();
   const [activeTab, setActiveTab] = useState("pending_verification");
+  const [repFilter, setRepFilter] = useState("all");
+
+  // Fetch Team members for Manager & Admin rep filter
+  const { data: teamData } = useQuery({
+    queryKey: ["team-list"],
+    queryFn: async () => {
+      const res = await fetch("/api/team");
+      if (!res.ok) return { users: [] };
+      return res.json();
+    },
+    enabled: canManagePayments,
+  });
+
+  const repOptions = useMemo(() => {
+    const list: { id: string; name: string }[] = [];
+    const seen = new Set<string>();
+    if (teamData?.users && Array.isArray(teamData.users)) {
+      teamData.users.forEach((u: any) => {
+        if (u.id && !seen.has(u.id)) {
+          seen.add(u.id);
+          const roleLabel = u.role === "sales_rep" ? "Rep" : u.role === "sales_manager" ? "Manager" : "Admin";
+          list.push({ id: u.id, name: `${u.fullName || u.name || u.email} (${roleLabel})` });
+        }
+      });
+    }
+    return list;
+  }, [teamData]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["payments", activeTab],
-    queryFn: () => fetchPayments(activeTab),
+    queryKey: ["payments", activeTab, repFilter],
+    queryFn: () => fetchPayments(activeTab, repFilter),
   });
 
   const approveMutation = useMutation({
@@ -98,26 +131,53 @@ export default function PaymentsPage() {
         </p>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-xl w-fit">
-        {tabs.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-              activeTab === tab.key
-                ? "bg-white text-gray-800 shadow-sm"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            {tab.label}
-            {tab.key === "pending_verification" && payments.length > 0 && activeTab === "pending_verification" && (
-              <span className="ml-2 bg-orange-500 text-white text-xs rounded-full px-1.5 py-0.5">
-                {payments.length}
-              </span>
-            )}
-          </button>
-        ))}
+      {/* Controls: Tabs & Member Filter */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+        {/* Tabs */}
+        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition cursor-pointer ${
+                activeTab === tab.key
+                  ? "bg-white text-gray-800 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {tab.label}
+              {tab.key === "pending_verification" && payments.length > 0 && activeTab === "pending_verification" && (
+                <span className="ml-2 bg-orange-500 text-white text-xs rounded-full px-1.5 py-0.5">
+                  {payments.length}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Member Filter (Level 2 & Level 3 only) */}
+        {canManagePayments && (
+          <div className="relative min-w-[200px]">
+            <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-emerald-600">
+              <User className="w-3.5 h-3.5" />
+            </div>
+            <select
+              value={repFilter}
+              onChange={(e) => setRepFilter(e.target.value)}
+              className="w-full pl-8 pr-7 py-2 bg-white border border-gray-200 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-1.5 focus:ring-emerald-500 shadow-2xs transition cursor-pointer appearance-none"
+            >
+              <option value="all">All Team Members</option>
+              {repOptions.map((rep) => (
+                <option key={rep.id} value={rep.id}>
+                  {rep.name}
+                </option>
+              ))}
+            </select>
+            <div className="absolute inset-y-0 right-0 pr-2.5 flex items-center pointer-events-none text-gray-400 text-[10px]">
+              ▼
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Table */}

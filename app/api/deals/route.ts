@@ -16,11 +16,25 @@ export async function GET(request: NextRequest) {
   }
 
   const isRep = role === "sales_rep";
+  const { searchParams } = new URL(request.url);
+  const filterRepId = searchParams.get("repId");
+
   const isValidUuid = (val?: string | null) =>
     typeof val === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
   try {
     return await withClient(async (client) => {
+      let whereClause = "d.tenant_id = $1";
+      const params: any[] = [tenantId];
+
+      if (isRep && isValidUuid(repId)) {
+        params.push(repId);
+        whereClause += ` AND (d.rep_id = $${params.length} OR l.assigned_rep_id = $${params.length})`;
+      } else if (!isRep && filterRepId && filterRepId !== "all" && isValidUuid(filterRepId)) {
+        params.push(filterRepId);
+        whereClause += ` AND (d.rep_id = $${params.length} OR l.assigned_rep_id = $${params.length})`;
+      }
+
       const dealsRes = await client.query(
         `SELECT d.id, d.tenant_id as "tenantId", d.lead_id as "leadId", d.rep_id as "repId",
                 d.service_type as "serviceType", d.quantity, d.quoted_price as "quotedPrice",
@@ -67,9 +81,9 @@ export async function GET(request: NextRequest) {
            ORDER BY p.created_at DESC
            LIMIT 1
          ) pay ON true
-         WHERE d.tenant_id = $1 ${isRep && isValidUuid(repId) ? "AND (d.rep_id = $2 OR l.assigned_rep_id = $2)" : ""}
+         WHERE ${whereClause}
          ORDER BY d.created_at DESC`,
-        isRep && isValidUuid(repId) ? [tenantId, repId] : [tenantId]
+        params
       );
 
       const deals = dealsRes.rows.map((r) => {
