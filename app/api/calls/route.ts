@@ -39,6 +39,33 @@ export async function GET(request: NextRequest) {
           );
       `).catch(() => {});
 
+      // Self-healing: Merge and clean up any historical duplicate SIM dialer logs where a manual APK disposition exists for the same call interaction
+      await client.query(`
+        UPDATE call_logs c2
+        SET recording_url = COALESCE(c2.recording_url, c1.recording_url),
+            duration_seconds = GREATEST(c2.duration_seconds, c1.duration_seconds)
+        FROM call_logs c1
+        WHERE c1.remark = 'Captured from SIM dialer'
+          AND c2.lead_id = c1.lead_id
+          AND c2.rep_id = c1.rep_id
+          AND c2.id != c1.id
+          AND ABS(c2.duration_seconds - c1.duration_seconds) <= 3
+          AND c2.call_timestamp >= (c1.call_timestamp - INTERVAL '20 minutes')
+          AND c2.call_timestamp <= (c1.call_timestamp + INTERVAL '20 minutes');
+
+        DELETE FROM call_logs c1
+        WHERE c1.remark = 'Captured from SIM dialer'
+          AND EXISTS (
+            SELECT 1 FROM call_logs c2
+            WHERE c2.lead_id = c1.lead_id
+              AND c2.rep_id = c1.rep_id
+              AND c2.id != c1.id
+              AND ABS(c2.duration_seconds - c1.duration_seconds) <= 3
+              AND c2.call_timestamp >= (c1.call_timestamp - INTERVAL '20 minutes')
+              AND c2.call_timestamp <= (c1.call_timestamp + INTERVAL '20 minutes')
+          );
+      `).catch(() => {});
+
       const conditions: string[] = ["c.tenant_id = $1"];
       const params: any[] = [tenantId];
 
@@ -281,26 +308,34 @@ export async function POST(request: NextRequest) {
         }
 
         // Deduplication and Upsert:
-        // Only treat as the same call if it has the exact same timestamp (within 15 seconds) from a network retry/duplicate.
-        // Multiple calls placed to the same lead minutes or hours apart are distinct interactions and must NEVER be overwritten!
+        // Match the same call interaction:
+        // 1. Within 5 minutes of callTimestamp
+        // 2. Or matching duration (+/- 3 seconds) within the last 15 minutes
+        // 3. Or an un-disposed SIM dialer capture waiting for match within 15 minutes
         const recentLogRes = await client.query(
           `SELECT id, disposition, duration_seconds as "durationSeconds", log_source as "logSource", remark, recording_url as "recordingUrl", call_timestamp as "callTimestamp"
            FROM call_logs
            WHERE tenant_id = $1 AND lead_id = $2 AND rep_id = $3
-             AND call_timestamp >= ($4::TIMESTAMPTZ - INTERVAL '15 seconds')
-             AND call_timestamp <= ($4::TIMESTAMPTZ + INTERVAL '15 seconds')
+             AND (
+               (call_timestamp >= ($4::TIMESTAMPTZ - INTERVAL '5 minutes') AND call_timestamp <= ($4::TIMESTAMPTZ + INTERVAL '5 minutes'))
+               OR (call_timestamp >= ($4::TIMESTAMPTZ - INTERVAL '15 minutes') AND ABS(duration_seconds - $5) <= 3)
+               OR (call_timestamp >= NOW() - INTERVAL '15 minutes' AND (remark = 'Captured from SIM dialer' OR log_source IN ('dialer_connected', 'apk_connected')))
+             )
            ORDER BY call_timestamp DESC
            LIMIT 1`,
-          [tenantId, targetLeadId, repId, callTimestamp]
+          [tenantId, targetLeadId, repId, callTimestamp, durationSeconds]
         );
 
         let finalLog;
         if (recentLogRes.rows.length > 0) {
           const existing = recentLogRes.rows[0];
           const newDuration = Math.max(existing.durationSeconds || 0, durationSeconds);
-          const newRemark = remark || existing.remark;
-          const newRecording = recordingUrl || existing.recordingUrl;
-          const finalSource = logSource === "apk_manual" ? "apk_manual" : existing.logSource || logSource;
+          // If the existing log already has a manual disposition/notes entered by the sales rep, DO NOT overwrite with raw SIM background values
+          const isManualDisposed = existing.logSource === "apk_manual" || (existing.remark && existing.remark !== "Captured from SIM dialer");
+          const finalDisposition = isManualDisposed ? existing.disposition : disposition;
+          const finalRemark = isManualDisposed ? existing.remark : (remark || existing.remark);
+          const finalSource = isManualDisposed ? existing.logSource : (logSource || existing.logSource);
+          const finalRecording = recordingUrl || existing.recordingUrl;
           const finalTimestamp = existing.callTimestamp || callTimestamp;
 
           const updatedRes = await client.query(
@@ -315,7 +350,7 @@ export async function POST(request: NextRequest) {
              RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
                        disposition, duration_seconds as "durationSeconds", remark,
                        recording_url as "recordingUrl", log_source as "logSource", call_timestamp as "callTimestamp"`,
-            [disposition, newDuration, newRemark, newRecording, finalSource, finalTimestamp, existing.id]
+            [finalDisposition, newDuration, finalRemark, finalRecording, finalSource, finalTimestamp, existing.id]
           );
           finalLog = updatedRes.rows[0];
 

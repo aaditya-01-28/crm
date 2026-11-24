@@ -27,6 +27,8 @@ export async function PATCH(
       durationSeconds = 0,
       recordingUrl,
       logSource = "dialer_web",
+      callTimestamp,
+      callLogId,
     } = body;
 
     if (!disposition) {
@@ -142,18 +144,53 @@ export async function PATCH(
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS log_source TEXT DEFAULT 'dialer_web';").catch(() => {});
 
-      // Only attach to a recent call if it was completed in the last 20 seconds of this active dialer session.
-      // Older calls are preserved as immutable interaction history and never overwritten!
-      const recentLog = await client.query(
-        `SELECT id, duration_seconds FROM call_logs
-         WHERE lead_id = $1 AND rep_id = $2
-           AND call_timestamp > NOW() - INTERVAL '20 seconds'
-         ORDER BY call_timestamp DESC
-         LIMIT 1`,
-        [id, repId]
-      );
+      // Attach disposition, notes, and duration to the call from this active session.
+      // 1. If explicit callLogId is passed and exists, use it.
+      // 2. Otherwise match an un-disposed SIM dialer call (remark = 'Captured from SIM dialer' or log_source IN ('dialer_connected', 'apk_connected')) in the last 30 minutes.
+      // 3. Or match close timestamp proximity (+/- 5 minutes) if callTimestamp is provided.
+      // 4. Or match a call with matching duration (+/- 3 seconds) in the last 15 minutes.
+      // 5. Or any call logged for this lead and rep in the last 10 minutes that was not yet manually disposed with a finalized remark.
+      let targetCallId: string | null = null;
 
-      if (recentLog.rows.length > 0) {
+      if (callLogId && typeof callLogId === "string" && callLogId.length > 10 && !callLogId.startsWith("manual_")) {
+        const idCheck = await client.query(
+          `SELECT id FROM call_logs WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          [callLogId, tenantId]
+        ).catch(() => null);
+        if (idCheck && idCheck.rows.length > 0) {
+          targetCallId = idCheck.rows[0].id;
+        }
+      }
+
+      if (!targetCallId) {
+        const parsedTimestamp = callTimestamp ? new Date(callTimestamp) : null;
+        const validTimestamp = parsedTimestamp && !isNaN(parsedTimestamp.getTime()) ? parsedTimestamp : null;
+
+        const candidateLogs = await client.query(
+          `SELECT id, duration_seconds, remark, log_source, call_timestamp
+           FROM call_logs
+           WHERE lead_id = $1 AND rep_id = $2 AND tenant_id = $3
+             AND (
+               -- Case A: Un-disposed SIM capture waiting for disposition (up to 30 minutes)
+               (call_timestamp >= NOW() - INTERVAL '30 minutes' AND (remark = 'Captured from SIM dialer' OR log_source IN ('dialer_connected', 'apk_connected')))
+               -- Case B: Close timestamp proximity (+/- 5 minutes)
+               OR ($4::TIMESTAMPTZ IS NOT NULL AND call_timestamp >= ($4::TIMESTAMPTZ - INTERVAL '5 minutes') AND call_timestamp <= ($4::TIMESTAMPTZ + INTERVAL '5 minutes'))
+               -- Case C: Matching duration within last 15 minutes
+               OR (call_timestamp >= NOW() - INTERVAL '15 minutes' AND ABS(duration_seconds - $5) <= 3)
+               -- Case D: Recent log within 10 minutes not yet finalized
+               OR (call_timestamp >= NOW() - INTERVAL '10 minutes' AND (log_source != 'apk_manual' OR remark = 'Captured from SIM dialer' OR remark IS NULL OR remark = 'na' OR remark = ''))
+             )
+           ORDER BY call_timestamp DESC
+           LIMIT 1`,
+          [id, repId, tenantId, validTimestamp, durationSeconds]
+        );
+
+        if (candidateLogs.rows.length > 0) {
+          targetCallId = candidateLogs.rows[0].id;
+        }
+      }
+
+      if (targetCallId) {
         await client.query(
           `UPDATE call_logs
            SET disposition = $1,
@@ -162,15 +199,29 @@ export async function PATCH(
                recording_url = COALESCE($4, recording_url),
                log_source = $5
            WHERE id = $6`,
-          [disposition, durationSeconds, remark || null, recordingUrl || null, logSource, recentLog.rows[0].id]
+          [disposition, durationSeconds, remark || null, recordingUrl || null, logSource, targetCallId]
         );
       } else {
+        const parsedTimestamp = callTimestamp ? new Date(callTimestamp) : null;
+        const finalTimestamp = parsedTimestamp && !isNaN(parsedTimestamp.getTime()) ? parsedTimestamp : new Date();
+
         await client.query(
           `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, call_timestamp)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
-          [tenantId, id, repId, disposition, durationSeconds, remark || null, recordingUrl || null, logSource]
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [tenantId, id, repId, disposition, durationSeconds, remark || null, recordingUrl || null, logSource, finalTimestamp]
         );
       }
+
+      // Immediately clean up any ghost duplicate SIM logs that may have arrived via background sync for this same call interaction
+      await client.query(
+        `DELETE FROM call_logs
+         WHERE lead_id = $1 AND rep_id = $2 AND tenant_id = $3
+           AND remark = 'Captured from SIM dialer'
+           AND ($4::UUID IS NULL OR id != $4)
+           AND ABS(duration_seconds - $5) <= 3
+           AND call_timestamp >= NOW() - INTERVAL '30 minutes'`,
+        [id, repId, tenantId, targetCallId, durationSeconds]
+      ).catch(() => {});
 
       // Record stage transition into persistent lead_stage_history table
       await client.query(`
