@@ -34,15 +34,18 @@ function formatLastLogin(dateStr?: string | null): { display: string; full: stri
       return { display: "First Login", full: "First recorded session for this account" };
     }
     const datePart = d.toLocaleDateString("en-IN", {
+      timeZone: "Asia/Kolkata",
       day: "2-digit",
       month: "short",
     });
     const timePart = d.toLocaleTimeString("en-IN", {
+      timeZone: "Asia/Kolkata",
       hour: "2-digit",
       minute: "2-digit",
       hour12: true,
     });
     const full = d.toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
       day: "2-digit",
       month: "short",
       year: "numeric",

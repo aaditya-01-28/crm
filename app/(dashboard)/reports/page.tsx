@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { BarChart3, Download, RefreshCw, TrendingUp, Calendar, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
-import { formatCurrency, formatDuration } from "@/lib/utils";
+import { formatCurrency, formatDuration, getISTDateRange, getISTDateString } from "@/lib/utils";
 
 type ReportPeriod = "today" | "yesterday" | "week" | "month" | "custom";
 
@@ -23,33 +23,11 @@ type SortField =
 
 type SortDirection = "asc" | "desc";
 
-const formatLocalDate = (d: Date): string => {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
 const getPresetDates = (preset: ReportPeriod): { from: string; to: string } => {
-  const now = new Date();
-  const todayStr = formatLocalDate(now);
-  if (preset === "yesterday") {
-    const y = new Date();
-    y.setDate(y.getDate() - 1);
-    const yStr = formatLocalDate(y);
-    return { from: yStr, to: yStr };
-  }
-  if (preset === "week") {
-    const p7 = new Date();
-    p7.setDate(p7.getDate() - 6);
-    return { from: formatLocalDate(p7), to: todayStr };
-  }
-  if (preset === "month") {
-    const p30 = new Date();
-    p30.setDate(p30.getDate() - 29);
-    return { from: formatLocalDate(p30), to: todayStr };
-  }
-  return { from: todayStr, to: todayStr };
+  const { startOfPeriod, endOfPeriod } = getISTDateRange(preset);
+  const from = getISTDateString(startOfPeriod);
+  const to = getISTDateString(endOfPeriod);
+  return { from, to };
 };
 
 interface RepMetrics {

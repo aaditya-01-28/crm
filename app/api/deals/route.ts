@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
-import { parseScheduledDateTime } from "@/lib/utils";
+import { parseScheduledDateTime, getISTDateString } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -318,7 +318,7 @@ export async function POST(request: NextRequest) {
           const dossier = {
             executiveName: item.executiveName || body.executiveName || null,
             executiveEmail: item.executiveEmail || body.executiveEmail || null,
-            wonDate: item.wonDate || body.wonDate || new Date().toISOString().split("T")[0],
+            wonDate: item.wonDate || body.wonDate || getISTDateString(),
             productName: item.productName || item.serviceType,
             productDescription: item.productDescription || null,
             customerCompanyName: item.customerCompanyName || body.companyName || null,

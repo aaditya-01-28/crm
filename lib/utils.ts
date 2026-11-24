@@ -40,30 +40,13 @@ export function formatDateTime(date?: string | Date | null): string {
 /**
  * Converts any local datetime-local string (e.g. "2026-11-24T18:25")
  * or Date object to an unambiguous UTC ISO-8601 string (ending in 'Z').
- * Prevents timezone double-offset bugs between client browsers and server environments.
+ * Safely anchors bare strings to Indian Standard Time (IST, UTC+05:30)
+ * preventing timezone double-offset bugs between client browsers and server environments.
  */
 export function toUtcIsoString(input?: string | Date | null): string | null {
   if (!input) return null;
-  if (input instanceof Date) {
-    return isNaN(input.getTime()) ? null : input.toISOString();
-  }
-  const str = typeof input === "string" ? input.trim() : String(input).trim();
-  if (!str) return null;
-
-  // If already has explicit UTC or offset (Z or +05:30), parse directly
-  if (str.endsWith("Z") || /[+-]\d{2}(:?\d{2})?$/.test(str)) {
-    const d = new Date(str);
-    return isNaN(d.getTime()) ? null : d.toISOString();
-  }
-
-  // Bare datetime-local format from HTML input: "YYYY-MM-DDTHH:mm"
-  // In client browser, new Date(str) interprets in local user timezone
-  const localParsed = new Date(str);
-  if (!isNaN(localParsed.getTime())) {
-    return localParsed.toISOString();
-  }
-
-  return null;
+  const d = parseScheduledDateTime(input);
+  return d && !isNaN(d.getTime()) ? d.toISOString() : null;
 }
 
 /**

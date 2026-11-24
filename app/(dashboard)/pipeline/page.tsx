@@ -23,7 +23,7 @@ import {
   Filter,
   AlertCircle,
 } from "lucide-react";
-import { formatCurrency, SERVICE_INTERESTS } from "@/lib/utils";
+import { formatCurrency, SERVICE_INTERESTS, getISTDateRange } from "@/lib/utils";
 import { DealCard } from "@/components/pipeline/DealCard";
 import { DealModal } from "@/components/pipeline/DealModal";
 import { PaymentModal } from "@/components/payments/PaymentModal";
@@ -326,48 +326,22 @@ export default function PipelinePage() {
         }
       }
 
-      // 4. Date filter
+      // 4. Date filter strictly anchored to IST
       if (dateFilter !== "all") {
         const dealDateStr = deal.createdAt || deal.updatedAt;
         if (!dealDateStr) return false;
         const dealDate = new Date(dealDateStr);
-        const now = new Date();
+        if (isNaN(dealDate.getTime())) return false;
 
-        if (dateFilter === "today") {
-          const isToday =
-            dealDate.getDate() === now.getDate() &&
-            dealDate.getMonth() === now.getMonth() &&
-            dealDate.getFullYear() === now.getFullYear();
-          if (!isToday) return false;
-        } else if (dateFilter === "yesterday") {
-          const yesterday = new Date(now);
-          yesterday.setDate(yesterday.getDate() - 1);
-          const isYesterday =
-            dealDate.getDate() === yesterday.getDate() &&
-            dealDate.getMonth() === yesterday.getMonth() &&
-            dealDate.getFullYear() === yesterday.getFullYear();
-          if (!isYesterday) return false;
-        } else if (dateFilter === "this_week") {
-          const sevenDaysAgo = new Date(now);
-          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-          sevenDaysAgo.setHours(0, 0, 0, 0);
-          if (dealDate < sevenDaysAgo) return false;
-        } else if (dateFilter === "this_month") {
-          const isThisMonth =
-            dealDate.getMonth() === now.getMonth() &&
-            dealDate.getFullYear() === now.getFullYear();
-          if (!isThisMonth) return false;
-        } else if (dateFilter === "custom") {
-          if (customStartDate) {
-            const start = new Date(customStartDate);
-            start.setHours(0, 0, 0, 0);
-            if (dealDate < start) return false;
-          }
-          if (customEndDate) {
-            const end = new Date(customEndDate);
-            end.setHours(23, 59, 59, 999);
-            if (dealDate > end) return false;
-          }
+        const rangePreset = dateFilter === "this_week" ? "week" : dateFilter === "this_month" ? "month" : dateFilter;
+        const { startOfPeriod, endOfPeriod } = getISTDateRange(
+          rangePreset,
+          customStartDate,
+          customEndDate
+        );
+
+        if (dealDate < startOfPeriod || dealDate > endOfPeriod) {
+          return false;
         }
       }
 

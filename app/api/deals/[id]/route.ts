@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { isManagerOrAdmin } from "@/lib/rbac";
-import { parseScheduledDateTime } from "@/lib/utils";
+import { parseScheduledDateTime, getISTDateString } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -82,7 +82,7 @@ export async function PATCH(
           ...existingDossier,
           executiveName: wonDetails.executiveName || existingDossier.executiveName || null,
           executiveEmail: wonDetails.executiveEmail || existingDossier.executiveEmail || null,
-          wonDate: wonDetails.wonDate || existingDossier.wonDate || new Date().toISOString().split("T")[0],
+          wonDate: wonDetails.wonDate || existingDossier.wonDate || getISTDateString(),
           productName: wonDetails.productName || existingDossier.productName || newService,
           productDescription: wonDetails.productDescription ?? existingDossier.productDescription ?? null,
           customerCompanyName: wonDetails.customerCompanyName || body.companyName || existingDossier.customerCompanyName || null,

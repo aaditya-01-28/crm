@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
-import { parseScheduledDateTime } from "@/lib/utils";
+import { parseScheduledDateTime, formatDateTime } from "@/lib/utils";
 
 export async function PATCH(
   request: NextRequest,
@@ -99,7 +99,7 @@ export async function PATCH(
         const stageType = task.task_type === "product_demo" ? "demo" : "callback";
         const logRemark = remark
           ? `Rescheduled: ${remark}`
-          : `Rescheduled to ${finalScheduledTime ? finalScheduledTime.toLocaleString() : "TBD"}`;
+          : `Rescheduled to ${finalScheduledTime ? formatDateTime(finalScheduledTime) : "TBD"}`;
 
         const leadStatus = task.task_type === "product_demo" ? "demo_scheduled" : "callback";
         await client.query(

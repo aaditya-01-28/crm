@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
-import { parseScheduledDateTime } from "@/lib/utils";
+import { parseScheduledDateTime, getISTDateRange } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
@@ -15,16 +15,8 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const source = searchParams.get("source");
 
-  const now = new Date();
   // Anchor "Today" to Indian Standard Time (IST, UTC+05:30) so tasks scheduled late evening or early morning stay properly bucketed
-  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-  const istNow = new Date(now.getTime() + IST_OFFSET_MS);
-  const year = istNow.getUTCFullYear();
-  const month = istNow.getUTCMonth();
-  const date = istNow.getUTCDate();
-
-  const startOfDay = new Date(Date.UTC(year, month, date, 0, 0, 0, 0) - IST_OFFSET_MS);
-  const endOfDay = new Date(Date.UTC(year, month, date, 23, 59, 59, 999) - IST_OFFSET_MS);
+  const { startOfPeriod: startOfDay, endOfPeriod: endOfDay } = getISTDateRange("today");
 
   try {
     return await withClient(async (client) => {

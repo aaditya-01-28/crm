@@ -207,7 +207,7 @@ export async function PATCH(
           [disposition, durationSeconds, remark || null, recordingUrl || null, logSource, targetCallId]
         );
       } else {
-        const parsedTimestamp = callTimestamp ? new Date(callTimestamp) : null;
+        const parsedTimestamp = callTimestamp ? parseScheduledDateTime(callTimestamp) : null;
         const finalTimestamp = parsedTimestamp && !isNaN(parsedTimestamp.getTime()) ? parsedTimestamp : new Date();
 
         await client.query(
