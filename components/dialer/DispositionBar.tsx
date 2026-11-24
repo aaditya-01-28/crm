@@ -49,7 +49,7 @@ export function DispositionBar({
   leadId,
   quickNote = "",
 }: DispositionBarProps) {
-  const [modal, setModal] = useState<"callback" | "demo" | null>(null);
+  const [modal, setModal] = useState<"callback" | "demo" | "demo_done" | null>(null);
   const [remark, setRemark] = useState("");
   const [callbackDatetime, setCallbackDatetime] = useState("");
   const [demoDatetime, setDemoDatetime] = useState("");
@@ -66,6 +66,10 @@ export function DispositionBar({
       setRemark(quickNote);
       setDemoDatetime("");
       setModal("demo");
+    } else if (type === "Demo Done") {
+      setRemark(quickNote);
+      setCallbackDatetime("");
+      setModal("demo_done");
     } else {
       const extra = quickNote.trim() ? { remark: quickNote.trim() } : undefined;
       onDispose(type, extra);
@@ -90,6 +94,14 @@ export function DispositionBar({
     closeModal();
   }
 
+  function submitDemoDone() {
+    onDispose("Demo Done", {
+      remark: [quickNote.trim(), remark.trim()].filter(Boolean).join(" • ") || undefined,
+      callbackDatetime: callbackDatetime || undefined,
+    });
+    closeModal();
+  }
+
   function closeModal() {
     setModal(null);
     setRemark("");
@@ -106,7 +118,7 @@ export function DispositionBar({
     const isoLocal = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
       .toISOString()
       .slice(0, 16);
-    if (modal === "callback") setCallbackDatetime(isoLocal);
+    if (modal === "callback" || modal === "demo_done") setCallbackDatetime(isoLocal);
     if (modal === "demo") setDemoDatetime(isoLocal);
   }
 
@@ -117,7 +129,7 @@ export function DispositionBar({
     const isoLocal = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
       .toISOString()
       .slice(0, 16);
-    if (modal === "callback") setCallbackDatetime(isoLocal);
+    if (modal === "callback" || modal === "demo_done") setCallbackDatetime(isoLocal);
     if (modal === "demo") setDemoDatetime(isoLocal);
   }
 
@@ -431,6 +443,100 @@ export function DispositionBar({
                   className="px-4 py-2 text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-xl shadow-sm transition cursor-pointer"
                 >
                   Schedule Demo & Advance
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Demo Done Modal: Complete Demo & Schedule Closing Callback */}
+      {modal === "demo_done" && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full border border-gray-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 bg-emerald-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CheckCircle className="w-5 h-5 text-emerald-100" />
+                <h3 className="font-bold text-sm">Demo Done & Follow-Up Callback</h3>
+              </div>
+              <button
+                type="button"
+                onClick={closeModal}
+                className="text-white/80 hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs">
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">
+                  Post-Demo Follow-Up Callback (Optional)
+                </label>
+                <input
+                  type="datetime-local"
+                  value={callbackDatetime}
+                  onChange={(e) => setCallbackDatetime(e.target.value)}
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+
+                {/* Quick Presets */}
+                <div className="flex items-center gap-1.5 mt-2">
+                  <span className="text-[10px] text-gray-400">Quick:</span>
+                  <button
+                    type="button"
+                    onClick={() => setPresetTime(2)}
+                    className="px-2 py-0.5 rounded bg-gray-100 hover:bg-emerald-50 text-[10px] font-semibold text-gray-700 hover:text-emerald-700 border border-gray-200 transition cursor-pointer"
+                  >
+                    +2 Hours
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTomorrowTime(11)}
+                    className="px-2 py-0.5 rounded bg-gray-100 hover:bg-emerald-50 text-[10px] font-semibold text-gray-700 hover:text-emerald-700 border border-gray-200 transition cursor-pointer"
+                  >
+                    Tomorrow 11 AM
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTomorrowTime(16)}
+                    className="px-2 py-0.5 rounded bg-gray-100 hover:bg-emerald-50 text-[10px] font-semibold text-gray-700 hover:text-emerald-700 border border-gray-200 transition cursor-pointer"
+                  >
+                    Tomorrow 4 PM
+                  </button>
+                </div>
+                <p className="text-[11px] text-gray-500 mt-1.5">
+                  💡 A follow-up task will be added to your Agenda so you never miss calling back to close the deal.
+                </p>
+              </div>
+
+              <div>
+                <label className="font-semibold text-gray-700 block mb-1">
+                  Demo Discussion Notes & Pricing Discussed
+                </label>
+                <textarea
+                  value={remark}
+                  onChange={(e) => setRemark(e.target.value)}
+                  rows={2}
+                  placeholder="e.g. Completed walkthrough, client liked WhatsApp green tick, promised quotation..."
+                  className="w-full p-3 bg-gray-50 border border-gray-300 rounded-xl text-xs text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="px-3.5 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={submitDemoDone}
+                  className="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-sm transition cursor-pointer"
+                >
+                  Save Demo Done & Advance
                 </button>
               </div>
             </div>

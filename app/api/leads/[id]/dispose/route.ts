@@ -139,6 +139,13 @@ export async function PATCH(
         case "Demo Done":
         case "Demo Completed":
           newStatus = "demo_done";
+          taskToCreate = {
+            taskType: "callback",
+            scheduledTime: callbackDatetime ? new Date(callbackDatetime) : null,
+            notes: remark
+              ? `Post-Demo Follow-Up: ${remark}`
+              : "Post-Demo Follow-Up: Client demo completed, call back to close deal.",
+          };
           break;
       }
 
@@ -307,19 +314,44 @@ export async function PATCH(
         await client.query(
           `ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_source TEXT DEFAULT 'dialer';`
         ).catch(() => {});
-        await client.query(
-          `INSERT INTO scheduled_tasks (tenant_id, lead_id, rep_id, task_type, scheduled_time, meeting_link, notes, status, task_source, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'dialer', NOW(), NOW())`,
-          [
-            tenantId,
-            id,
-            repId,
-            taskToCreate.taskType,
-            taskToCreate.scheduledTime,
-            taskToCreate.meetingLink || null,
-            taskToCreate.notes || null,
-          ]
-        );
+
+        // If creating a callback task, check if there's already a pending callback for this lead
+        let alreadyHasPendingCb = false;
+        if (taskToCreate.taskType === "callback") {
+          const existingCb = await client.query(
+            `SELECT id FROM scheduled_tasks WHERE lead_id = $1 AND task_type = 'callback' AND status = 'pending' LIMIT 1`,
+            [id]
+          );
+          if (existingCb.rows.length > 0) {
+            alreadyHasPendingCb = true;
+            if (taskToCreate.scheduledTime) {
+              await client.query(
+                `UPDATE scheduled_tasks
+                 SET scheduled_time = $1,
+                     notes = COALESCE($2, notes),
+                     updated_at = NOW()
+                 WHERE id = $3`,
+                [taskToCreate.scheduledTime, taskToCreate.notes, existingCb.rows[0].id]
+              );
+            }
+          }
+        }
+
+        if (!alreadyHasPendingCb) {
+          await client.query(
+            `INSERT INTO scheduled_tasks (tenant_id, lead_id, rep_id, task_type, scheduled_time, meeting_link, notes, status, task_source, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'dialer', NOW(), NOW())`,
+            [
+              tenantId,
+              id,
+              repId,
+              taskToCreate.taskType,
+              taskToCreate.scheduledTime,
+              taskToCreate.meetingLink || null,
+              taskToCreate.notes || null,
+            ]
+          );
+        }
       }
 
       // Complete pending product_demo tasks if demo done

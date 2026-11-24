@@ -70,7 +70,8 @@ export default function DashboardPage() {
       }
       return res.json();
     },
-    staleTime: 30 * 1000, // 30 seconds
+    staleTime: 10 * 1000,
+    refetchInterval: 15 * 1000, // Real-time 15s auto-refresh
   });
 
   const handleRefresh = async () => {

@@ -152,7 +152,11 @@ export async function GET(request: NextRequest) {
       const callCountsRes = await client.query(
         `SELECT COUNT(id)::int as "totalCalls",
                 COUNT(DISTINCT lead_id)::int as "uniqueDials",
-                COUNT(CASE WHEN duration_seconds > 0 OR disposition ILIKE '%Connected%' OR disposition = 'Contacted' THEN 1 END)::int as "connectedCalls",
+                COUNT(CASE 
+                  WHEN disposition NOT IN ('RNR', 'Ringing No Response', 'Ring No Response', 'Invalid')
+                   AND (duration_seconds > 0 OR disposition IN ('Connected', 'Contacted', 'Answered', 'Callback', 'Callback Requested', 'Demo Scheduled', 'Demo Done', 'Demo Completed', 'Already Using Our Service', 'Already Purchased or Using Other Company Service', 'Not Interested', 'Future Requirement'))
+                  THEN 1 
+                END)::int as "connectedCalls",
                 COALESCE(SUM(duration_seconds), 0)::int as "totalDuration"
          FROM call_logs
          WHERE ${callWhereClause}`,
@@ -187,7 +191,9 @@ export async function GET(request: NextRequest) {
       const talkTimeFormatted = formatDuration(totalDurationSeconds);
 
       // 3. Scheduled Tasks (Agenda, Callbacks, Demos)
-      const taskWhereClause = targetUserId ? "t.tenant_id = $1 AND t.rep_id = $2" : "t.tenant_id = $1";
+      const taskWhereClause = targetUserId
+        ? "t.tenant_id = $1 AND (t.rep_id = $2 OR l.assigned_rep_id = $2)"
+        : "t.tenant_id = $1";
       const taskParams = targetUserId ? [tenantId, targetUserId] : [tenantId];
 
       const agendaRes = await client.query(
@@ -198,12 +204,28 @@ export async function GET(request: NextRequest) {
                 l.company_name as "companyName", l.business_vertical as "businessVertical",
                 u.full_name as "repFullName"
          FROM scheduled_tasks t
-         JOIN leads l ON t.lead_id = l.id
-         JOIN users u ON t.rep_id = u.id
-         WHERE ${taskWhereClause} AND t.status = 'pending'
-           AND t.scheduled_time >= $${taskParams.length + 1} AND t.scheduled_time <= $${taskParams.length + 2}
-         ORDER BY t.scheduled_time ASC
-          LIMIT 6`,
+         LEFT JOIN leads l ON t.lead_id = l.id
+         LEFT JOIN users u ON t.rep_id = u.id
+         WHERE ${taskWhereClause}
+           AND (
+             -- Pending tasks scheduled for today / this period
+             (t.status = 'pending' AND t.scheduled_time >= $${taskParams.length + 1} AND t.scheduled_time <= $${taskParams.length + 2})
+             -- Pending overdue tasks
+             OR (t.status = 'pending' AND t.scheduled_time < $${taskParams.length + 1})
+             -- Pending unconfirmed tasks (client callback yet to confirm)
+             OR (t.status = 'pending' AND t.scheduled_time IS NULL)
+             -- Demos completed in this period
+             OR (t.task_type = 'product_demo' AND t.status = 'completed' AND t.updated_at >= $${taskParams.length + 1} AND t.updated_at <= $${taskParams.length + 2})
+           )
+         ORDER BY
+           CASE
+             WHEN t.status = 'completed' THEN 3
+             WHEN t.scheduled_time < $${taskParams.length + 1} THEN 0
+             WHEN t.scheduled_time IS NOT NULL THEN 1
+             ELSE 2
+           END,
+           t.scheduled_time ASC NULLS LAST
+         LIMIT 10`,
         [...taskParams, startOfPeriod, endOfPeriod]
       );
 
@@ -229,12 +251,13 @@ export async function GET(request: NextRequest) {
 
       const taskStatsRes = await client.query(
         `SELECT
-           COUNT(CASE WHEN status = 'pending' AND scheduled_time < $2 THEN 1 END)::int as "overdueTasksCount",
-           COUNT(CASE WHEN task_type = 'callback' AND status = 'pending' AND scheduled_time >= $3 AND scheduled_time <= $4 THEN 1 END)::int as "todayCallbacksCount",
-           COUNT(CASE WHEN task_type = 'product_demo' AND status = 'pending' AND scheduled_time >= $3 AND scheduled_time <= $4 THEN 1 END)::int as "todayDemosCount",
-           COUNT(CASE WHEN task_type = 'product_demo' AND status = 'completed' AND updated_at >= $3 AND updated_at <= $4 THEN 1 END)::int as "todayDemosDoneCount"
-         FROM scheduled_tasks
-         WHERE ${targetUserId ? "tenant_id = $1 AND rep_id = $5" : "tenant_id = $1"}`,
+           COUNT(CASE WHEN t.status = 'pending' AND t.scheduled_time < $2 THEN 1 END)::int as "overdueTasksCount",
+           COUNT(CASE WHEN t.task_type = 'callback' AND t.status = 'pending' AND ((t.scheduled_time >= $3 AND t.scheduled_time <= $4) OR t.scheduled_time IS NULL) THEN 1 END)::int as "todayCallbacksCount",
+           COUNT(CASE WHEN t.task_type = 'product_demo' AND t.status = 'pending' AND t.scheduled_time >= $3 AND t.scheduled_time <= $4 THEN 1 END)::int as "todayDemosCount",
+           COUNT(CASE WHEN t.task_type = 'product_demo' AND t.status = 'completed' AND t.updated_at >= $3 AND t.updated_at <= $4 THEN 1 END)::int as "todayDemosDoneCount"
+         FROM scheduled_tasks t
+         LEFT JOIN leads l ON t.lead_id = l.id
+         WHERE ${targetUserId ? "t.tenant_id = $1 AND (t.rep_id = $5 OR l.assigned_rep_id = $5)" : "t.tenant_id = $1"}`,
         targetUserId
           ? [tenantId, now, startOfPeriod, endOfPeriod, targetUserId]
           : [tenantId, now, startOfPeriod, endOfPeriod]

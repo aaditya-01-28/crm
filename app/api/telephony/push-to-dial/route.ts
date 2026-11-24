@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 
-// Ensure push_to_dial_jobs table exists
+// Cached flag so DDL is never executed on high-frequency polling requests
+let pushTableChecked = false;
+
 async function ensurePushTable(client: any) {
+  if (pushTableChecked) return;
   await client.query(`
     CREATE TABLE IF NOT EXISTS push_to_dial_jobs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -17,10 +20,11 @@ async function ensurePushTable(client: any) {
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
-    CREATE INDEX IF NOT EXISTS idx_push_to_dial_rep_status ON push_to_dial_jobs (rep_id, status);
+    CREATE INDEX IF NOT EXISTS idx_push_to_dial_rep_status ON push_to_dial_jobs (rep_id, status, created_at DESC);
   `).catch((err: any) => {
     console.error("[PUSH_TO_DIAL_TABLE_INIT]", err?.message);
   });
+  pushTableChecked = true;
 }
 
 /**
@@ -114,8 +118,6 @@ export async function GET(request: NextRequest) {
 
   try {
     return await withClient(async (client) => {
-      await ensurePushTable(client);
-
       // Web CRM checking specific job status
       if (jobId) {
         const res = await client.query(

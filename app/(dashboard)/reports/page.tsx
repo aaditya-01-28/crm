@@ -3,10 +3,24 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { BarChart3, Download, RefreshCw, TrendingUp, Calendar } from "lucide-react";
+import { BarChart3, Download, RefreshCw, TrendingUp, Calendar, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { formatCurrency, formatDuration } from "@/lib/utils";
 
 type ReportPeriod = "today" | "yesterday" | "week" | "month" | "custom";
+
+type SortField =
+  | "repName"
+  | "totalCalls"
+  | "uniqueDialed"
+  | "connectedCalls"
+  | "talkTime"
+  | "demosBooked"
+  | "demosCompleted"
+  | "quotesSent"
+  | "totalQuotedValue"
+  | "revenueCollected";
+
+type SortDirection = "asc" | "desc";
 
 const formatLocalDate = (d: Date): string => {
   const year = d.getFullYear();
@@ -94,12 +108,23 @@ export default function ReportsPage() {
   const [period, setPeriod] = useState<ReportPeriod>("today");
   const [customDateFrom, setCustomDateFrom] = useState(() => getPresetDates("today").from);
   const [customDateTo, setCustomDateTo] = useState(() => getPresetDates("today").to);
+  const [sortField, setSortField] = useState<SortField>("totalCalls");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["eod", period, customDateFrom, customDateTo],
     queryFn: () => fetchEOD(customDateFrom, customDateTo),
-    refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 min
+    refetchInterval: 15_000, // Real-time 15s auto-refresh
   });
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection((prev) => (prev === "desc" ? "asc" : "desc"));
+    } else {
+      setSortField(field);
+      setSortDirection(field === "repName" ? "asc" : "desc");
+    }
+  };
 
   const handleRefresh = async () => {
     try {
@@ -156,6 +181,26 @@ export default function ReportsPage() {
 
   const totals = data?.totals;
   const reps = data?.reps || [];
+
+  const sortedReps = [...reps].sort((a, b) => {
+    let valA: any;
+    let valB: any;
+    if (sortField === "talkTime") {
+      valA = a.talkTimeSecs ?? (a.talkTimeMins || 0) * 60;
+      valB = b.talkTimeSecs ?? (b.talkTimeMins || 0) * 60;
+    } else {
+      valA = a[sortField];
+      valB = b[sortField];
+    }
+
+    if (typeof valA === "string") {
+      const cmp = valA.localeCompare(valB || "");
+      return sortDirection === "asc" ? cmp : -cmp;
+    }
+    const numA = Number(valA || 0);
+    const numB = Number(valB || 0);
+    return sortDirection === "asc" ? numA - numB : numB - numA;
+  });
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -279,9 +324,30 @@ export default function ReportsPage() {
           )}
 
           {/* Rep Leaderboard */}
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-5 py-4 border-b border-gray-100">
-              <h2 className="font-semibold text-gray-800">Rep Performance</h2>
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-xs">
+            <div className="px-5 py-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h2 className="font-semibold text-gray-800 text-base">Rep Performance Leaderboard</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Sorted by <strong className="text-emerald-700 font-semibold">{
+                    sortField === "totalCalls" ? "Calls" :
+                    sortField === "uniqueDialed" ? "Unique Dialed" :
+                    sortField === "connectedCalls" ? "Connected Calls" :
+                    sortField === "talkTime" ? "Talk Time" :
+                    sortField === "demosBooked" ? "Demos Booked" :
+                    sortField === "demosCompleted" ? "Demos Done" :
+                    sortField === "quotesSent" ? "Quotes" :
+                    sortField === "totalQuotedValue" ? "Quoted Value" :
+                    sortField === "revenueCollected" ? "Revenue" : "Rep Name"
+                  }</strong> ({sortDirection === "desc" ? "highest first ↓" : "lowest first ↑"}) • Click any column title to sort
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold border border-emerald-200">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  Live Sync (15s)
+                </span>
+              </div>
             </div>
             {reps.length === 0 ? (
               <div className="text-center py-12 text-gray-400">
@@ -290,59 +356,187 @@ export default function ReportsPage() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-xs text-gray-500">
+                  <thead className="bg-gray-50 text-xs text-gray-500 border-b border-gray-200">
                     <tr>
-                      <th className="px-4 py-3 text-left font-semibold">Rep</th>
-                      <th className="px-3 py-3 text-center font-semibold">Calls</th>
-                      <th className="px-3 py-3 text-center font-semibold">Unique</th>
-                      <th className="px-3 py-3 text-center font-semibold">Connected</th>
-                      <th className="px-3 py-3 text-center font-semibold">Talk Time</th>
-                      <th className="px-3 py-3 text-center font-semibold">Demos 📅</th>
-                      <th className="px-3 py-3 text-center font-semibold">Done ✅</th>
-                      <th className="px-3 py-3 text-center font-semibold">Quotes</th>
-                      <th className="px-3 py-3 text-right font-semibold">Quoted ₹</th>
-                      <th className="px-3 py-3 text-right font-semibold">Revenue ₹</th>
+                      <th
+                        onClick={() => handleSort("repName")}
+                        className="px-4 py-3 text-left font-semibold cursor-pointer select-none group hover:bg-gray-100 transition"
+                        title="Sort by Rep Name"
+                      >
+                        <div className="inline-flex items-center gap-1.5">
+                          <span className={sortField === "repName" ? "text-emerald-700 font-bold" : ""}>Rep</span>
+                          {sortField === "repName" ? (
+                            sortDirection === "asc" ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-gray-400 opacity-40 group-hover:opacity-100 transition" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("totalCalls")}
+                        className="px-3 py-3 text-center font-semibold cursor-pointer select-none group hover:bg-gray-100 transition"
+                        title="Sort by Total Calls"
+                      >
+                        <div className="inline-flex items-center gap-1.5 justify-center">
+                          <span className={sortField === "totalCalls" ? "text-emerald-700 font-bold" : ""}>Calls</span>
+                          {sortField === "totalCalls" ? (
+                            sortDirection === "asc" ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-gray-400 opacity-40 group-hover:opacity-100 transition" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("uniqueDialed")}
+                        className="px-3 py-3 text-center font-semibold cursor-pointer select-none group hover:bg-gray-100 transition"
+                        title="Sort by Unique Leads Dialed"
+                      >
+                        <div className="inline-flex items-center gap-1.5 justify-center">
+                          <span className={sortField === "uniqueDialed" ? "text-emerald-700 font-bold" : ""}>Unique</span>
+                          {sortField === "uniqueDialed" ? (
+                            sortDirection === "asc" ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-gray-400 opacity-40 group-hover:opacity-100 transition" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("connectedCalls")}
+                        className="px-3 py-3 text-center font-semibold cursor-pointer select-none group hover:bg-gray-100 transition"
+                        title="Sort by Connected Calls"
+                      >
+                        <div className="inline-flex items-center gap-1.5 justify-center">
+                          <span className={sortField === "connectedCalls" ? "text-emerald-700 font-bold" : ""}>Connected</span>
+                          {sortField === "connectedCalls" ? (
+                            sortDirection === "asc" ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-gray-400 opacity-40 group-hover:opacity-100 transition" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("talkTime")}
+                        className="px-3 py-3 text-center font-semibold cursor-pointer select-none group hover:bg-gray-100 transition"
+                        title="Sort by Talk Time"
+                      >
+                        <div className="inline-flex items-center gap-1.5 justify-center">
+                          <span className={sortField === "talkTime" ? "text-emerald-700 font-bold" : ""}>Talk Time</span>
+                          {sortField === "talkTime" ? (
+                            sortDirection === "asc" ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-gray-400 opacity-40 group-hover:opacity-100 transition" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("demosBooked")}
+                        className="px-3 py-3 text-center font-semibold cursor-pointer select-none group hover:bg-gray-100 transition"
+                        title="Sort by Demos Booked"
+                      >
+                        <div className="inline-flex items-center gap-1.5 justify-center">
+                          <span className={sortField === "demosBooked" ? "text-emerald-700 font-bold" : ""}>Demos 📅</span>
+                          {sortField === "demosBooked" ? (
+                            sortDirection === "asc" ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-gray-400 opacity-40 group-hover:opacity-100 transition" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("demosCompleted")}
+                        className="px-3 py-3 text-center font-semibold cursor-pointer select-none group hover:bg-gray-100 transition"
+                        title="Sort by Demos Done"
+                      >
+                        <div className="inline-flex items-center gap-1.5 justify-center">
+                          <span className={sortField === "demosCompleted" ? "text-emerald-700 font-bold" : ""}>Done ✅</span>
+                          {sortField === "demosCompleted" ? (
+                            sortDirection === "asc" ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-gray-400 opacity-40 group-hover:opacity-100 transition" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("quotesSent")}
+                        className="px-3 py-3 text-center font-semibold cursor-pointer select-none group hover:bg-gray-100 transition"
+                        title="Sort by Quotes Sent"
+                      >
+                        <div className="inline-flex items-center gap-1.5 justify-center">
+                          <span className={sortField === "quotesSent" ? "text-emerald-700 font-bold" : ""}>Quotes</span>
+                          {sortField === "quotesSent" ? (
+                            sortDirection === "asc" ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-gray-400 opacity-40 group-hover:opacity-100 transition" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("totalQuotedValue")}
+                        className="px-3 py-3 text-right font-semibold cursor-pointer select-none group hover:bg-gray-100 transition"
+                        title="Sort by Total Quoted Value"
+                      >
+                        <div className="inline-flex items-center gap-1.5 justify-end">
+                          <span className={sortField === "totalQuotedValue" ? "text-emerald-700 font-bold" : ""}>Quoted ₹</span>
+                          {sortField === "totalQuotedValue" ? (
+                            sortDirection === "asc" ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-gray-400 opacity-40 group-hover:opacity-100 transition" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("revenueCollected")}
+                        className="px-3 py-3 text-right font-semibold cursor-pointer select-none group hover:bg-gray-100 transition"
+                        title="Sort by Revenue Collected"
+                      >
+                        <div className="inline-flex items-center gap-1.5 justify-end">
+                          <span className={sortField === "revenueCollected" ? "text-emerald-700 font-bold" : ""}>Revenue ₹</span>
+                          {sortField === "revenueCollected" ? (
+                            sortDirection === "asc" ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-gray-400 opacity-40 group-hover:opacity-100 transition" />
+                          )}
+                        </div>
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {reps
-                      .sort((a, b) => b.revenueCollected - a.revenueCollected)
-                      .map((rep, i) => (
-                        <tr
-                          key={rep.repId}
-                          className="hover:bg-gray-50 transition"
-                        >
-                          <td className="px-4 py-3 font-medium text-gray-800">
-                            {i === 0 && "🥇 "}
-                            {i === 1 && "🥈 "}
-                            {i === 2 && "🥉 "}
-                            {rep.repName}
-                          </td>
-                          <td className="px-3 py-3 text-center text-gray-600">{rep.totalCalls}</td>
-                          <td className="px-3 py-3 text-center text-gray-600">{rep.uniqueDialed}</td>
-                          <td className="px-3 py-3 text-center">
-                            <span className="font-medium text-green-700">{rep.connectedCalls}</span>
-                          </td>
-                          <td className="px-3 py-3 text-center text-gray-600 font-medium">
-                            {rep.talkTimeFormatted || formatDuration((rep.talkTimeMins || 0) * 60)}
-                          </td>
-                          <td className="px-3 py-3 text-center">
-                            <span className="font-medium text-purple-700">{rep.demosBooked}</span>
-                          </td>
-                          <td className="px-3 py-3 text-center">
-                            <span className="font-medium text-violet-700">{rep.demosCompleted}</span>
-                          </td>
-                          <td className="px-3 py-3 text-center text-gray-600">{rep.quotesSent}</td>
-                          <td className="px-3 py-3 text-right text-gray-700 font-medium">
-                            {formatCurrency(rep.totalQuotedValue)}
-                          </td>
-                          <td className="px-3 py-3 text-right">
-                            <span className="font-bold text-green-700">
-                              {formatCurrency(rep.revenueCollected)}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                    {sortedReps.map((rep, i) => (
+                      <tr
+                        key={rep.repId}
+                        className="hover:bg-gray-50 transition"
+                      >
+                        <td className="px-4 py-3 font-medium text-gray-800">
+                          {i === 0 && "🥇 "}
+                          {i === 1 && "🥈 "}
+                          {i === 2 && "🥉 "}
+                          {rep.repName}
+                        </td>
+                        <td className="px-3 py-3 text-center text-gray-700 font-semibold">{rep.totalCalls}</td>
+                        <td className="px-3 py-3 text-center text-gray-600">{rep.uniqueDialed}</td>
+                        <td className="px-3 py-3 text-center">
+                          <span className="font-medium text-green-700">{rep.connectedCalls}</span>
+                        </td>
+                        <td className="px-3 py-3 text-center text-gray-600 font-medium">
+                          {rep.talkTimeFormatted || formatDuration((rep.talkTimeMins || 0) * 60)}
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          <span className="font-medium text-purple-700">{rep.demosBooked}</span>
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          <span className="font-medium text-violet-700">{rep.demosCompleted}</span>
+                        </td>
+                        <td className="px-3 py-3 text-center text-gray-600">{rep.quotesSent}</td>
+                        <td className="px-3 py-3 text-right text-gray-700 font-medium">
+                          {formatCurrency(rep.totalQuotedValue)}
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <span className="font-bold text-green-700">
+                            {formatCurrency(rep.revenueCollected)}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>

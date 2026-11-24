@@ -60,7 +60,7 @@ export default function AgendaPage() {
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["agenda"],
     queryFn: fetchAgenda,
-    refetchInterval: 60_000, // Refresh every minute
+    refetchInterval: 15_000, // Real-time 15s dynamic sync
   });
 
   const handleRefresh = async () => {

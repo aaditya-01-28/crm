@@ -1192,6 +1192,30 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                     </div>
                   )}
 
+                  {/* Demo Done Follow-Up Section */}
+                  {disposition === "Demo Done" && (
+                    <div className="bg-white/90 border border-teal-200/80 rounded-xl p-3.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-semibold text-teal-900 flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-teal-600" />
+                          Post-Demo Follow-Up Date & Time
+                        </label>
+                        <span className="text-[11px] text-slate-500 font-normal">
+                          (Optional closing callback)
+                        </span>
+                      </div>
+                      <input
+                        type="datetime-local"
+                        value={callbackDatetime}
+                        onChange={(e) => setCallbackDatetime(e.target.value)}
+                        className="w-full text-xs px-3 py-2 bg-white border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-teal-500 text-gray-900"
+                      />
+                      <p className="text-[11px] text-gray-500">
+                        💡 A follow-up task will be added to your Agenda so you never miss calling back to close the deal.
+                      </p>
+                    </div>
+                  )}
+
                   <div>
                     <label className="text-xs font-medium text-slate-700 block mb-1">
                       Discussion Notes / Remark <span className="text-red-500">*</span>

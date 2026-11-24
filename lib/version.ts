@@ -1,12 +1,12 @@
-export const APP_VERSION = "1.2.6";
-export const APP_BUILD = 9;
+export const APP_VERSION = "1.2.7";
+export const APP_BUILD = 10;
 export const APP_RELEASE_DATE = "2026-11-24";
 export const APP_RELEASE_NOTES = [
-  "Fixed lead activity history bug: manual notes and subsequent calls no longer overwrite previous comments/dispositions",
-  "Fixed mobile app dashboard Total Talk Time: now displays exact timestamp duration (e.g. 0m 22s, 2m 14s)",
-  "Dynamic version badge on Mobile App dashboard synced with app version",
-  "Added 'Mark as read' and 'Read all' options to Notification Bell",
-  "Strict agenda write permissions: only the assigned representative can complete tasks",
-  "Level 2 Manager subtabs in Call Logs: toggle between personal call logs and whole team call logs",
-  "Live assigned timestamp on leads in both web directory and mobile dialer",
+  "Dynamic real-time dashboard auto-refresh across both Web CRM and Mobile APK (15s live sync)",
+  "Post-demo follow-up callback automatically scheduled upon Demo Done so closing deals are never missed in Agenda",
+  "Interactive multi-column sorting across all titles in EOD Reports with default sort by total calls descending",
+  "Callbacks & Demos card dynamically tracks active follow-ups, pending demos, and demos completed today",
+  "Fixed lead activity history: manual notes and subsequent calls preserve full chronological timeline without overwriting",
+  "Exact talk time duration displayed on Mobile APK dashboard",
+  "Live assigned timestamp visible on leads across both Web CRM Directory and Mobile APK Queue",
 ];

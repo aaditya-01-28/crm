@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
       if (disposition && disposition !== "all") {
         if (disposition === "Connected" || disposition === "connected") {
           conditions.push(
-            `(c.duration_seconds > 0 OR c.disposition = 'Connected' OR c.disposition ILIKE '%Connected%' OR c.disposition = 'Contacted' OR c.disposition = 'Answered')`
+            `(c.disposition NOT IN ('RNR', 'Ringing No Response', 'Ring No Response', 'Invalid') AND (c.duration_seconds > 0 OR c.disposition IN ('Connected', 'Contacted', 'Answered', 'Callback', 'Callback Requested', 'Demo Scheduled', 'Demo Done', 'Demo Completed', 'Already Using Our Service', 'Already Purchased or Using Other Company Service', 'Not Interested', 'Future Requirement')))`
           );
         } else if (
           disposition === "RNR" ||
@@ -90,7 +90,7 @@ export async function GET(request: NextRequest) {
           disposition === "Ring No Response"
         ) {
           conditions.push(
-            `(c.duration_seconds = 0 AND (c.disposition = 'RNR' OR c.disposition ILIKE '%Ringing%' OR c.disposition ILIKE '%No Response%' OR c.disposition ILIKE '%No Answer%'))`
+            `(c.disposition IN ('RNR', 'Ringing No Response', 'Ring No Response') OR c.disposition ILIKE '%Ringing%' OR c.disposition ILIKE '%No Response%' OR c.disposition ILIKE '%No Answer%')`
           );
         } else if (disposition === "Callback" || disposition === "Callback Requested") {
           conditions.push(`(c.disposition = 'Callback' OR c.disposition ILIKE '%Callback%')`);
@@ -168,7 +168,11 @@ export async function GET(request: NextRequest) {
       const countRes = await client.query(
         `SELECT COUNT(c.id)::int as total,
                 COALESCE(SUM(c.duration_seconds), 0)::int as "totalDuration",
-                COUNT(CASE WHEN c.duration_seconds > 0 OR c.disposition ILIKE '%Connected%' OR c.disposition = 'Contacted' THEN 1 END)::int as "connectedCount"
+                COUNT(CASE 
+                  WHEN c.disposition NOT IN ('RNR', 'Ringing No Response', 'Ring No Response', 'Invalid')
+                   AND (c.duration_seconds > 0 OR c.disposition IN ('Connected', 'Contacted', 'Answered', 'Callback', 'Callback Requested', 'Demo Scheduled', 'Demo Done', 'Demo Completed', 'Already Using Our Service', 'Already Purchased or Using Other Company Service', 'Not Interested', 'Future Requirement'))
+                  THEN 1 
+                END)::int as "connectedCount"
          FROM call_logs c
          LEFT JOIN leads l ON c.lead_id = l.id
          WHERE ${whereClause}`,

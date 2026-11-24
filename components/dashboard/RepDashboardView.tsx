@@ -39,6 +39,7 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
     talkTimeMins = 0,
     todayCallbacksCount = 0,
     todayDemosCount = 0,
+    todayDemosDoneCount = 0,
     overdueTasksCount = 0,
     activeDealsCount = 0,
     activePipelineValue = 0,
@@ -152,15 +153,21 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
 
         <KpiCard
           label="Callbacks & Demos"
-          value={todayCallbacksCount + todayDemosCount}
+          value={todayCallbacksCount + todayDemosCount + todayDemosDoneCount}
           subValue={
             overdueTasksCount > 0
               ? `⚠️ ${overdueTasksCount} overdue follow-up(s)`
+              : todayDemosDoneCount > 0
+              ? `✅ ${todayDemosDoneCount} demo(s) completed today`
               : "All follow-ups on track"
           }
           icon={Calendar}
-          color={overdueTasksCount > 0 ? "rose" : "amber"}
-          badge={`${todayDemosCount} Demos Scheduled`}
+          color={overdueTasksCount > 0 ? "rose" : todayDemosDoneCount > 0 ? "emerald" : "amber"}
+          badge={
+            todayDemosDoneCount > 0
+              ? `${todayDemosDoneCount} Done • ${todayDemosCount} Pending`
+              : `${todayDemosCount} Demos Scheduled`
+          }
         />
 
         <KpiCard
@@ -246,12 +253,18 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
                           <div className="flex items-center gap-2">
                             <span
                               className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
-                                task.taskType === "product_demo"
+                                task.status === "completed"
+                                  ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                                  : task.taskType === "product_demo"
                                   ? "bg-purple-100 text-purple-700 border border-purple-200"
                                   : "bg-blue-100 text-blue-700 border border-blue-200"
                               }`}
                             >
-                              {task.taskType === "product_demo" ? "Product Demo" : "Callback"}
+                              {task.status === "completed"
+                                ? "Demo Done ✅"
+                                : task.taskType === "product_demo"
+                                ? "Product Demo"
+                                : "Callback"}
                             </span>
                             <span className="text-xs font-semibold text-gray-900 truncate group-hover:text-emerald-700 transition">
                               {task.lead?.companyName || task.lead?.contactName || "Lead Contact"}
@@ -263,7 +276,7 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
                             )}
                           </div>
                           <p className="text-xs text-gray-500 flex items-center gap-2">
-                            <span>🕒 {formatDateTime(task.scheduledTime)}</span>
+                            <span>🕒 {task.scheduledTime ? formatDateTime(task.scheduledTime) : "Pending Date Confirmation"}</span>
                             {task.lead?.businessVertical && (
                               <span>• {task.lead.businessVertical}</span>
                             )}

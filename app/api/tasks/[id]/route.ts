@@ -148,6 +148,19 @@ export async function PATCH(
               JSON.stringify({ taskId: id, stage: "demo_done" }),
             ]
           ).catch(() => {});
+
+          // Automatically schedule post-demo follow-up callback task so the rep never misses closing follow-up
+          const existingPendingCallback = await client.query(
+            `SELECT id FROM scheduled_tasks WHERE lead_id = $1 AND task_type = 'callback' AND status = 'pending' LIMIT 1`,
+            [lead.id]
+          );
+          if (existingPendingCallback.rows.length === 0) {
+            await client.query(
+              `INSERT INTO scheduled_tasks (tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, task_source, created_at, updated_at)
+               VALUES ($1, $2, $3, 'callback', NULL, 'Post-Demo Follow-Up: Client demo completed, call back to close deal.', 'pending', 'dialer', NOW(), NOW())`,
+              [tenantId, lead.id, lead.assigned_rep_id || task.rep_id]
+            ).catch(() => {});
+          }
         }
       }
 

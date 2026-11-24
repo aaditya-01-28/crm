@@ -65,7 +65,11 @@ export async function GET(request: NextRequest) {
           client.query(
             `SELECT rep_id,
                     COUNT(id)::int as total_calls,
-                    COUNT(CASE WHEN duration_seconds > 0 OR disposition ILIKE '%Connected%' OR disposition = 'Contacted' THEN 1 END)::int as connected_calls,
+                    COUNT(CASE 
+                      WHEN disposition NOT IN ('RNR', 'Ringing No Response', 'Ring No Response', 'Invalid')
+                       AND (duration_seconds > 0 OR disposition IN ('Connected', 'Contacted', 'Answered', 'Callback', 'Callback Requested', 'Demo Scheduled', 'Demo Done', 'Demo Completed', 'Already Using Our Service', 'Already Purchased or Using Other Company Service', 'Not Interested', 'Future Requirement'))
+                      THEN 1 
+                    END)::int as connected_calls,
                     COALESCE(SUM(duration_seconds), 0)::int as total_duration
              FROM call_logs
              WHERE tenant_id = $1 AND rep_id = ANY($2::uuid[])
