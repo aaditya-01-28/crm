@@ -128,6 +128,23 @@ export async function GET(
         CREATE INDEX IF NOT EXISTS idx_lead_stage_history_lead ON lead_stage_history(lead_id, created_at DESC);
       `).catch(() => {});
 
+      // Self-healing: Clean up duplicate stage history records created within 5 minutes for the same lead and stage
+      await client.query(`
+        DELETE FROM lead_stage_history h1
+        WHERE EXISTS (
+          SELECT 1 FROM lead_stage_history h2
+          WHERE h2.lead_id = h1.lead_id
+            AND h2.id != h1.id
+            AND (
+              h2.stage_name = h1.stage_name
+              OR (h2.notes IS NOT NULL AND h2.notes != '' AND h2.notes = h1.notes)
+            )
+            AND h2.created_at >= (h1.created_at - INTERVAL '5 minutes')
+            AND h2.created_at <= (h1.created_at + INTERVAL '5 minutes')
+            AND h2.created_at > h1.created_at
+        );
+      `).catch(() => {});
+
       const stageHistoryRes = await client.query(
         `SELECT h.id, h.tenant_id as "tenantId", h.lead_id as "leadId", h.rep_id as "repId",
                 h.stage_name as "stageName", h.stage_type as "stageType", h.notes,

@@ -256,26 +256,39 @@ export async function PATCH(
         stageName = "Using Other Company Service";
       }
 
-      await client.query(
-        `INSERT INTO lead_stage_history (tenant_id, lead_id, rep_id, stage_name, stage_type, notes, metadata, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
-        [
-          tenantId,
-          id,
-          repId,
-          stageName,
-          stageType,
-          remark || null,
-          JSON.stringify({
-            previousStatus: lead.status,
-            newStatus,
-            demoDatetime: demoDatetime || null,
-            callbackDatetime: callbackDatetime || null,
-            decisionMakerName: decisionMakerName || null,
-            meetingLink: meetingLink || null,
-          }),
-        ]
-      ).catch(() => {});
+      // Deduplicate/Update recent stage history record within 5 minutes instead of inserting redundant duplicates
+      const recentStage = await client.query(
+        `SELECT id FROM lead_stage_history
+         WHERE lead_id = $1 AND rep_id = $2 AND tenant_id = $3
+           AND created_at >= NOW() - INTERVAL '5 minutes'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [id, repId, tenantId]
+      ).catch(() => ({ rows: [] }));
+
+      const stageMeta = JSON.stringify({
+        previousStatus: lead.status,
+        newStatus,
+        demoDatetime: demoDatetime || null,
+        callbackDatetime: callbackDatetime || null,
+        decisionMakerName: decisionMakerName || null,
+        meetingLink: meetingLink || null,
+      });
+
+      if (recentStage.rows.length > 0) {
+        await client.query(
+          `UPDATE lead_stage_history
+           SET stage_name = $1, stage_type = $2, notes = $3, metadata = $4, created_at = NOW()
+           WHERE id = $5`,
+          [stageName, stageType, remark || null, stageMeta, recentStage.rows[0].id]
+        ).catch(() => {});
+      } else {
+        await client.query(
+          `INSERT INTO lead_stage_history (tenant_id, lead_id, rep_id, stage_name, stage_type, notes, metadata, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+          [tenantId, id, repId, stageName, stageType, remark || null, stageMeta]
+        ).catch(() => {});
+      }
 
       // Synchronize lead status and exact rnr_count from call_logs
       await client.query(

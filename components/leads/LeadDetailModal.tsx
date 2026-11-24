@@ -524,31 +524,105 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
       });
     }
 
-    // Deduplicate close duplicates (e.g. stage-record and call-record created for the same event within 2 mins)
-    const deduped: typeof items = [];
-    const seen = new Set<string>();
+    // Helper to normalize dispositions and stage names into canonical keys
+    const normalizeStage = (name: string) => {
+      const s = (name || "").toLowerCase().trim();
+      if (s.includes("rnr") || s.includes("ringing") || s.includes("no response") || s.includes("no answer")) return "rnr";
+      if (s.includes("demo scheduled") || s.includes("product_demo")) return "demo_scheduled";
+      if (s.includes("demo done") || s.includes("demo completed")) return "demo_done";
+      if (s.includes("callback")) return "callback";
+      if (s.includes("other company") || s.includes("other service") || s.includes("purchased") || s.includes("competitor")) return "already_purchased";
+      if (s.includes("our service") || s.includes("already using")) return "already_using";
+      if (s.includes("not interested")) return "not_interested";
+      if (s.includes("future requirement") || s.includes("future")) return "future_requirement";
+      if (s.includes("invalid")) return "invalid";
+      if (s.includes("connected")) return "connected";
+      return s;
+    };
 
-    // Sort descending by timestamp first
+    // Sort descending by timestamp first (latest interactions first)
     items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
+    // Deduplicate and unify companion records (e.g. call log and stage transition created for the same interaction)
+    const deduped: typeof items = [];
+
     items.forEach((item) => {
-      const timeWindow = Math.floor(new Date(item.timestamp).getTime() / (1000 * 90)); // 90s bucket
-      const key = `${item.type}-${item.badge}-${timeWindow}`;
-      if (seen.has(key)) {
-        const prev = deduped.find(
-          (d) => `${d.type}-${d.badge}-${Math.floor(new Date(d.timestamp).getTime() / (1000 * 90))}` === key
-        );
-        if (prev) {
-          if (!prev.meetingLink && item.meetingLink) prev.meetingLink = item.meetingLink;
-          if (!prev.scheduledTime && item.scheduledTime) prev.scheduledTime = item.scheduledTime;
-          if (!prev.recordingUrl && item.recordingUrl) prev.recordingUrl = item.recordingUrl;
-          if ((!prev.durationSeconds || prev.durationSeconds === 0) && item.durationSeconds) prev.durationSeconds = item.durationSeconds;
-          if (!prev.notes && item.notes) prev.notes = item.notes;
+      const itemTime = new Date(item.timestamp).getTime();
+      const itemStage = normalizeStage(item.badge);
+      const itemNotes = (item.notes || "").trim().toLowerCase();
+
+      // Look for an existing match in deduped within 10 minutes
+      const matchIndex = deduped.findIndex((prev) => {
+        const prevTime = new Date(prev.timestamp).getTime();
+        const timeDiff = Math.abs(prevTime - itemTime);
+        if (timeDiff > 10 * 60 * 1000) return false; // More than 10 minutes apart: distinct interaction
+
+        const prevStage = normalizeStage(prev.badge);
+        const prevNotes = (prev.notes || "").trim().toLowerCase();
+
+        // Condition 1: Same stage/disposition within 10 minutes
+        if (prevStage === itemStage && prevStage !== "") return true;
+
+        // Condition 2: Identical notes within 10 minutes
+        if (prevNotes !== "" && prevNotes === itemNotes) return true;
+
+        // Condition 3: One is call and one is status_change within 3 minutes for this lead
+        if (
+          ((prev.type === "call" && item.type === "status_change") ||
+           (prev.type === "status_change" && item.type === "call")) &&
+          timeDiff <= 3 * 60 * 1000
+        ) {
+          return true;
         }
-        return;
+
+        return false;
+      });
+
+      if (matchIndex >= 0) {
+        const prev = deduped[matchIndex];
+
+        // Merge attributes to keep the richest information from both records
+        if (item.type === "call" || prev.type === "call") {
+          prev.type = "call"; // Ensure phone icon and talk time are rendered
+          if (item.type === "call" && item.badge) {
+            prev.badge = item.badge;
+            prev.badgeColor = item.badgeColor;
+            prev.iconColor = item.iconColor;
+          }
+        }
+
+        // Keep the more descriptive badge name
+        if (item.badge && item.badge.length > prev.badge.length) {
+          prev.badge = item.badge;
+          prev.badgeColor = item.badgeColor;
+          prev.iconColor = item.iconColor;
+        }
+
+        // Merge call duration & audio recording
+        prev.durationSeconds = Math.max(prev.durationSeconds || 0, item.durationSeconds || 0);
+        if (!prev.recordingUrl && item.recordingUrl) prev.recordingUrl = item.recordingUrl;
+
+        // Merge tasks / meeting details
+        if (!prev.meetingLink && item.meetingLink) prev.meetingLink = item.meetingLink;
+        if (!prev.scheduledTime && item.scheduledTime) prev.scheduledTime = item.scheduledTime;
+
+        // Merge notes (prefer non-empty)
+        if ((!prev.notes || prev.notes.trim() === "" || prev.notes === "na") && item.notes && item.notes.trim() !== "") {
+          prev.notes = item.notes;
+        }
+
+        // Merge rep name (prefer human rep name over System)
+        if ((!prev.repName || prev.repName === "System" || prev.repName === "Representative") && item.repName) {
+          prev.repName = item.repName;
+        }
+
+        // Prefer earlier timestamp if one is a call from earlier in the session
+        if (item.type === "call" && itemTime < new Date(prev.timestamp).getTime()) {
+          prev.timestamp = item.timestamp;
+        }
+      } else {
+        deduped.push({ ...item });
       }
-      seen.add(key);
-      deduped.push(item);
     });
 
     return deduped;
