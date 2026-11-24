@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
-import { formatDuration } from "@/lib/utils";
+import { formatDuration, getISTDateRange } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
@@ -13,13 +13,15 @@ export async function GET(request: NextRequest) {
   const role = session.role;
   const { searchParams } = new URL(request.url);
 
-  const todayStr = new Date().toISOString().split("T")[0];
-  const dateFromStr = searchParams.get("dateFrom") || searchParams.get("startDate") || searchParams.get("date") || todayStr;
-  const dateToStr = searchParams.get("dateTo") || searchParams.get("endDate") || searchParams.get("date") || dateFromStr;
-
-  // Anchor to Indian Standard Time (IST, UTC+05:30)
-  const startOfDay = new Date(`${dateFromStr}T00:00:00+05:30`);
-  const endOfDay = new Date(`${dateToStr}T23:59:59.999+05:30`);
+  const rawDateFrom = searchParams.get("dateFrom") || searchParams.get("startDate") || searchParams.get("date");
+  const rawDateTo = searchParams.get("dateTo") || searchParams.get("endDate") || searchParams.get("date");
+  const { startOfPeriod: startOfDay, endOfPeriod: endOfDay, istTodayStr } = getISTDateRange(
+    rawDateFrom || rawDateTo ? "custom" : "today",
+    rawDateFrom,
+    rawDateTo
+  );
+  const dateFromStr = rawDateFrom || istTodayStr;
+  const dateToStr = rawDateTo || dateFromStr;
 
   const repFilter = role === "sales_rep" ? repId : searchParams.get("repId") || undefined;
 

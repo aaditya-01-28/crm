@@ -273,3 +273,100 @@ export function hasLanguageMatch(
   return leadLangs.some((lang) => repLangs.includes(lang));
 }
 
+/**
+ * Returns the current date in Indian Standard Time (IST, UTC+05:30) as YYYY-MM-DD.
+ */
+export function getISTDateString(d: Date = new Date()): string {
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const istNow = new Date(d.getTime() + IST_OFFSET_MS);
+  return istNow.toISOString().split("T")[0];
+}
+
+/**
+ * Computes exact start and end UTC timestamps for a given period or custom date range,
+ * strictly anchored to Indian Standard Time (IST, UTC+05:30).
+ * Prevents UTC midnight mismatch where servers think it is still yesterday between 12:00 AM and 05:30 AM IST.
+ */
+export function getISTDateRange(
+  period: string = "today",
+  dateFromParam?: string | null,
+  dateToParam?: string | null
+): { startOfPeriod: Date; endOfPeriod: Date; istTodayStr: string } {
+  const now = new Date();
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const istNow = new Date(now.getTime() + IST_OFFSET_MS);
+  const istTodayStr = istNow.toISOString().split("T")[0]; // e.g. "2026-11-25"
+
+  const [currentYear, currentMonth, currentDay] = istTodayStr.split("-").map(Number);
+
+  const createISTDate = (y: number, m: number, d: number, endOfDay: boolean = false): Date => {
+    if (endOfDay) {
+      return new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999) - IST_OFFSET_MS);
+    }
+    return new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0) - IST_OFFSET_MS);
+  };
+
+  const startOfToday = createISTDate(currentYear, currentMonth, currentDay, false);
+  const endOfToday = createISTDate(currentYear, currentMonth, currentDay, true);
+
+  let startOfPeriod = startOfToday;
+  let endOfPeriod = endOfToday;
+
+  if (period === "all") {
+    startOfPeriod = new Date(0);
+    endOfPeriod = new Date("2100-01-01T00:00:00.000Z");
+  } else if (period === "yesterday") {
+    const yDate = new Date(istNow.getTime() - 24 * 60 * 60 * 1000);
+    const yYear = yDate.getUTCFullYear();
+    const yMonth = yDate.getUTCMonth() + 1;
+    const yDay = yDate.getUTCDate();
+    startOfPeriod = createISTDate(yYear, yMonth, yDay, false);
+    endOfPeriod = createISTDate(yYear, yMonth, yDay, true);
+  } else if (period === "week") {
+    const p7Date = new Date(istNow.getTime() - 6 * 24 * 60 * 60 * 1000);
+    const p7Year = p7Date.getUTCFullYear();
+    const p7Month = p7Date.getUTCMonth() + 1;
+    const p7Day = p7Date.getUTCDate();
+    startOfPeriod = createISTDate(p7Year, p7Month, p7Day, false);
+    endOfPeriod = endOfToday;
+  } else if (period === "month" || period === "this_month" || period === "thisMonth") {
+    startOfPeriod = createISTDate(currentYear, currentMonth, 1, false);
+    endOfPeriod = endOfToday;
+  } else if (period === "last_month" || period === "lastMonth") {
+    const lastMonthDate = new Date(Date.UTC(currentYear, currentMonth - 2, 1));
+    const lmYear = lastMonthDate.getUTCFullYear();
+    const lmMonth = lastMonthDate.getUTCMonth() + 1;
+    const daysInLastMonth = new Date(Date.UTC(lmYear, lmMonth, 0)).getUTCDate();
+    startOfPeriod = createISTDate(lmYear, lmMonth, 1, false);
+    endOfPeriod = createISTDate(lmYear, lmMonth, daysInLastMonth, true);
+  } else if (period === "custom") {
+    if (dateFromParam) {
+      const match = dateFromParam.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+      if (match) {
+        startOfPeriod = createISTDate(Number(match[1]), Number(match[2]), Number(match[3]), false);
+      } else {
+        const d = new Date(dateFromParam);
+        if (!isNaN(d.getTime())) {
+          startOfPeriod = d;
+        }
+      }
+    }
+    if (dateToParam) {
+      const match = dateToParam.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+      if (match) {
+        endOfPeriod = createISTDate(Number(match[1]), Number(match[2]), Number(match[3]), true);
+      } else {
+        const d = new Date(dateToParam);
+        if (!isNaN(d.getTime())) {
+          endOfPeriod = d;
+        }
+      }
+    } else if (dateFromParam) {
+      endOfPeriod = new Date(startOfPeriod.getTime() + 24 * 60 * 60 * 1000 - 1);
+    }
+  }
+
+  return { startOfPeriod, endOfPeriod, istTodayStr };
+}
+
+

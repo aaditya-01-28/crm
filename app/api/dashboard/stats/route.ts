@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { normalizeRole, isManagerOrAdmin, isSalesRep } from "@/lib/rbac";
 import { getSession } from "@/lib/auth";
-import { formatDuration } from "@/lib/utils";
+import { formatDuration, getISTDateRange } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
@@ -27,94 +27,9 @@ export async function GET(request: NextRequest) {
     targetUserId = requestedUserId;
   }
 
-  // Calculate Date Ranges
   const now = new Date();
-  const startOfToday = new Date(now);
-  startOfToday.setHours(0, 0, 0, 0);
-
-  const endOfToday = new Date(now);
-  endOfToday.setHours(23, 59, 59, 999);
-
-  let startOfPeriod = new Date(startOfToday);
-  let endOfPeriod = new Date(endOfToday);
-
-  if (period === "all") {
-    startOfPeriod = new Date(0);
-    endOfPeriod = new Date("2100-01-01T00:00:00.000Z");
-  } else if (period === "yesterday") {
-    const yesterdayStart = new Date(startOfToday);
-    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-    yesterdayStart.setHours(0, 0, 0, 0);
-
-    const yesterdayEnd = new Date(startOfToday);
-    yesterdayEnd.setMilliseconds(-1);
-
-    startOfPeriod = yesterdayStart;
-    endOfPeriod = yesterdayEnd;
-  } else if (period === "week") {
-    const past7 = new Date(startOfToday);
-    past7.setDate(past7.getDate() - 6);
-    past7.setHours(0, 0, 0, 0);
-    startOfPeriod = past7;
-    endOfPeriod = new Date(endOfToday);
-  } else if (period === "month" || period === "this_month" || period === "thisMonth") {
-    // Current month: 1st of this month to today
-    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    currentMonthStart.setHours(0, 0, 0, 0);
-    startOfPeriod = currentMonthStart;
-    endOfPeriod = new Date(endOfToday);
-  } else if (period === "last_month" || period === "lastMonth") {
-    // Last month: 1st day of last month to last day of last month
-    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    lastMonthStart.setHours(0, 0, 0, 0);
-    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-    lastMonthEnd.setHours(23, 59, 59, 999);
-    startOfPeriod = lastMonthStart;
-    endOfPeriod = lastMonthEnd;
-  } else if (period === "custom") {
-    if (dateFromParam) {
-      const parts = dateFromParam.split("-");
-      if (parts.length === 3) {
-        const y = parseInt(parts[0], 10);
-        const m = parseInt(parts[1], 10) - 1;
-        const d = parseInt(parts[2], 10);
-        if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
-          const fromDate = new Date(y, m, d);
-          fromDate.setHours(0, 0, 0, 0);
-          startOfPeriod = fromDate;
-        }
-      } else {
-        const fromDate = new Date(dateFromParam);
-        if (!isNaN(fromDate.getTime())) {
-          fromDate.setHours(0, 0, 0, 0);
-          startOfPeriod = fromDate;
-        }
-      }
-    }
-    if (dateToParam) {
-      const parts = dateToParam.split("-");
-      if (parts.length === 3) {
-        const y = parseInt(parts[0], 10);
-        const m = parseInt(parts[1], 10) - 1;
-        const d = parseInt(parts[2], 10);
-        if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
-          const toDate = new Date(y, m, d);
-          toDate.setHours(23, 59, 59, 999);
-          endOfPeriod = toDate;
-        }
-      } else {
-        const toDate = new Date(dateToParam);
-        if (!isNaN(toDate.getTime())) {
-          toDate.setHours(23, 59, 59, 999);
-          endOfPeriod = toDate;
-        }
-      }
-    } else if (dateFromParam) {
-      const singleDayEnd = new Date(startOfPeriod);
-      singleDayEnd.setHours(23, 59, 59, 999);
-      endOfPeriod = singleDayEnd;
-    }
-  }
+  // Calculate Date Ranges strictly anchored to Indian Standard Time (IST, UTC+05:30)
+  const { startOfPeriod, endOfPeriod } = getISTDateRange(period, dateFromParam, dateToParam);
 
   try {
     return await withClient(async (client) => {

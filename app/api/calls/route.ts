@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { getISTDateRange } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
@@ -126,14 +127,12 @@ export async function GET(request: NextRequest) {
       }
 
       if (dateFrom) {
-        conditions.push(`c.call_timestamp >= $${params.push(new Date(dateFrom))}`);
+        const { startOfPeriod } = getISTDateRange("custom", dateFrom, null);
+        conditions.push(`c.call_timestamp >= $${params.push(startOfPeriod)}`);
       }
       if (dateTo) {
-        const end = new Date(dateTo);
-        if (dateTo.length <= 10) {
-          end.setHours(23, 59, 59, 999);
-        }
-        conditions.push(`c.call_timestamp <= $${params.push(end)}`);
+        const { endOfPeriod } = getISTDateRange("custom", null, dateTo);
+        conditions.push(`c.call_timestamp <= $${params.push(endOfPeriod)}`);
       }
 
       if (search) {

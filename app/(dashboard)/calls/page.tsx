@@ -35,6 +35,7 @@ import {
   buildWALink,
   WA_PITCH,
   cn,
+  getISTDateRange,
 } from "@/lib/utils";
 import { useSession } from "@/components/layout/SessionProvider";
 import { LeadDetailModal } from "@/components/leads/LeadDetailModal";
@@ -196,38 +197,30 @@ export default function CallLogsPage() {
   const [showAndroidModal, setShowAndroidModal] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
 
-  // Compute dateFrom and dateTo based on filter
+  // Compute dateFrom and dateTo based on filter strictly anchored to IST
   function getDateParams() {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
+    if (dateFilter === "all") return {};
     if (dateFilter === "today") {
-      return { dateFrom: today.toISOString() };
+      const { startOfPeriod, endOfPeriod } = getISTDateRange("today");
+      return { dateFrom: startOfPeriod.toISOString(), dateTo: endOfPeriod.toISOString() };
     }
     if (dateFilter === "yesterday") {
-      const yesterdayStart = new Date(today);
-      yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-      const yesterdayEnd = new Date(today);
-      yesterdayEnd.setMilliseconds(-1);
-      return {
-        dateFrom: yesterdayStart.toISOString(),
-        dateTo: yesterdayEnd.toISOString(),
-      };
+      const { startOfPeriod, endOfPeriod } = getISTDateRange("yesterday");
+      return { dateFrom: startOfPeriod.toISOString(), dateTo: endOfPeriod.toISOString() };
     }
     if (dateFilter === "7d") {
-      const past7 = new Date(today);
-      past7.setDate(past7.getDate() - 7);
-      return { dateFrom: past7.toISOString() };
+      const { startOfPeriod, endOfPeriod } = getISTDateRange("week");
+      return { dateFrom: startOfPeriod.toISOString(), dateTo: endOfPeriod.toISOString() };
     }
     if (dateFilter === "30d") {
-      const past30 = new Date(today);
-      past30.setDate(past30.getDate() - 30);
-      return { dateFrom: past30.toISOString() };
+      const { startOfPeriod, endOfPeriod } = getISTDateRange("month");
+      return { dateFrom: startOfPeriod.toISOString(), dateTo: endOfPeriod.toISOString() };
     }
     if (dateFilter === "custom") {
+      const { startOfPeriod, endOfPeriod } = getISTDateRange("custom", customDateFrom, customDateTo);
       return {
-        ...(customDateFrom ? { dateFrom: customDateFrom } : {}),
-        ...(customDateTo ? { dateTo: customDateTo } : {}),
+        ...(customDateFrom ? { dateFrom: startOfPeriod.toISOString() } : {}),
+        ...(customDateTo ? { dateTo: endOfPeriod.toISOString() } : {}),
       };
     }
     return {};
