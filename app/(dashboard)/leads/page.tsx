@@ -295,6 +295,7 @@ export default function LeadsDirectoryPage() {
       if (!res.ok) throw new Error("Failed to fetch leads");
       return res.json();
     },
+    placeholderData: (prev) => prev,
   });
 
   const leads = data?.leads || [];
@@ -743,6 +744,7 @@ export default function LeadsDirectoryPage() {
                     onClick={() => {
                       setSelectedRepFilter("all");
                       setActiveStatus("all");
+                      setPage(1);
                     }}
                     className="px-3.5 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition"
                   >

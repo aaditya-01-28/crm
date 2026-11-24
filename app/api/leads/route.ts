@@ -181,19 +181,19 @@ export async function GET(request: NextRequest) {
       );
       const total = countRes.rows[0]?.total || 0;
 
-      // Compute status tab counts across the active filter (scoped to selected rep and vertical).
-      // This ensures tab counters (New, Callback, Won, etc.) exactly match the leads shown in that view.
+      // Compute status tab counts across the active filter.
+      // For sales reps, counts are strictly scoped to their assigned leads.
+      // For managers/admins, counts reflect the full CRM pipeline (or selected rep).
+      // When viewing "unassigned" pool, we DO NOT filter statusBaseConditions by assigned_rep_id IS NULL,
+      // because Unassigned Pool has its own dedicated counter (stats.unassigned), while the status tabs
+      // (All Leads, New, Callbacks, RNR, etc.) represent the overall CRM pipeline counts which must remain visible.
       const statusBaseConditions: string[] = ["l.tenant_id = $1"];
       const statusBaseParams: any[] = [tenantId];
 
       if (isSalesRep(role)) {
         statusBaseConditions.push(`l.assigned_rep_id = $${statusBaseParams.push(repId)}`);
-      } else if (filterRepId && filterRepId !== "all") {
-        if (filterRepId === "unassigned") {
-          statusBaseConditions.push("l.assigned_rep_id IS NULL");
-        } else {
-          statusBaseConditions.push(`l.assigned_rep_id = $${statusBaseParams.push(filterRepId)}`);
-        }
+      } else if (filterRepId && filterRepId !== "all" && filterRepId !== "unassigned") {
+        statusBaseConditions.push(`l.assigned_rep_id = $${statusBaseParams.push(filterRepId)}`);
       }
 
       if (vertical && vertical !== "all" && vertical !== "All Verticals") {
@@ -207,7 +207,7 @@ export async function GET(request: NextRequest) {
       );
 
       let unassignedTotal = 0;
-      if (role !== "sales_rep") {
+      if (!isSalesRep(role)) {
         const unassignedParams: any[] = [tenantId];
         let unassignedCondition = "tenant_id = $1 AND assigned_rep_id IS NULL";
         if (vertical && vertical !== "all" && vertical !== "All Verticals") {
