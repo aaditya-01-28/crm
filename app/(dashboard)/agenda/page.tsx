@@ -10,6 +10,14 @@ import {
   RefreshCw,
   ArrowRight,
   User,
+  Calendar,
+  PhoneOff,
+  PhoneCall,
+  CalendarX,
+  X,
+  Check,
+  Phone,
+  MessageCircle,
 } from "lucide-react";
 import { formatDateTime, cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -56,6 +64,7 @@ export default function AgendaPage() {
   const queryClient = useQueryClient();
   const { userId: currentUserId } = useSession();
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [outcomeTask, setOutcomeTask] = useState<Task | null>(null);
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["agenda"],
@@ -110,7 +119,7 @@ export default function AgendaPage() {
             Follow-Up Agenda
           </h1>
           <p className="text-xs sm:text-sm text-gray-500 mt-0.5">
-            Callbacks, demos, and scheduled tasks. Click any task to open lead dossier & take action.
+            Callbacks, demos, and scheduled tasks. Click any task to open lead dossier or update outcome.
           </p>
         </div>
 
@@ -138,6 +147,7 @@ export default function AgendaPage() {
           currentUserId={currentUserId}
           onComplete={(id) => completeMutation.mutate(id)}
           onOpenLead={(leadId) => setSelectedLeadId(leadId)}
+          onUpdateOutcome={(task) => setOutcomeTask(task)}
         />
       )}
 
@@ -152,6 +162,7 @@ export default function AgendaPage() {
           currentUserId={currentUserId}
           onComplete={(id) => completeMutation.mutate(id)}
           onOpenLead={(leadId) => setSelectedLeadId(leadId)}
+          onUpdateOutcome={(task) => setOutcomeTask(task)}
         />
       )}
 
@@ -165,6 +176,7 @@ export default function AgendaPage() {
         currentUserId={currentUserId}
         onComplete={(id) => completeMutation.mutate(id)}
         onOpenLead={(leadId) => setSelectedLeadId(leadId)}
+        onUpdateOutcome={(task) => setOutcomeTask(task)}
         emptyMessage="No tasks scheduled for today"
       />
 
@@ -179,6 +191,7 @@ export default function AgendaPage() {
           currentUserId={currentUserId}
           onComplete={(id) => completeMutation.mutate(id)}
           onOpenLead={(leadId) => setSelectedLeadId(leadId)}
+          onUpdateOutcome={(task) => setOutcomeTask(task)}
         />
       )}
 
@@ -207,6 +220,19 @@ export default function AgendaPage() {
           }}
         />
       )}
+
+      {/* Task Outcome & Reschedule Modal */}
+      {outcomeTask && (
+        <TaskOutcomeModal
+          task={outcomeTask}
+          onClose={() => setOutcomeTask(null)}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ["agenda"] });
+            queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+            queryClient.invalidateQueries({ queryKey: ["leads-directory"] });
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -220,6 +246,7 @@ function AgendaSection({
   currentUserId,
   onComplete,
   onOpenLead,
+  onUpdateOutcome,
   emptyMessage,
 }: {
   title: string;
@@ -230,6 +257,7 @@ function AgendaSection({
   currentUserId?: string;
   onComplete: (id: string) => void;
   onOpenLead: (leadId: string) => void;
+  onUpdateOutcome: (task: Task) => void;
   emptyMessage?: string;
 }) {
   return (
@@ -253,6 +281,7 @@ function AgendaSection({
               currentUserId={currentUserId}
               onComplete={onComplete}
               onOpenLead={onOpenLead}
+              onUpdateOutcome={onUpdateOutcome}
               isLast={i === tasks.length - 1}
             />
           ))
@@ -267,12 +296,14 @@ function TaskRow({
   currentUserId,
   onComplete,
   onOpenLead,
+  onUpdateOutcome,
   isLast,
 }: {
   task: Task;
   currentUserId?: string;
   onComplete: (id: string) => void;
   onOpenLead: (leadId: string) => void;
+  onUpdateOutcome: (task: Task) => void;
   isLast: boolean;
 }) {
   const isDemo = task.taskType === "product_demo";
@@ -386,26 +417,441 @@ function TaskRow({
         </button>
 
         {isOwner ? (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onComplete(task.id);
-            }}
-            className="flex items-center gap-1 text-xs text-green-700 border border-green-200 bg-green-50 px-2.5 py-1.5 rounded-lg hover:bg-green-100 transition shrink-0 font-medium cursor-pointer"
-            title="Mark task completed"
-          >
-            <CheckCircle className="w-3.5 h-3.5" />
-            <span>Done</span>
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onUpdateOutcome(task);
+              }}
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 hover:border-emerald-300 border border-emerald-200 px-3 py-1.5 rounded-lg transition shrink-0 cursor-pointer shadow-2xs"
+              title="Update status, reschedule or mark customer not answering"
+            >
+              <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Update Outcome</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onComplete(task.id);
+              }}
+              className="flex items-center gap-1 text-xs text-slate-700 border border-slate-200 bg-slate-50 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition shrink-0 font-medium cursor-pointer"
+              title="Quick mark completed"
+            >
+              <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="hidden md:inline">Done</span>
+            </button>
+          </>
         ) : (
           <span
             className="inline-flex items-center text-[11px] text-slate-400 font-medium px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg shrink-0"
-            title="Read-only: Only assigned representative can complete this task"
+            title="Read-only: Only assigned representative can complete or update this task"
           >
             Read Only
           </span>
         )}
+      </div>
+    </div>
+  );
+}
+
+function TaskOutcomeModal({
+  task,
+  onClose,
+  onSuccess,
+}: {
+  task: Task | null;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const isDemo = task?.taskType === "product_demo";
+  const [outcome, setOutcome] = useState<"completed" | "rnr" | "reschedule" | "not_interested">("completed");
+  const [scheduledDatetime, setScheduledDatetime] = useState("");
+  const [remark, setRemark] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (task) {
+      setOutcome("completed");
+      setScheduledDatetime("");
+      setRemark("");
+    }
+  }, [task]);
+
+  if (!task) return null;
+
+  function setPresetTime(hoursFromNow: number) {
+    const d = new Date();
+    d.setHours(d.getHours() + hoursFromNow);
+    d.setMinutes(0, 0, 0);
+    const isoLocal = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+      .toISOString()
+      .slice(0, 16);
+    setScheduledDatetime(isoLocal);
+  }
+
+  function setTomorrowTime(hour: number) {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    d.setHours(hour, 0, 0, 0);
+    const isoLocal = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+      .toISOString()
+      .slice(0, 16);
+    setScheduledDatetime(isoLocal);
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!task) return;
+    setIsSubmitting(true);
+    try {
+      let finalAction: string = outcome;
+      if (outcome === "completed" && isDemo) {
+        finalAction = "demo_done";
+      }
+
+      const res = await fetch(`/api/tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: finalAction,
+          status: outcome === "completed" || outcome === "not_interested" ? "completed" : "pending",
+          scheduledTime: scheduledDatetime || null,
+          remark: remark.trim() || undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to update agenda task");
+      }
+
+      toast.success(
+        outcome === "rnr"
+          ? "RNR recorded: Customer Not Answering logged & retry callback scheduled ✅"
+          : outcome === "reschedule"
+          ? `${isDemo ? "Demo" : "Callback"} rescheduled successfully 📅`
+          : outcome === "completed"
+          ? `${isDemo ? "Demo marked Done & post-demo follow-up scheduled" : "Task marked completed"} ✅`
+          : "Task closed as Not Interested"
+      );
+      onSuccess();
+      onClose();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update task");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl max-w-lg w-full border border-gray-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        {/* Header */}
+        <div className="px-6 py-4 bg-gradient-to-r from-slate-900 via-slate-800 to-emerald-950 text-white flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                isDemo ? "bg-purple-500/20 text-purple-300 border border-purple-400/30" : "bg-blue-500/20 text-blue-300 border border-blue-400/30"
+              }`}>
+                {isDemo ? "Product Demo" : "Callback Task"}
+              </span>
+              <h3 className="font-bold text-sm text-white">
+                Update Meeting Outcome
+              </h3>
+            </div>
+            <p className="text-xs text-slate-300 mt-1">
+              {task.lead.companyName || task.lead.contactName || task.lead.phoneNumber} • {task.lead.phoneNumber}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-white/80 hover:text-white p-1 rounded-lg"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
+          {/* Outcome Choice Grid */}
+          <div>
+            <label className="font-bold text-gray-800 block mb-2 text-xs uppercase tracking-wider">
+              Select What Happened:
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {/* Option 1: Done */}
+              <div
+                onClick={() => setOutcome("completed")}
+                className={`p-3 rounded-xl border cursor-pointer transition select-none flex items-start gap-2.5 ${
+                  outcome === "completed"
+                    ? "bg-emerald-50 border-emerald-500 text-emerald-900 ring-2 ring-emerald-500/20 shadow-xs"
+                    : "bg-gray-50 hover:bg-gray-100 border-gray-200 text-gray-700"
+                }`}
+              >
+                <CheckCircle className={`w-4 h-4 shrink-0 mt-0.5 ${outcome === "completed" ? "text-emerald-600" : "text-gray-400"}`} />
+                <div>
+                  <span className="font-bold block text-xs">
+                    {isDemo ? "Demo Completed ✅" : "Callback Completed ✅"}
+                  </span>
+                  <span className="text-[11px] text-gray-500 leading-tight block mt-0.5">
+                    {isDemo ? "Walkthrough finished with client" : "Spoke with client, resolved"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Option 2: Customer Not Picking / RNR */}
+              <div
+                onClick={() => setOutcome("rnr")}
+                className={`p-3 rounded-xl border cursor-pointer transition select-none flex items-start gap-2.5 ${
+                  outcome === "rnr"
+                    ? "bg-amber-50 border-amber-500 text-amber-900 ring-2 ring-amber-500/20 shadow-xs"
+                    : "bg-gray-50 hover:bg-gray-100 border-gray-200 text-gray-700"
+                }`}
+              >
+                <PhoneOff className={`w-4 h-4 shrink-0 mt-0.5 ${outcome === "rnr" ? "text-amber-600" : "text-gray-400"}`} />
+                <div>
+                  <span className="font-bold block text-xs">
+                    Not Picking Up / RNR 📵
+                  </span>
+                  <span className="text-[11px] text-gray-500 leading-tight block mt-0.5">
+                    No answer on call or WhatsApp
+                  </span>
+                </div>
+              </div>
+
+              {/* Option 3: Rescheduled */}
+              <div
+                onClick={() => setOutcome("reschedule")}
+                className={`p-3 rounded-xl border cursor-pointer transition select-none flex items-start gap-2.5 ${
+                  outcome === "reschedule"
+                    ? "bg-blue-50 border-blue-500 text-blue-900 ring-2 ring-blue-500/20 shadow-xs"
+                    : "bg-gray-50 hover:bg-gray-100 border-gray-200 text-gray-700"
+                }`}
+              >
+                <Calendar className={`w-4 h-4 shrink-0 mt-0.5 ${outcome === "reschedule" ? "text-blue-600" : "text-gray-400"}`} />
+                <div>
+                  <span className="font-bold block text-xs">
+                    Reschedule Meeting 📅
+                  </span>
+                  <span className="text-[11px] text-gray-500 leading-tight block mt-0.5">
+                    Customer requested another time
+                  </span>
+                </div>
+              </div>
+
+              {/* Option 4: Not Interested / Cancelled */}
+              <div
+                onClick={() => setOutcome("not_interested")}
+                className={`p-3 rounded-xl border cursor-pointer transition select-none flex items-start gap-2.5 ${
+                  outcome === "not_interested"
+                    ? "bg-rose-50 border-rose-500 text-rose-900 ring-2 ring-rose-500/20 shadow-xs"
+                    : "bg-gray-50 hover:bg-gray-100 border-gray-200 text-gray-700"
+                }`}
+              >
+                <CalendarX className={`w-4 h-4 shrink-0 mt-0.5 ${outcome === "not_interested" ? "text-rose-600" : "text-gray-400"}`} />
+                <div>
+                  <span className="font-bold block text-xs">
+                    Not Interested / Cancelled ❌
+                  </span>
+                  <span className="text-[11px] text-gray-500 leading-tight block mt-0.5">
+                    Declined demo or closed requirement
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Conditional Date / Time Pickers */}
+          {outcome === "rnr" && (
+            <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="font-semibold text-amber-900 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-amber-600" />
+                  Reschedule Retry Callback Date & Time
+                </label>
+                <span className="text-[11px] text-slate-500 font-normal">
+                  (Optional retry time)
+                </span>
+              </div>
+              <input
+                type="datetime-local"
+                value={scheduledDatetime}
+                onChange={(e) => setScheduledDatetime(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-gray-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-amber-500 outline-none text-gray-900"
+              />
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] text-gray-400 font-medium">Quick Retry:</span>
+                <button
+                  type="button"
+                  onClick={() => setPresetTime(2)}
+                  className="px-2 py-0.5 rounded bg-white hover:bg-amber-100 text-[10px] font-semibold text-gray-700 hover:text-amber-800 border border-gray-200 transition cursor-pointer"
+                >
+                  +2 Hours
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTomorrowTime(11)}
+                  className="px-2 py-0.5 rounded bg-white hover:bg-amber-100 text-[10px] font-semibold text-gray-700 hover:text-amber-800 border border-gray-200 transition cursor-pointer"
+                >
+                  Tomorrow 11 AM
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTomorrowTime(16)}
+                  className="px-2 py-0.5 rounded bg-white hover:bg-amber-100 text-[10px] font-semibold text-gray-700 hover:text-amber-800 border border-gray-200 transition cursor-pointer"
+                >
+                  Tomorrow 4 PM
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-500">
+                💡 RNR will be recorded in lead history. If retry time is left blank, it stays in &quot;Pending Date Confirmation&quot; so you can follow up later.
+              </p>
+            </div>
+          )}
+
+          {outcome === "reschedule" && (
+            <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="font-semibold text-blue-900 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-blue-600" />
+                  New {isDemo ? "Demo" : "Callback"} Date & Time <span className="text-red-500">*</span>
+                </label>
+              </div>
+              <input
+                type="datetime-local"
+                value={scheduledDatetime}
+                onChange={(e) => setScheduledDatetime(e.target.value)}
+                required
+                className="w-full px-3 py-2 bg-white border border-gray-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-none text-gray-900"
+              />
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] text-gray-400 font-medium">Quick Reschedule:</span>
+                <button
+                  type="button"
+                  onClick={() => setPresetTime(2)}
+                  className="px-2 py-0.5 rounded bg-white hover:bg-blue-100 text-[10px] font-semibold text-gray-700 hover:text-blue-800 border border-gray-200 transition cursor-pointer"
+                >
+                  +2 Hours
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTomorrowTime(11)}
+                  className="px-2 py-0.5 rounded bg-white hover:bg-blue-100 text-[10px] font-semibold text-gray-700 hover:text-blue-800 border border-gray-200 transition cursor-pointer"
+                >
+                  Tomorrow 11 AM
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTomorrowTime(16)}
+                  className="px-2 py-0.5 rounded bg-white hover:bg-blue-100 text-[10px] font-semibold text-gray-700 hover:text-blue-800 border border-gray-200 transition cursor-pointer"
+                >
+                  Tomorrow 4 PM
+                </button>
+              </div>
+            </div>
+          )}
+
+          {outcome === "completed" && isDemo && (
+            <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="font-semibold text-emerald-900 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-emerald-600" />
+                  Post-Demo Follow-Up Callback (Optional)
+                </label>
+                <span className="text-[11px] text-slate-500 font-normal">
+                  (Closing callback)
+                </span>
+              </div>
+              <input
+                type="datetime-local"
+                value={scheduledDatetime}
+                onChange={(e) => setScheduledDatetime(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-gray-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-emerald-500 outline-none text-gray-900"
+              />
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] text-gray-400 font-medium">Quick Preset:</span>
+                <button
+                  type="button"
+                  onClick={() => setPresetTime(2)}
+                  className="px-2 py-0.5 rounded bg-white hover:bg-emerald-100 text-[10px] font-semibold text-gray-700 hover:text-emerald-800 border border-gray-200 transition cursor-pointer"
+                >
+                  +2 Hours
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTomorrowTime(11)}
+                  className="px-2 py-0.5 rounded bg-white hover:bg-emerald-100 text-[10px] font-semibold text-gray-700 hover:text-emerald-800 border border-gray-200 transition cursor-pointer"
+                >
+                  Tomorrow 11 AM
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTomorrowTime(16)}
+                  className="px-2 py-0.5 rounded bg-white hover:bg-emerald-100 text-[10px] font-semibold text-gray-700 hover:text-emerald-800 border border-gray-200 transition cursor-pointer"
+                >
+                  Tomorrow 4 PM
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-500">
+                💡 A post-demo follow-up callback will be placed in your Agenda so you never miss calling back to close the deal.
+              </p>
+            </div>
+          )}
+
+          {/* Notes / Remark */}
+          <div>
+            <label className="font-semibold text-gray-700 block mb-1">
+              Discussion Notes & Reasons
+            </label>
+            <textarea
+              value={remark}
+              onChange={(e) => setRemark(e.target.value)}
+              rows={2}
+              placeholder={
+                outcome === "rnr"
+                  ? "e.g. Called 2 times, sent WhatsApp reminder, no response..."
+                  : outcome === "reschedule"
+                  ? "e.g. Client busy in meeting, asked to connect tomorrow at 11 AM..."
+                  : outcome === "completed"
+                  ? "e.g. Walkthrough completed, showed WhatsApp catalog, client interested in 50k SMS pack..."
+                  : "e.g. Pricing high, not needed at this moment..."
+              }
+              className="w-full p-3 bg-gray-50 border border-gray-300 rounded-xl text-xs text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+            />
+          </div>
+
+          {/* Actions */}
+          <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSubmitting}
+              className="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-xl cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="px-5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-sm transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+            >
+              {isSubmitting ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Save & Update Agenda</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

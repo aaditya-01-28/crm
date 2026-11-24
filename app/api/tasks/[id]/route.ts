@@ -17,7 +17,7 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const { status, notes, meetingLink, scheduledTime } = body;
+    const { status, notes, meetingLink, scheduledTime, action, remark } = body;
 
     return await withClient(async (client) => {
       const taskRes = await client.query(
@@ -41,10 +41,29 @@ export async function PATCH(
         );
       }
 
-      const newStatus = status || task.status;
-      const newNotes = notes !== undefined ? notes : task.notes;
-      const newMeetingLink = meetingLink !== undefined ? meetingLink : task.meeting_link;
-      const newScheduledTime = scheduledTime ? new Date(scheduledTime) : task.scheduled_time;
+      let finalStatus = status || task.status;
+      let finalNotes = notes !== undefined ? notes : (remark || task.notes);
+      let finalMeetingLink = meetingLink !== undefined ? meetingLink : task.meeting_link;
+      let finalScheduledTime = scheduledTime !== undefined
+        ? (scheduledTime ? new Date(scheduledTime) : null)
+        : task.scheduled_time;
+
+      // Handle specific agenda actions
+      if (action === "reschedule") {
+        finalStatus = "pending";
+        finalNotes = remark ? `Rescheduled: ${remark}` : (notes || task.notes);
+      } else if (action === "rnr") {
+        finalStatus = "pending";
+        finalNotes = remark ? `RNR (Customer Not Picking): ${remark}` : "Customer not answering / unavailable for scheduled meeting";
+      } else if (action === "demo_done") {
+        finalStatus = "completed";
+        finalNotes = remark ? `Demo Done: ${remark}` : "Product demo completed";
+      } else if (action === "not_interested") {
+        finalStatus = "completed";
+        finalNotes = remark ? `Not Interested: ${remark}` : "Customer not interested / cancelled";
+      } else if (action === "completed") {
+        finalStatus = "completed";
+      }
 
       const updateRes = await client.query(
         `UPDATE scheduled_tasks
@@ -53,13 +72,105 @@ export async function PATCH(
          RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
                    task_type as "taskType", scheduled_time as "scheduledTime",
                    meeting_link as "meetingLink", notes, status, updated_at as "updatedAt"`,
-        [newStatus, newNotes, newMeetingLink, newScheduledTime, id]
+        [finalStatus, finalNotes, finalMeetingLink, finalScheduledTime, id]
       );
 
       const updated = updateRes.rows[0];
 
-      // If a product_demo task was marked completed, sync pipeline to 'demo_done'
-      if (task.task_type === "product_demo" && status === "completed") {
+      // Ensure stage history table exists
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS lead_stage_history (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          tenant_id UUID NOT NULL,
+          lead_id UUID NOT NULL,
+          rep_id UUID,
+          stage_name VARCHAR(100) NOT NULL,
+          stage_type VARCHAR(50) NOT NULL,
+          notes TEXT,
+          metadata JSONB DEFAULT '{}',
+          created_at TIMESTAMPTZ(6) DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_lead_stage_history_lead ON lead_stage_history(lead_id, created_at DESC);
+      `).catch(() => {});
+
+      // 1. Action: Reschedule
+      if (action === "reschedule") {
+        const stageName = task.task_type === "product_demo" ? "Demo Rescheduled" : "Callback Rescheduled";
+        const stageType = task.task_type === "product_demo" ? "demo" : "callback";
+        const logRemark = remark
+          ? `Rescheduled: ${remark}`
+          : `Rescheduled to ${finalScheduledTime ? finalScheduledTime.toLocaleString() : "TBD"}`;
+
+        await client.query(
+          `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, call_timestamp)
+           VALUES ($1, $2, $3, $4, 0, $5, NOW())`,
+          [tenantId, task.lead_id, task.rep_id, task.task_type === "product_demo" ? "Demo Scheduled" : "Callback", logRemark]
+        ).catch(() => {});
+
+        await client.query(
+          `INSERT INTO lead_stage_history (tenant_id, lead_id, rep_id, stage_name, stage_type, notes, metadata, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+          [tenantId, task.lead_id, task.rep_id, stageName, stageType, logRemark, JSON.stringify({ taskId: id, scheduledTime: finalScheduledTime })]
+        ).catch(() => {});
+      }
+
+      // 2. Action: Customer Not Picking / RNR
+      if (action === "rnr") {
+        const logRemark = remark
+          ? `RNR (Customer Not Picking / Unavailable): ${remark}`
+          : "Customer not answering / unavailable for scheduled meeting";
+
+        await client.query(
+          `UPDATE leads
+           SET status = 'rnr',
+               rnr_count = COALESCE(rnr_count, 0) + 1,
+               updated_at = NOW()
+           WHERE id = $1`,
+          [task.lead_id]
+        ).catch(() => {});
+
+        await client.query(
+          `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, call_timestamp)
+           VALUES ($1, $2, $3, 'RNR', 0, $4, NOW())`,
+          [tenantId, task.lead_id, task.rep_id, logRemark]
+        ).catch(() => {});
+
+        await client.query(
+          `INSERT INTO lead_stage_history (tenant_id, lead_id, rep_id, stage_name, stage_type, notes, metadata, created_at)
+           VALUES ($1, $2, $3, 'RNR', 'status', $4, $5, NOW())`,
+          [tenantId, task.lead_id, task.rep_id, logRemark, JSON.stringify({ taskId: id, retryTime: finalScheduledTime })]
+        ).catch(() => {});
+      }
+
+      // 3. Action: Not Interested
+      if (action === "not_interested") {
+        const logRemark = remark ? `Not Interested: ${remark}` : "Customer not interested / cancelled";
+
+        await client.query(
+          `UPDATE leads SET status = 'not_interested', updated_at = NOW() WHERE id = $1`,
+          [task.lead_id]
+        ).catch(() => {});
+
+        await client.query(
+          `UPDATE deals SET stage = 'closed_lost', closing_notes = $1, updated_at = NOW() WHERE lead_id = $2 AND tenant_id = $3`,
+          [logRemark, task.lead_id, tenantId]
+        ).catch(() => {});
+
+        await client.query(
+          `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, call_timestamp)
+           VALUES ($1, $2, $3, 'Not Interested', 0, $4, NOW())`,
+          [tenantId, task.lead_id, task.rep_id, logRemark]
+        ).catch(() => {});
+
+        await client.query(
+          `INSERT INTO lead_stage_history (tenant_id, lead_id, rep_id, stage_name, stage_type, notes, metadata, created_at)
+           VALUES ($1, $2, $3, 'Not Interested', 'status', $4, $5, NOW())`,
+          [tenantId, task.lead_id, task.rep_id, logRemark, JSON.stringify({ taskId: id })]
+        ).catch(() => {});
+      }
+
+      // 4. Action: Demo Completed / Done
+      if (action === "demo_done" || (task.task_type === "product_demo" && finalStatus === "completed")) {
         const leadRes = await client.query(
           "SELECT id, assigned_rep_id, service_type FROM leads WHERE id = $1",
           [task.lead_id]
