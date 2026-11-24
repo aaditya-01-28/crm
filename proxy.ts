@@ -8,6 +8,9 @@ const PUBLIC_PATHS = [
   "/api/auth/register",
   "/api/auth/forgot-password",
   "/api/auth/reset-password",
+  "/api/app/version",
+  "/api/app/download",
+  "/downloads",
 ];
 
 export async function proxy(request: NextRequest) {
@@ -18,13 +21,14 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Allow Next.js internals and static assets (images, icons, etc.)
+  // Allow Next.js internals and static assets (images, icons, APK downloads, etc.)
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
     pathname.startsWith("/icons") ||
     pathname.startsWith("/logo") ||
-    /\.(png|jpg|jpeg|svg|webp|ico|csv)$/i.test(pathname)
+    pathname.startsWith("/downloads") ||
+    /\.(png|jpg|jpeg|svg|webp|ico|csv|apk)$/i.test(pathname)
   ) {
     return NextResponse.next();
   }
