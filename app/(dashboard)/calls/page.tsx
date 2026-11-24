@@ -25,6 +25,7 @@ import {
   X,
   Copy,
   Check,
+  Users,
 } from "lucide-react";
 import {
   formatDateTime,
@@ -166,8 +167,12 @@ const DISPOSITION_BADGES: Record<
 };
 
 export default function CallLogsPage() {
-  const { role, userName, userEmail, userPhone } = useSession();
+  const { role, userId, userName, userEmail, userPhone } = useSession();
+  const isLevel2 = role === "sales_manager";
   const isManagerOrAdmin = role === "super_admin" || role === "sales_manager";
+
+  // Level 2 Sales Manager subtab state: 'own' (My Call Logs) vs 'team' (Whole Team Call Logs)
+  const [managerSubtab, setManagerSubtab] = useState<"own" | "team">("own");
 
   // Filter state
   const [dateFilter, setDateFilter] = useState<"today" | "yesterday" | "7d" | "30d" | "all" | "custom">("today");
@@ -232,12 +237,17 @@ export default function CallLogsPage() {
     enabled: isManagerOrAdmin,
   });
 
+  // Determine effectiveRep based on role and Level 2 subtab
+  const effectiveRep = isLevel2
+    ? (managerSubtab === "own" ? userId : selectedRep)
+    : (role === "sales_rep" ? userId : selectedRep);
+
   // Fetch Call Logs
   const { data, isLoading, isFetching, refetch } = useQuery<CallsResponse>({
     queryKey: [
       "call-logs",
       page,
-      selectedRep,
+      effectiveRep,
       selectedDisposition,
       search,
       dateFrom,
@@ -247,7 +257,7 @@ export default function CallLogsPage() {
       const params = new URLSearchParams();
       params.set("page", page.toString());
       params.set("limit", "50");
-      if (selectedRep !== "all") params.set("repId", selectedRep);
+      if (effectiveRep && effectiveRep !== "all") params.set("repId", effectiveRep);
       if (selectedDisposition !== "all") params.set("disposition", selectedDisposition);
       if (search.trim()) params.set("search", search.trim());
       if (dateFrom) params.set("dateFrom", dateFrom);
@@ -406,6 +416,44 @@ export default function CallLogsPage() {
           </button>
         </div>
       </div>
+
+      {/* Level 2 Manager Subtabs */}
+      {isLevel2 && (
+        <div className="flex items-center gap-2 bg-slate-100/90 p-1.5 rounded-2xl w-fit border border-slate-200">
+          <button
+            type="button"
+            onClick={() => {
+              setManagerSubtab("own");
+              setPage(1);
+            }}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer",
+              managerSubtab === "own"
+                ? "bg-emerald-600 text-white shadow-emerald-600/25"
+                : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
+            )}
+          >
+            <User className="w-3.5 h-3.5" />
+            <span>My Call Logs</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setManagerSubtab("team");
+              setPage(1);
+            }}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition shadow-xs cursor-pointer",
+              managerSubtab === "team"
+                ? "bg-emerald-600 text-white shadow-emerald-600/25"
+                : "text-slate-600 hover:text-slate-900 hover:bg-white/60"
+            )}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Whole Team Call Logs</span>
+          </button>
+        </div>
+      )}
 
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
@@ -570,7 +618,14 @@ export default function CallLogsPage() {
             </select>
           </div>
 
-          {isManagerOrAdmin && (
+          {isLevel2 && managerSubtab === "own" && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 font-semibold text-xs">
+              <User className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Viewing: {userName || "My Calls"} (Personal Queue)</span>
+            </div>
+          )}
+
+          {isManagerOrAdmin && (!isLevel2 || managerSubtab === "team") && (
             <div className="flex items-center gap-1.5">
               <span className="text-gray-500 font-medium">Representative:</span>
               <select
@@ -689,7 +744,9 @@ export default function CallLogsPage() {
                   return (
                     <tr
                       key={call.id}
-                      className="hover:bg-slate-50/80 transition group"
+                      onClick={() => setSelectedLeadId(call.lead.id)}
+                      className="hover:bg-slate-50/80 transition group cursor-pointer"
+                      title="Click row to open lead dossier"
                     >
                       {/* Timestamp */}
                       <td className="py-3.5 px-4 whitespace-nowrap">
@@ -788,7 +845,7 @@ export default function CallLogsPage() {
                       </td>
 
                       {/* Call Audio / QA Audit */}
-                      <td className="py-3.5 px-4 whitespace-nowrap">
+                      <td className="py-3.5 px-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         {call.recordingUrl ? (
                           <AudioRecordingPlayer
                             recordingUrl={call.recordingUrl}
@@ -815,17 +872,18 @@ export default function CallLogsPage() {
 
                       {/* Quick Actions */}
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1.5">
+                        <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                           <button
                             type="button"
-                            onClick={() =>
+                            onClick={(e) => {
+                              e.stopPropagation();
                               handlePushToDial(
                                 call.lead.phoneNumber,
                                 call.lead.id,
                                 call.lead.contactName,
                                 call.lead.companyName
-                              )
-                            }
+                              );
+                            }}
                             className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition cursor-pointer"
                             title="Call Prospect via Textora Dialer Phone"
                           >
@@ -835,6 +893,7 @@ export default function CallLogsPage() {
                             href={waLink}
                             target="_blank"
                             rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
                             className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition"
                             title="WhatsApp Pitch"
                           >
@@ -842,8 +901,11 @@ export default function CallLogsPage() {
                           </a>
                           <button
                             type="button"
-                            onClick={() => setSelectedLeadId(call.lead.id)}
-                            className="px-2.5 py-1 text-xs font-semibold bg-gray-100 text-gray-700 hover:bg-slate-900 hover:text-white rounded-lg transition"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedLeadId(call.lead.id);
+                            }}
+                            className="px-2.5 py-1 text-xs font-semibold bg-gray-100 text-gray-700 hover:bg-slate-900 hover:text-white rounded-lg transition cursor-pointer"
                           >
                             Dossier
                           </button>

@@ -28,6 +28,8 @@ export async function GET(request: NextRequest) {
 
   try {
     return await withClient(async (client) => {
+      await client.query("ALTER TABLE leads ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ;").catch(() => {});
+
       // 1. Queue mode for Dialer Console
       if (queue) {
         // Fix: use stable ordering — new leads first (by assignment time), then RNR retries.
@@ -35,6 +37,7 @@ export async function GET(request: NextRequest) {
         // Now: status='new' leads are served first in insertion order, THEN rnr leads (oldest first).
         const queueRes = await client.query(
           `SELECT l.id, l.tenant_id as "tenantId", l.assigned_rep_id as "assignedRepId",
+                  COALESCE(l.assigned_at, l.first_assigned_at, (CASE WHEN l.assigned_rep_id IS NOT NULL THEN l.created_at ELSE NULL END)) as "assignedAt",
                   l.phone_number as "phoneNumber", l.contact_name as "contactName",
                   l.company_name as "companyName", l.website_url as "websiteUrl",
                   l.business_vertical as "businessVertical", l.service_type as "serviceType",
@@ -64,6 +67,7 @@ export async function GET(request: NextRequest) {
           id: q.id,
           tenantId: q.tenantId,
           assignedRepId: q.assignedRepId,
+          assignedAt: q.assignedAt,
           phoneNumber: q.phoneNumber,
           contactName: q.contactName,
           companyName: q.companyName,
@@ -140,6 +144,7 @@ export async function GET(request: NextRequest) {
 
       const leadsRes = await client.query(
         `SELECT l.id, l.tenant_id as "tenantId", l.assigned_rep_id as "assignedRepId",
+                COALESCE(l.assigned_at, l.first_assigned_at, (CASE WHEN l.assigned_rep_id IS NOT NULL THEN l.created_at ELSE NULL END)) as "assignedAt",
                 l.first_assigned_rep_id as "firstAssignedRepId", l.first_assigned_at as "firstAssignedAt",
                 l.phone_number as "phoneNumber", l.contact_name as "contactName",
                 l.company_name as "companyName", l.website_url as "websiteUrl",
@@ -247,6 +252,7 @@ export async function GET(request: NextRequest) {
         id: l.id,
         tenantId: l.tenantId,
         assignedRepId: l.assignedRepId,
+        assignedAt: l.assignedAt,
         firstAssignedRepId: isSalesRep(role) ? null : l.firstAssignedRepId,
         firstAssignedAt: isSalesRep(role) ? null : l.firstAssignedAt,
         phoneNumber: l.phoneNumber,

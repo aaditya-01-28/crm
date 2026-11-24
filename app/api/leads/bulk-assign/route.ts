@@ -38,6 +38,8 @@ export async function POST(request: NextRequest) {
     }
 
     return await withClient(async (client) => {
+      await client.query("ALTER TABLE leads ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ;").catch(() => {});
+
       // Mode 1: Round Robin Distribution
       if (mode === "round_robin") {
         let targetRepIds: string[] = Array.isArray(repIds) ? repIds.filter(Boolean) : [];
@@ -64,6 +66,7 @@ export async function POST(request: NextRequest) {
            SET assigned_rep_id = v.rep_id,
                first_assigned_rep_id = COALESCE(l.first_assigned_rep_id, v.rep_id),
                first_assigned_at = COALESCE(l.first_assigned_at, NOW()),
+               assigned_at = NOW(),
                status = CASE WHEN l.assigned_rep_id IS DISTINCT FROM v.rep_id THEN 'new' ELSE l.status END,
                rnr_count = CASE WHEN l.assigned_rep_id IS DISTINCT FROM v.rep_id THEN 0 ELSE l.rnr_count END,
                updated_at = NOW()
@@ -82,7 +85,7 @@ export async function POST(request: NextRequest) {
       // Mode 2: Unassign Leads
       if (repId === null || repId === "unassigned") {
         const updateRes = await client.query(
-          "UPDATE leads SET assigned_rep_id = NULL, updated_at = NOW() WHERE id = ANY($1::uuid[]) AND tenant_id = $2 RETURNING id",
+          "UPDATE leads SET assigned_rep_id = NULL, assigned_at = NULL, updated_at = NOW() WHERE id = ANY($1::uuid[]) AND tenant_id = $2 RETURNING id",
           [leadIds, tenantId]
         );
 
@@ -114,6 +117,7 @@ export async function POST(request: NextRequest) {
            SET assigned_rep_id = $1,
                first_assigned_rep_id = COALESCE(first_assigned_rep_id, $1),
                first_assigned_at = COALESCE(first_assigned_at, NOW()),
+               assigned_at = NOW(),
                status = CASE WHEN assigned_rep_id IS DISTINCT FROM $1 THEN 'new' ELSE status END,
                rnr_count = CASE WHEN assigned_rep_id IS DISTINCT FROM $1 THEN 0 ELSE rnr_count END,
                updated_at = NOW()

@@ -16,6 +16,8 @@ import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
 import { LeadDetailModal } from "@/components/leads/LeadDetailModal";
 
+import { useSession } from "@/components/layout/SessionProvider";
+
 interface TaskLead {
   id?: string;
   phoneNumber: string;
@@ -27,13 +29,14 @@ interface TaskLead {
 interface Task {
   id: string;
   leadId: string;
+  repId?: string;
   taskType: string;
   scheduledTime: string | null;
   status: string;
   meetingLink: string | null;
   notes: string | null;
   lead: TaskLead;
-  rep: { fullName: string };
+  rep?: { id?: string; fullName: string };
 }
 
 interface AgendaData {
@@ -51,6 +54,7 @@ async function fetchAgenda(): Promise<AgendaData> {
 
 export default function AgendaPage() {
   const queryClient = useQueryClient();
+  const { userId: currentUserId } = useSession();
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
 
   const { data, isLoading, refetch, isFetching } = useQuery({
@@ -131,6 +135,7 @@ export default function AgendaPage() {
           iconClass="text-amber-600"
           headerClass="border-amber-300 bg-amber-50"
           tasks={unconfirmed}
+          currentUserId={currentUserId}
           onComplete={(id) => completeMutation.mutate(id)}
           onOpenLead={(leadId) => setSelectedLeadId(leadId)}
         />
@@ -144,6 +149,7 @@ export default function AgendaPage() {
           iconClass="text-red-500"
           headerClass="border-red-200 bg-red-50"
           tasks={overdue}
+          currentUserId={currentUserId}
           onComplete={(id) => completeMutation.mutate(id)}
           onOpenLead={(leadId) => setSelectedLeadId(leadId)}
         />
@@ -156,6 +162,7 @@ export default function AgendaPage() {
         iconClass="text-emerald-600"
         headerClass="border-emerald-200 bg-emerald-50"
         tasks={today}
+        currentUserId={currentUserId}
         onComplete={(id) => completeMutation.mutate(id)}
         onOpenLead={(leadId) => setSelectedLeadId(leadId)}
         emptyMessage="No tasks scheduled for today"
@@ -169,6 +176,7 @@ export default function AgendaPage() {
           iconClass="text-purple-500"
           headerClass="border-purple-200 bg-purple-50"
           tasks={upcoming}
+          currentUserId={currentUserId}
           onComplete={(id) => completeMutation.mutate(id)}
           onOpenLead={(leadId) => setSelectedLeadId(leadId)}
         />
@@ -209,6 +217,7 @@ function AgendaSection({
   iconClass,
   headerClass,
   tasks,
+  currentUserId,
   onComplete,
   onOpenLead,
   emptyMessage,
@@ -218,6 +227,7 @@ function AgendaSection({
   iconClass: string;
   headerClass: string;
   tasks: Task[];
+  currentUserId?: string;
   onComplete: (id: string) => void;
   onOpenLead: (leadId: string) => void;
   emptyMessage?: string;
@@ -240,6 +250,7 @@ function AgendaSection({
             <TaskRow
               key={task.id}
               task={task}
+              currentUserId={currentUserId}
               onComplete={onComplete}
               onOpenLead={onOpenLead}
               isLast={i === tasks.length - 1}
@@ -253,17 +264,23 @@ function AgendaSection({
 
 function TaskRow({
   task,
+  currentUserId,
   onComplete,
   onOpenLead,
   isLast,
 }: {
   task: Task;
+  currentUserId?: string;
   onComplete: (id: string) => void;
   onOpenLead: (leadId: string) => void;
   isLast: boolean;
 }) {
   const isDemo = task.taskType === "product_demo";
   const targetLeadId = task.leadId || task.lead?.id;
+  const isOwner = Boolean(
+    currentUserId &&
+      (task.repId === currentUserId || task.rep?.id === currentUserId)
+  );
 
   return (
     <div
@@ -368,18 +385,27 @@ function TaskRow({
           <ArrowRight className="w-3.5 h-3.5" />
         </button>
 
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onComplete(task.id);
-          }}
-          className="flex items-center gap-1 text-xs text-green-700 border border-green-200 bg-green-50 px-2.5 py-1.5 rounded-lg hover:bg-green-100 transition shrink-0 font-medium cursor-pointer"
-          title="Mark task completed"
-        >
-          <CheckCircle className="w-3.5 h-3.5" />
-          <span>Done</span>
-        </button>
+        {isOwner ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onComplete(task.id);
+            }}
+            className="flex items-center gap-1 text-xs text-green-700 border border-green-200 bg-green-50 px-2.5 py-1.5 rounded-lg hover:bg-green-100 transition shrink-0 font-medium cursor-pointer"
+            title="Mark task completed"
+          >
+            <CheckCircle className="w-3.5 h-3.5" />
+            <span>Done</span>
+          </button>
+        ) : (
+          <span
+            className="inline-flex items-center text-[11px] text-slate-400 font-medium px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg shrink-0"
+            title="Read-only: Only assigned representative can complete this task"
+          >
+            Read Only
+          </span>
+        )}
       </div>
     </div>
   );

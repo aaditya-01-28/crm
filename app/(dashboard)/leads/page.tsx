@@ -64,6 +64,7 @@ interface LeadRecord {
   createdAt: string;
   updatedAt: string;
   assignedRep: { id: string; fullName: string } | null;
+  assignedAt?: string | null;
   firstAssignedRep?: { id: string; fullName: string } | null;
   firstAssignedAt?: string | null;
   callLogs: LastCallLog[];
@@ -966,6 +967,15 @@ export default function LeadsDirectoryPage() {
                               <span className="w-2 h-2 rounded-full bg-emerald-500" />
                               {lead.assignedRep.fullName}
                             </span>
+                            {lead.assignedAt && (
+                              <div
+                                className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5"
+                                title={`Assigned on ${formatDateTime(lead.assignedAt)}`}
+                              >
+                                <Clock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                                <span>Assigned: {formatDateTime(lead.assignedAt)}</span>
+                              </div>
+                            )}
                             {canAssign && lead.firstAssignedRep && lead.firstAssignedRep.id !== lead.assignedRep.id && (
                               <div>
                                 <span

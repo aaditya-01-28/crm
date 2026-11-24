@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
           companyName: r.lead_companyName,
           businessVertical: r.lead_businessVertical,
         },
-        rep: { fullName: r.rep_fullName },
+        rep: { id: r.repId, fullName: r.rep_fullName },
       }));
 
       const unconfirmed = tasks.filter((t) => !t.scheduledTime);

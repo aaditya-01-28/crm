@@ -958,6 +958,11 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                     })}
                   </select>
                 </div>
+                {lead.assignedAt && lead.assignedRep && (
+                  <span className="text-[11px] text-slate-500 font-medium">
+                    (Assigned: {formatDateTime(lead.assignedAt)})
+                  </span>
+                )}
                 {lead.firstAssignedRep && (
                   <div
                     className="flex items-center gap-1.5 bg-blue-50 text-blue-900 border border-blue-200/90 px-2.5 py-1 rounded-lg text-xs"
@@ -975,11 +980,16 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                 )}
               </div>
             ) : (
-              <div>
+              <div className="flex items-center gap-1.5">
                 <span className="text-gray-400">Assigned: </span>
                 <span className="font-semibold text-gray-700">
                   {lead.assignedRep?.fullName || "Unassigned"}
                 </span>
+                {lead.assignedAt && (
+                  <span className="text-[11px] text-slate-500 font-medium">
+                    ({formatDateTime(lead.assignedAt)})
+                  </span>
+                )}
               </div>
             )}
             <div>

@@ -9,6 +9,7 @@ export async function PATCH(
   const { id } = await params;
   const session = await getSession();
   const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
+  const currentUserId = session?.sub || request.headers.get("x-user-id") || "";
 
   if (!tenantId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -29,6 +30,17 @@ export async function PATCH(
       }
 
       const task = taskRes.rows[0];
+
+      // Strict Agenda Permission:
+      // Only the assigned representative who owns the agenda task can complete or write to it.
+      // Level 2, Level 3, and all others have read-only permissions on another rep's task.
+      if (task.rep_id && currentUserId && task.rep_id !== currentUserId) {
+        return NextResponse.json(
+          { error: "Forbidden: Only the assigned representative of this agenda task has write permission." },
+          { status: 403 }
+        );
+      }
+
       const newStatus = status || task.status;
       const newNotes = notes !== undefined ? notes : task.notes;
       const newMeetingLink = meetingLink !== undefined ? meetingLink : task.meeting_link;

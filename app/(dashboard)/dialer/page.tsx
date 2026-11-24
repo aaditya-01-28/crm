@@ -8,7 +8,7 @@ import { SalesScriptAssistant } from "@/components/dialer/SalesScriptAssistant";
 import { WhatsAppTemplateModal } from "@/components/dialer/WhatsAppTemplateModal";
 import { CSVImporter } from "@/components/dialer/CSVImporter";
 import { toast } from "sonner";
-import { useCanImportLeads } from "@/components/layout/SessionProvider";
+import { useCanImportLeads, useSession } from "@/components/layout/SessionProvider";
 
 interface Lead {
   id: string;
@@ -31,6 +31,7 @@ async function fetchNextLead(): Promise<{ lead: Lead | null }> {
 
 export default function DialerPage() {
   const queryClient = useQueryClient();
+  const { role } = useSession();
   const [showImporter, setShowImporter] = useState(false);
   const [showWAModal, setShowWAModal] = useState(false);
   const [sessionCalls, setSessionCalls] = useState(0);
@@ -66,7 +67,11 @@ export default function DialerPage() {
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-bold text-gray-900 tracking-tight">Smart Dialer Studio</h1>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                Level 1 Representative
+                {role === "sales_manager"
+                  ? "Level 2 Manager"
+                  : role === "super_admin"
+                  ? "Level 3 Super Admin"
+                  : "Level 1 Representative"}
               </span>
             </div>
             <p className="text-xs text-gray-500 mt-0.5">
@@ -129,7 +134,9 @@ export default function DialerPage() {
           </div>
           <h3 className="text-base font-bold text-gray-800">Queue Complete!</h3>
           <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
-            All your assigned leads have been called or resolved. Your manager will assign fresh leads shortly.
+            {role === "sales_rep"
+              ? "All your assigned leads have been called or resolved. Your manager will assign fresh leads shortly."
+              : "All your assigned personal leads have been called or resolved. You can assign fresh leads from the Leads Directory."}
           </p>
           {canImport && (
             <button

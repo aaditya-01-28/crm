@@ -26,8 +26,19 @@ interface TaskItem {
 export function NotificationBell() {
   const [isOpen, setIsOpen] = useState(false);
   const [tasks, setTasks] = useState<{ overdue: TaskItem[]; today: TaskItem[] }>({ overdue: [], today: [] });
+  const [readTaskIds, setReadTaskIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Load read notification IDs from localStorage
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("read_agenda_notifications");
+      if (stored) {
+        setReadTaskIds(new Set(JSON.parse(stored)));
+      }
+    } catch (_) {}
+  }, []);
 
   async function fetchTasks() {
     try {
@@ -41,6 +52,27 @@ export function NotificationBell() {
     } catch {
       // silently handle
     }
+  }
+
+  function markAsRead(taskId: string) {
+    const next = new Set(readTaskIds);
+    next.add(taskId);
+    setReadTaskIds(next);
+    try {
+      localStorage.setItem("read_agenda_notifications", JSON.stringify(Array.from(next)));
+    } catch (_) {}
+    toast.success("Notification marked as read");
+  }
+
+  function markAllAsRead() {
+    const next = new Set(readTaskIds);
+    const all = [...tasks.overdue, ...tasks.today];
+    all.forEach((t) => next.add(t.id));
+    setReadTaskIds(next);
+    try {
+      localStorage.setItem("read_agenda_notifications", JSON.stringify(Array.from(next)));
+    } catch (_) {}
+    toast.success("All notifications marked as read");
   }
 
   useEffect(() => {
@@ -83,24 +115,11 @@ export function NotificationBell() {
     }
   }
 
-  async function completeTask(taskId: string) {
-    try {
-      const res = await fetch(`/api/tasks/${taskId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "completed" }),
-      });
-      if (res.ok) {
-        toast.success("Task completed ✅");
-        fetchTasks();
-      }
-    } catch {
-      toast.error("Failed to update task");
-    }
-  }
-
   const allActiveTasks = [...tasks.overdue, ...tasks.today];
-  const pendingCount = allActiveTasks.filter((t) => t.status === "pending").length;
+  const unreadTasks = allActiveTasks.filter(
+    (t) => t.status === "pending" && !readTaskIds.has(t.id)
+  );
+  const pendingCount = unreadTasks.length;
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -133,25 +152,37 @@ export function NotificationBell() {
                 </span>
               )}
             </div>
-            <Link
-              href="/agenda"
-              onClick={() => setIsOpen(false)}
-              className="text-xs font-medium text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
-            >
-              Full Agenda
-              <ExternalLink className="w-3 h-3" />
-            </Link>
+            <div className="flex items-center gap-2.5">
+              {pendingCount > 0 && (
+                <button
+                  type="button"
+                  onClick={markAllAsRead}
+                  className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 transition cursor-pointer hover:underline"
+                  title="Mark all notifications as read"
+                >
+                  Read All
+                </button>
+              )}
+              <Link
+                href="/agenda"
+                onClick={() => setIsOpen(false)}
+                className="text-xs font-medium text-slate-600 hover:text-slate-900 flex items-center gap-1"
+              >
+                Full Agenda
+                <ExternalLink className="w-3 h-3" />
+              </Link>
+            </div>
           </div>
 
           <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
-            {allActiveTasks.length === 0 ? (
+            {unreadTasks.length === 0 ? (
               <div className="p-6 text-center text-slate-400 text-xs">
                 <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-500 mb-2 opacity-80" />
                 <p className="font-medium text-slate-700">All caught up!</p>
-                <p className="mt-0.5 text-slate-500">No pending agenda reminders right now.</p>
+                <p className="mt-0.5 text-slate-500">No unread agenda reminders right now.</p>
               </div>
             ) : (
-              allActiveTasks.map((task) => {
+              unreadTasks.map((task) => {
                 const targetName =
                   task.lead?.companyName || task.lead?.contactName || task.lead?.phoneNumber || "Scheduled Contact";
                 const isOverdue = tasks.overdue.some((o) => o.id === task.id);
@@ -187,9 +218,9 @@ export function NotificationBell() {
                       </div>
 
                       <button
-                        onClick={() => completeTask(task.id)}
-                        className="text-slate-400 hover:text-emerald-600 p-1 rounded-md transition"
-                        title="Mark Complete"
+                        onClick={() => markAsRead(task.id)}
+                        className="text-slate-400 hover:text-emerald-600 p-1 rounded-md transition cursor-pointer"
+                        title="Mark as read"
                       >
                         <CheckCircle2 className="w-4 h-4" />
                       </button>

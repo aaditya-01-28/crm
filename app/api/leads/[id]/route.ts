@@ -23,6 +23,7 @@ export async function GET(
     return await withClient(async (client) => {
       const leadRes = await client.query(
         `SELECT l.id, l.tenant_id as "tenantId", l.assigned_rep_id as "assignedRepId",
+                COALESCE(l.assigned_at, l.first_assigned_at, (CASE WHEN l.assigned_rep_id IS NOT NULL THEN l.created_at ELSE NULL END)) as "assignedAt",
                 l.first_assigned_rep_id as "firstAssignedRepId", l.first_assigned_at as "firstAssignedAt",
                 l.phone_number as "phoneNumber", l.contact_name as "contactName",
                 l.company_name as "companyName", l.website_url as "websiteUrl",
@@ -178,6 +179,7 @@ export async function GET(
           id: l.id,
           tenantId: l.tenantId,
           assignedRepId: l.assignedRepId,
+          assignedAt: l.assignedAt,
           firstAssignedRepId: isLevel1 ? null : l.firstAssignedRepId,
           firstAssignedAt: isLevel1 ? null : l.firstAssignedAt,
           phoneNumber: l.phoneNumber,
@@ -236,6 +238,7 @@ export async function PATCH(
     const isLevel1 = isSalesRep(role);
 
     return await withClient(async (client) => {
+      await client.query("ALTER TABLE leads ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ;").catch(() => {});
       const existingRes = await client.query(
         `SELECT * FROM leads WHERE id = $1 AND tenant_id = $2 ${isLevel1 ? "AND assigned_rep_id = $3" : ""}`,
         isLevel1 ? [id, tenantId, repId] : [id, tenantId]
@@ -290,11 +293,13 @@ export async function PATCH(
              rnr_count = CASE WHEN $13 THEN 0 ELSE rnr_count END,
              custom_metadata = $8,
              assigned_rep_id = $9,
+             assigned_at = CASE WHEN $9 IS NOT NULL AND $9 != '' THEN NOW() WHEN $9 IS NULL THEN NULL ELSE assigned_at END,
              first_assigned_rep_id = $10,
              first_assigned_at = $11,
              updated_at = NOW()
          WHERE id = $12
          RETURNING id, tenant_id as "tenantId", assigned_rep_id as "assignedRepId",
+                   COALESCE(assigned_at, first_assigned_at, (CASE WHEN assigned_rep_id IS NOT NULL THEN created_at ELSE NULL END)) as "assignedAt",
                    first_assigned_rep_id as "firstAssignedRepId", first_assigned_at as "firstAssignedAt",
                    phone_number as "phoneNumber", contact_name as "contactName",
                    company_name as "companyName", website_url as "websiteUrl",
