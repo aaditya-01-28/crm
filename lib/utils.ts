@@ -15,6 +15,7 @@ export function formatCurrency(amount: number | string): string {
 
 export function formatDate(date: string | Date): string {
   return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -26,6 +27,7 @@ export function formatDateTime(date?: string | Date | null): string {
   const d = new Date(date);
   if (isNaN(d.getTime())) return "Date & time TBD";
   return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
     day: "2-digit",
     month: "short",
     year: "numeric",

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { parseScheduledDateTime } from "@/lib/utils";
 
 export async function PATCH(
   request: NextRequest,
@@ -45,7 +46,7 @@ export async function PATCH(
       let finalNotes = notes !== undefined ? notes : (remark || task.notes);
       let finalMeetingLink = meetingLink !== undefined ? meetingLink : task.meeting_link;
       let finalScheduledTime = scheduledTime !== undefined
-        ? (scheduledTime ? new Date(scheduledTime) : null)
+        ? parseScheduledDateTime(scheduledTime)
         : task.scheduled_time;
 
       // Handle specific agenda actions
@@ -100,6 +101,12 @@ export async function PATCH(
         const logRemark = remark
           ? `Rescheduled: ${remark}`
           : `Rescheduled to ${finalScheduledTime ? finalScheduledTime.toLocaleString() : "TBD"}`;
+
+        const leadStatus = task.task_type === "product_demo" ? "demo_scheduled" : "callback";
+        await client.query(
+          `UPDATE leads SET status = $1, updated_at = NOW() WHERE id = $2`,
+          [leadStatus, task.lead_id]
+        ).catch(() => {});
 
         await client.query(
           `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, call_timestamp)

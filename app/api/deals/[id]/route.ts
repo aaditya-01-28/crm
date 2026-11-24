@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { isManagerOrAdmin } from "@/lib/rbac";
+import { parseScheduledDateTime } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -304,8 +305,8 @@ export async function PATCH(
 
       // Demo Scheduled calendar task (tagged as pipeline so it doesn't pollute follow-up agenda)
       if (newStage === "demo_scheduled" && body.demoDate && deal.lead_id) {
-        const demoDateObj = new Date(body.demoDate);
-        if (!isNaN(demoDateObj.getTime())) {
+        const demoDateObj = parseScheduledDateTime(body.demoDate);
+        if (demoDateObj && !isNaN(demoDateObj.getTime())) {
           const existingTaskRes = await client.query(
             "SELECT id FROM scheduled_tasks WHERE lead_id = $1 AND task_type = 'product_demo' AND status = 'pending' ORDER BY scheduled_time DESC LIMIT 1",
             [deal.lead_id]
@@ -339,8 +340,8 @@ export async function PATCH(
 
       // Demo Done & Quote Sent contact back callback task
       if ((newStage === "demo_done" || newStage === "quote_sent") && body.contactBackDate && deal.lead_id) {
-        const cbDateObj = new Date(body.contactBackDate);
-        if (!isNaN(cbDateObj.getTime())) {
+        const cbDateObj = parseScheduledDateTime(body.contactBackDate);
+        if (cbDateObj && !isNaN(cbDateObj.getTime())) {
           await client.query(
             `INSERT INTO scheduled_tasks (
                tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, task_source, created_at, updated_at
@@ -362,8 +363,8 @@ export async function PATCH(
 
       // Closed Lost recontact callback task
       if (newStage === "closed_lost" && body.recontactDate && deal.lead_id) {
-        const rcDateObj = new Date(body.recontactDate);
-        if (!isNaN(rcDateObj.getTime())) {
+        const rcDateObj = parseScheduledDateTime(body.recontactDate);
+        if (rcDateObj && !isNaN(rcDateObj.getTime())) {
           await client.query(
             `INSERT INTO scheduled_tasks (
                tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, task_source, created_at, updated_at

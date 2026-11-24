@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { parseScheduledDateTime } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -475,7 +476,7 @@ export async function POST(request: NextRequest) {
             tenantId,
             leadId,
             repId,
-            new Date(firstComm.demoDate),
+            parseScheduledDateTime(firstComm.demoDate),
             firstComm.meetingLink || null,
             firstComm.demoNotes || firstComm.closingNotes || null,
           ]
@@ -496,7 +497,7 @@ export async function POST(request: NextRequest) {
             tenantId,
             leadId,
             repId,
-            new Date(firstComm.contactBackDate),
+            parseScheduledDateTime(firstComm.contactBackDate),
             firstComm.closingNotes ||
               (primaryStage === "demo_done"
                 ? "Post-demo update follow-up"
@@ -516,7 +517,7 @@ export async function POST(request: NextRequest) {
             tenantId,
             leadId,
             repId,
-            new Date(firstComm.recontactDate),
+            parseScheduledDateTime(firstComm.recontactDate),
             firstComm.lostRemarks
               ? `Closed Lost Re-contact: ${firstComm.lostRemarks}`
               : "Closed Lost re-contact follow-up",

@@ -14,6 +14,7 @@ import {
   Calendar,
   AlertCircle,
 } from "lucide-react";
+import { toUtcIsoString } from "@/lib/utils";
 
 type DispositionType =
   | "RNR"
@@ -79,7 +80,7 @@ export function DispositionBar({
   function submitCallback() {
     onDispose("Callback", {
       remark: [quickNote.trim(), remark.trim()].filter(Boolean).join(" • ") || undefined,
-      callbackDatetime: callbackDatetime || undefined,
+      callbackDatetime: callbackDatetime ? (toUtcIsoString(callbackDatetime) || undefined) : undefined,
     });
     closeModal();
   }
@@ -87,7 +88,7 @@ export function DispositionBar({
   function submitDemo() {
     onDispose("Demo Scheduled", {
       remark: [quickNote.trim(), remark.trim()].filter(Boolean).join(" • ") || undefined,
-      demoDatetime: demoDatetime || undefined,
+      demoDatetime: demoDatetime ? (toUtcIsoString(demoDatetime) || undefined) : undefined,
       decisionMakerName: decisionMakerName || undefined,
       meetingLink: meetingLink || undefined,
     });
@@ -97,7 +98,7 @@ export function DispositionBar({
   function submitDemoDone() {
     onDispose("Demo Done", {
       remark: [quickNote.trim(), remark.trim()].filter(Boolean).join(" • ") || undefined,
-      callbackDatetime: callbackDatetime || undefined,
+      callbackDatetime: callbackDatetime ? (toUtcIsoString(callbackDatetime) || undefined) : undefined,
     });
     closeModal();
   }
@@ -109,6 +110,15 @@ export function DispositionBar({
     setDemoDatetime("");
     setDecisionMakerName("");
     setMeetingLink("");
+  }
+
+  function setPresetMinutes(minutesFromNow: number) {
+    const d = new Date(Date.now() + minutesFromNow * 60000);
+    const isoLocal = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+      .toISOString()
+      .slice(0, 16);
+    if (modal === "callback" || modal === "demo_done") setCallbackDatetime(isoLocal);
+    if (modal === "demo") setDemoDatetime(isoLocal);
   }
 
   function setPresetTime(hoursFromNow: number) {
@@ -299,8 +309,22 @@ export function DispositionBar({
                 />
 
                 {/* Quick Presets */}
-                <div className="flex items-center gap-1.5 mt-2">
+                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                   <span className="text-[10px] text-gray-400">Quick:</span>
+                  <button
+                    type="button"
+                    onClick={() => setPresetMinutes(25)}
+                    className="px-2 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 text-[10px] font-semibold text-indigo-700 hover:text-indigo-800 border border-indigo-200 transition cursor-pointer"
+                  >
+                    +25 Min
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPresetTime(1)}
+                    className="px-2 py-0.5 rounded bg-gray-100 hover:bg-indigo-50 text-[10px] font-semibold text-gray-700 hover:text-indigo-700 border border-gray-200 transition cursor-pointer"
+                  >
+                    +1 Hour
+                  </button>
                   <button
                     type="button"
                     onClick={() => setPresetTime(2)}
@@ -388,6 +412,46 @@ export function DispositionBar({
                   onChange={(e) => setDemoDatetime(e.target.value)}
                   className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
+
+                {/* Quick Presets */}
+                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                  <span className="text-[10px] text-gray-400">Quick:</span>
+                  <button
+                    type="button"
+                    onClick={() => setPresetMinutes(25)}
+                    className="px-2 py-0.5 rounded bg-purple-50 hover:bg-purple-100 text-[10px] font-semibold text-purple-700 hover:text-purple-800 border border-purple-200 transition cursor-pointer"
+                  >
+                    +25 Min
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPresetTime(1)}
+                    className="px-2 py-0.5 rounded bg-gray-100 hover:bg-purple-50 text-[10px] font-semibold text-gray-700 hover:text-purple-700 border border-gray-200 transition cursor-pointer"
+                  >
+                    +1 Hour
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPresetTime(2)}
+                    className="px-2 py-0.5 rounded bg-gray-100 hover:bg-purple-50 text-[10px] font-semibold text-gray-700 hover:text-purple-700 border border-gray-200 transition cursor-pointer"
+                  >
+                    +2 Hours
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTomorrowTime(11)}
+                    className="px-2 py-0.5 rounded bg-gray-100 hover:bg-purple-50 text-[10px] font-semibold text-gray-700 hover:text-purple-700 border border-gray-200 transition cursor-pointer"
+                  >
+                    Tomorrow 11 AM
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTomorrowTime(16)}
+                    className="px-2 py-0.5 rounded bg-gray-100 hover:bg-purple-50 text-[10px] font-semibold text-gray-700 hover:text-purple-700 border border-gray-200 transition cursor-pointer"
+                  >
+                    Tomorrow 4 PM
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -481,8 +545,22 @@ export function DispositionBar({
                 />
 
                 {/* Quick Presets */}
-                <div className="flex items-center gap-1.5 mt-2">
+                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                   <span className="text-[10px] text-gray-400">Quick:</span>
+                  <button
+                    type="button"
+                    onClick={() => setPresetMinutes(25)}
+                    className="px-2 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 text-[10px] font-semibold text-emerald-700 hover:text-emerald-800 border border-emerald-200 transition cursor-pointer"
+                  >
+                    +25 Min
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPresetTime(1)}
+                    className="px-2 py-0.5 rounded bg-gray-100 hover:bg-emerald-50 text-[10px] font-semibold text-gray-700 hover:text-emerald-700 border border-gray-200 transition cursor-pointer"
+                  >
+                    +1 Hour
+                  </button>
                   <button
                     type="button"
                     onClick={() => setPresetTime(2)}

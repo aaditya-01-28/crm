@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { parseScheduledDateTime } from "@/lib/utils";
 
 export async function PATCH(
   request: NextRequest,
@@ -106,7 +107,7 @@ export async function PATCH(
           if (callbackDatetime) {
             taskToCreate = {
               taskType: "callback",
-              scheduledTime: new Date(callbackDatetime),
+              scheduledTime: parseScheduledDateTime(callbackDatetime),
               notes: remark ? `Future Requirement: ${remark}` : "Future Requirement follow-up",
             };
           }
@@ -118,7 +119,7 @@ export async function PATCH(
           newStatus = "callback";
           taskToCreate = {
             taskType: "callback",
-            scheduledTime: callbackDatetime ? new Date(callbackDatetime) : null,
+            scheduledTime: parseScheduledDateTime(callbackDatetime),
             notes: remark || null,
           };
           break;
@@ -126,7 +127,7 @@ export async function PATCH(
           newStatus = "demo_scheduled";
           taskToCreate = {
             taskType: "product_demo",
-            scheduledTime: demoDatetime ? new Date(demoDatetime) : null,
+            scheduledTime: parseScheduledDateTime(demoDatetime),
             meetingLink: meetingLink || null,
             notes: [
               decisionMakerName ? `Decision Maker: ${decisionMakerName}` : null,
@@ -141,7 +142,7 @@ export async function PATCH(
           newStatus = "demo_done";
           taskToCreate = {
             taskType: "callback",
-            scheduledTime: callbackDatetime ? new Date(callbackDatetime) : null,
+            scheduledTime: parseScheduledDateTime(callbackDatetime),
             notes: remark
               ? `Post-Demo Follow-Up: ${remark}`
               : "Post-Demo Follow-Up: Client demo completed, call back to close deal.",
