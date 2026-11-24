@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Eye, EyeOff, Mail, KeyRound, X, CheckCircle2, ArrowRight, ShieldAlert, ShieldCheck, UserCheck } from "lucide-react";
+import { APP_VERSION } from "@/lib/version";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -262,9 +263,15 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <p className="mt-6 text-center text-[11px] text-gray-400 font-medium">
-            © Textora Technologies Pvt Ltd · Internal CRM
-          </p>
+          <div className="mt-6 text-center space-y-1.5">
+            <div className="flex items-center justify-center gap-1.5 text-[11px] font-mono font-semibold text-slate-500">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span>Textora Engage v{APP_VERSION}</span>
+            </div>
+            <p className="text-[11px] text-gray-400 font-medium">
+              © Textora Technologies Pvt Ltd · Internal CRM
+            </p>
+          </div>
         </div>
       </div>
 

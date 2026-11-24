@@ -1,23 +1,18 @@
 import { NextResponse } from "next/server";
+import { APP_VERSION, APP_BUILD, APP_RELEASE_DATE, APP_RELEASE_NOTES } from "@/lib/version";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   return NextResponse.json(
     {
-      version: "1.2.1",
-      buildNumber: 4,
+      version: APP_VERSION,
+      buildNumber: APP_BUILD,
       downloadUrl: "https://crm.textorasms.com/downloads/textora-dialer.apk",
-      releaseNotes: [
-        "Eliminated duplicate call log issue on CRM call sync",
-        "Seamless synchronization between SIM dialer and PostCall disposition",
-        "Mandatory non-dismissible post-call disposition dialog",
-        "Added Callback & Demo Scheduled date/time/details pickers",
-        "Dynamic personalized WhatsApp intro pitch matching rep profile"
-      ],
+      releaseNotes: APP_RELEASE_NOTES,
       isMandatory: false,
       minSupportedBuild: 1,
-      releasedAt: "2026-11-24"
+      releasedAt: APP_RELEASE_DATE
     },
     {
       headers: {

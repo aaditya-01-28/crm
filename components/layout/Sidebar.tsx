@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { normalizeRole } from "@/lib/rbac";
 import { useQuery } from "@tanstack/react-query";
 import { useSidebar } from "./SidebarContext";
+import { APP_VERSION } from "@/lib/version";
 
 const NAV_ITEMS = [
   {
@@ -282,7 +283,7 @@ export default function Sidebar({ role }: SidebarProps) {
                 <span className="text-emerald-400 font-semibold uppercase tracking-wider text-[10px]">
                   Textora Engage
                 </span>
-                <span className="text-slate-500 text-[10px]">v1.0</span>
+                <span className="text-slate-500 text-[10px]">v{APP_VERSION}</span>
               </div>
             </>
           )}
@@ -373,17 +374,17 @@ export default function Sidebar({ role }: SidebarProps) {
             <>
               <span
                 className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"
-                title="System Online • v1.1.0"
+                title={`System Online • v${APP_VERSION}`}
               />
-              <span className="text-[9px] font-mono font-bold text-slate-500" title="Textora CRM v1.1.0">
-                v1.1
+              <span className="text-[9px] font-mono font-bold text-slate-500" title={`Textora CRM v${APP_VERSION}`}>
+                v{APP_VERSION}
               </span>
             </>
           ) : (
             <>
               <div className="flex flex-col">
                 <span className="font-semibold text-slate-300">Textora Engage</span>
-                <span className="text-[10px] text-slate-500 font-mono tracking-tight">v1.1.0</span>
+                <span className="text-[10px] text-slate-500 font-mono tracking-tight">v{APP_VERSION}</span>
               </div>
               <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
