@@ -9,12 +9,11 @@ export async function PATCH(
 ) {
   const { id } = await params;
   const session = await getSession(request);
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
-
-  if (!tenantId || !repId) {
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const repId = session.sub;
 
   try {
     const body = await request.json();

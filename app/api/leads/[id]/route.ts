@@ -9,13 +9,12 @@ export async function GET(
 ) {
   const { id } = await params;
   const session = await getSession(request);
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
-  const role = request.headers.get("x-user-role") || session?.role || "";
-
-  if (!tenantId) {
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const repId = session.sub;
+  const role = session.role;
 
   const isLevel1 = isSalesRep(role);
 
@@ -217,9 +216,12 @@ export async function PATCH(
 ) {
   const { id } = await params;
   const session = await getSession(request);
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const role = request.headers.get("x-user-role") || session?.role || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
+  if (!session?.tenantId || !session?.sub) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const tenantId = session.tenantId;
+  const role = session.role;
+  const repId = session.sub;
 
   try {
     const body = await request.json();
@@ -302,7 +304,7 @@ export async function PATCH(
              first_assigned_rep_id = $10::uuid,
              first_assigned_at = $11::timestamptz,
              updated_at = NOW()
-         WHERE id = $12::uuid
+         WHERE id = $12::uuid AND tenant_id = $14::uuid
          RETURNING id, tenant_id as "tenantId", assigned_rep_id as "assignedRepId",
                    COALESCE(assigned_at, first_assigned_at, (CASE WHEN assigned_rep_id IS NOT NULL THEN created_at ELSE NULL END)) as "assignedAt",
                    first_assigned_rep_id as "firstAssignedRepId", first_assigned_at as "firstAssignedAt",
@@ -325,6 +327,7 @@ export async function PATCH(
           finalFirstAssignedAt || null,
           id,
           Boolean(isReassigned),
+          tenantId,
         ]
       );
 

@@ -42,6 +42,8 @@ export function ManagerDashboardView({
     totalCalls = 0,
     connectedCalls = 0,
     connectRate = 0,
+    interestedCalls = 0,
+    interestedRate = 0,
     talkTimeMins = 0,
     todayCallbacksCount = 0,
     todayDemosCount = 0,
@@ -134,7 +136,7 @@ export function ManagerDashboardView({
           subValue={`${connectedCalls} connected (${connectRate}% pickup)`}
           icon={Phone}
           color="blue"
-          badge={`Team Talk Time: ${talkTimeMins}m`}
+          badge={interestedCalls > 0 ? `🔥 ${interestedCalls} Interested (${interestedRate}%)` : `Talk Time: ${talkTimeMins}m`}
         />
 
         <KpiCard
@@ -198,6 +200,7 @@ export function ManagerDashboardView({
                 <th className="px-5 py-3">Representative</th>
                 <th className="px-4 py-3">Total Dials</th>
                 <th className="px-4 py-3">Talk Time</th>
+                <th className="px-4 py-3">Interested 🔥</th>
                 <th className="px-4 py-3">Demos Booked</th>
                 <th className="px-4 py-3">Deals Won</th>
                 <th className="px-5 py-3">Won Revenue</th>
@@ -207,7 +210,7 @@ export function ManagerDashboardView({
             <tbody className="divide-y divide-gray-100">
               {leaderboard.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-8 text-gray-400">
+                  <td colSpan={8} className="text-center py-8 text-gray-400">
                     No sales reps active or no dials recorded for this period yet.
                   </td>
                 </tr>
@@ -266,6 +269,15 @@ export function ManagerDashboardView({
                         <span className="font-semibold text-gray-800">
                           {rep.talkTimeFormatted || `${rep.talkTimeMins || 0}m`}
                         </span>
+                      </td>
+
+                      <td className="px-4 py-3.5 text-amber-700 font-bold">
+                        <span>{rep.interestedCalls ?? 0}</span>
+                        {(rep.connectedCalls || 0) > 0 && (
+                          <span className="text-[11px] text-gray-400 font-medium ml-1">
+                            ({rep.interestedRate ?? Math.round(((rep.interestedCalls || 0) / rep.connectedCalls) * 100)}%)
+                          </span>
+                        )}
                       </td>
 
                       <td className="px-4 py-3.5 text-purple-700 font-semibold">
@@ -436,6 +448,29 @@ export function ManagerDashboardView({
           <p className="text-xs text-gray-500 mb-4">
             Aggregated call disposition distribution across all active representatives
           </p>
+
+          {/* 🔥 High-Level Interested Pipeline Banner */}
+          <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-orange-500/10 border border-amber-300 rounded-xl p-3 mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <span className="text-xl">🔥</span>
+              <div>
+                <span className="text-xs font-bold text-amber-950 block">
+                  Total Interested Customers ({activePeriodLabel})
+                </span>
+                <span className="text-[11px] text-amber-800">
+                  Callbacks + Demos Booked + Future Requirements
+                </span>
+              </div>
+            </div>
+            <div className="text-right">
+              <span className="text-lg font-black text-amber-950 block leading-tight">
+                {interestedCalls} Leads
+              </span>
+              <span className="text-[10px] font-bold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded border border-amber-300 inline-block mt-0.5">
+                {interestedRate}% of connected
+              </span>
+            </div>
+          </div>
 
           <div className="space-y-3">
             {[

@@ -6,12 +6,10 @@ import bcrypt from "bcryptjs";
 export async function GET(request: NextRequest) {
   try {
     const session = await getSession(request);
-    const headerUserId = request.headers.get("x-user-id");
-    const currentUserId = headerUserId || session?.sub;
-
-    if (!currentUserId) {
+    if (!session?.sub || !session?.tenantId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const currentUserId = session.sub;
 
     return await withClient(async (client) => {
       await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;`).catch(() => {});
@@ -76,12 +74,10 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const session = await getSession(request);
-    const headerUserId = request.headers.get("x-user-id");
-    const currentUserId = headerUserId || session?.sub;
-
-    if (!currentUserId) {
+    if (!session?.sub || !session?.tenantId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const currentUserId = session.sub;
 
     const body = await request.json();
     const { fullName, phoneNumber, language, avatarUrl, currentPassword, newPassword } = body;

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { sendTemporaryPasswordEmail, sendPasswordResetRequestNotificationEmail } from "@/lib/mail";
+import { sendTemporaryPasswordEmail, sendPasswordResetRequestNotificationEmail, sendPasswordResetEmail } from "@/lib/mail";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 
@@ -44,46 +44,36 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Role check: Level 3 Super Admin receives a temporary password on their email
+      // Role check: Level 3 Super Admin receives a secure single-use reset link on their email
       if (user.role === "super_admin") {
-        // Generate secure temporary password, e.g. Txt#4k9M2x8Q
-        const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
-        let randomChars = "";
-        const bytes = crypto.randomBytes(8);
-        for (let i = 0; i < 8; i++) {
-          randomChars += chars[bytes[i] % chars.length];
-        }
-        const tempPassword = `Txt#${randomChars}`;
-        const passwordHash = await bcrypt.hash(tempPassword, 12);
+        const resetToken = crypto.randomBytes(32).toString("hex");
 
         await client.query(
           `UPDATE users
-           SET password_hash = $1,
-               must_change_password = true,
-               reset_token = NULL,
-               reset_token_expiry = NULL
+           SET reset_token = $1,
+               reset_token_expiry = NOW() + INTERVAL '1 hour'
            WHERE id = $2`,
-          [passwordHash, user.id]
+          [resetToken, user.id]
         );
 
-        const origin =
-          request.headers.get("origin") ||
+        const baseUrl =
           process.env.NEXT_PUBLIC_APP_URL ||
-          "http://localhost:3000";
+          (request.headers.get("origin")?.startsWith("http://localhost")
+            ? request.headers.get("origin")!
+            : "https://crm.textorasms.com");
 
-        const loginUrl = `${origin}/login`;
+        const resetUrl = `${baseUrl}/reset-password?token=${resetToken}`;
 
-        const mailResult = await sendTemporaryPasswordEmail({
+        const mailResult = await sendPasswordResetEmail({
           to: user.email,
           fullName: user.fullName,
-          tempPassword,
-          loginUrl,
+          resetUrl,
         });
 
         return NextResponse.json({
           success: true,
           isSuperAdmin: true,
-          message: `A temporary login password has been sent to ${user.email}. Please check your inbox, sign in using your temporary password, and you will be prompted to set your new permanent password.`,
+          message: `Password reset instructions have been sent to ${user.email}. Please check your inbox and follow the link to reset your password.`,
           delivered: mailResult.delivered,
         });
       }

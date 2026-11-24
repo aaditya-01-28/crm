@@ -4,11 +4,14 @@ import { getSession } from "@/lib/auth";
 import bcrypt from "bcryptjs";
 
 export async function GET(request: NextRequest) {
-  const session = await getSession();
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId;
-  const role = request.headers.get("x-user-role") || session?.role;
+  const session = await getSession(request);
+  if (!session?.tenantId || !session?.sub) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const tenantId = session.tenantId;
+  const role = session.role;
 
-  if (!tenantId || !role || !["super_admin", "sales_manager"].includes(role)) {
+  if (!["super_admin", "sales_manager"].includes(role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -51,11 +54,14 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getSession();
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId;
-  const role = request.headers.get("x-user-role") || session?.role;
+  const session = await getSession(request);
+  if (!session?.tenantId || !session?.sub) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const tenantId = session.tenantId;
+  const role = session.role;
 
-  if (!tenantId || role !== "super_admin") {
+  if (role !== "super_admin") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

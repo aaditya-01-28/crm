@@ -4,16 +4,15 @@ import { can, normalizeRole } from "@/lib/rbac";
 import { getSession } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
-  const session = await getSession();
-  const headerTenantId = request.headers.get("x-tenant-id");
-  const headerRole = request.headers.get("x-user-role");
-
-  const tenantId = headerTenantId || session?.tenantId;
-  const role = headerRole || session?.role;
-
-  if (!tenantId || !role) {
+  const session = await getSession(request);
+  if (!session?.tenantId || !session?.role || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const tenantId = session.tenantId;
+  const role = session.role;
+  const currentUserId = session.sub;
+  const normalizedRole = normalizeRole(role);
 
   if (!can(role, "leads:assign")) {
     return NextResponse.json(
@@ -21,10 +20,6 @@ export async function POST(request: NextRequest) {
       { status: 403 }
     );
   }
-
-  // Get current user ID for self-assignment check
-  const currentUserId = request.headers.get("x-user-id") || session?.sub || "";
-  const normalizedRole = normalizeRole(role);
 
   try {
     const body = await request.json();

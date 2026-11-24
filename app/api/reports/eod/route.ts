@@ -18,8 +18,9 @@ export async function GET(request: NextRequest) {
   const dateFromStr = searchParams.get("dateFrom") || searchParams.get("startDate") || searchParams.get("date") || todayStr;
   const dateToStr = searchParams.get("dateTo") || searchParams.get("endDate") || searchParams.get("date") || dateFromStr;
 
-  const startOfDay = new Date(`${dateFromStr}T00:00:00`);
-  const endOfDay = new Date(`${dateToStr}T23:59:59.999`);
+  // Anchor to Indian Standard Time (IST, UTC+05:30)
+  const startOfDay = new Date(`${dateFromStr}T00:00:00+05:30`);
+  const endOfDay = new Date(`${dateToStr}T23:59:59.999+05:30`);
 
   const repFilter = role === "sales_rep" ? repId : searchParams.get("repId") || undefined;
 
@@ -45,6 +46,8 @@ export async function GET(request: NextRequest) {
             totalCalls: 0,
             uniqueDialed: 0,
             connectedCalls: 0,
+            interestedCalls: 0,
+            interestedRate: 0,
             talkTimeMins: 0,
             talkTimeSecs: 0,
             talkTimeFormatted: "0m 0s",
@@ -70,6 +73,11 @@ export async function GET(request: NextRequest) {
                        AND (duration_seconds > 0 OR disposition IN ('Connected', 'Contacted', 'Answered', 'Callback', 'Callback Requested', 'Demo Scheduled', 'Demo Done', 'Demo Completed', 'Already Using Our Service', 'Already Purchased or Using Other Company Service', 'Not Interested', 'Future Requirement'))
                       THEN 1 
                     END)::int as connected_calls,
+                    COUNT(CASE 
+                      WHEN disposition IN ('Demo Scheduled', 'Callback', 'Callback Requested', 'Future Requirement', 'Demo Done', 'Demo Completed', 'Quote Sent', 'Won', 'Deal Created')
+                        OR disposition ILIKE '%Demo%' OR disposition ILIKE '%Callback%' OR disposition ILIKE '%Future%'
+                      THEN 1 
+                    END)::int as interested_calls,
                     COALESCE(SUM(duration_seconds), 0)::int as total_duration
              FROM call_logs
              WHERE tenant_id = $1 AND rep_id = ANY($2::uuid[])
@@ -145,6 +153,8 @@ export async function GET(request: NextRequest) {
         const repCallStats = callStats.find((c: any) => c.rep_id === rep.id);
         const totalCalls = Number(repCallStats?.total_calls || 0);
         const connected = Number(repCallStats?.connected_calls || 0);
+        const interested = Number(repCallStats?.interested_calls || 0);
+        const interestedRate = connected > 0 ? Math.round((interested / connected) * 100) : 0;
         const talkTimeSecs = Number(repCallStats?.total_duration || 0);
         const uniqueCount = Number(uniqueDialed.find((u: any) => u.rep_id === rep.id)?.unique_count || 0);
         const demosB = demosBooked.find((d: any) => d.rep_id === rep.id)?.count || 0;
@@ -158,6 +168,8 @@ export async function GET(request: NextRequest) {
           totalCalls,
           uniqueDialed: uniqueCount,
           connectedCalls: connected,
+          interestedCalls: interested,
+          interestedRate,
           talkTimeMins: Math.round(talkTimeSecs / 60),
           talkTimeSecs,
           talkTimeFormatted: formatDuration(talkTimeSecs),
@@ -171,11 +183,16 @@ export async function GET(request: NextRequest) {
       });
 
       const totalTalkTimeSecs = metrics.reduce((sum, m) => sum + (m.talkTimeSecs || 0), 0);
+      const totalConnected = metrics.reduce((sum, m) => sum + m.connectedCalls, 0);
+      const totalInterested = metrics.reduce((sum, m) => sum + (m.interestedCalls || 0), 0);
+      const totalInterestedRate = totalConnected > 0 ? Math.round((totalInterested / totalConnected) * 100) : 0;
 
       const totals = {
         totalCalls: metrics.reduce((sum, m) => sum + m.totalCalls, 0),
         uniqueDialed: metrics.reduce((sum, m) => sum + m.uniqueDialed, 0),
-        connectedCalls: metrics.reduce((sum, m) => sum + m.connectedCalls, 0),
+        connectedCalls: totalConnected,
+        interestedCalls: totalInterested,
+        interestedRate: totalInterestedRate,
         talkTimeMins: Math.round(totalTalkTimeSecs / 60),
         talkTimeSecs: totalTalkTimeSecs,
         talkTimeFormatted: formatDuration(totalTalkTimeSecs),

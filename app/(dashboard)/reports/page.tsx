@@ -13,6 +13,7 @@ type SortField =
   | "totalCalls"
   | "uniqueDialed"
   | "connectedCalls"
+  | "interestedCalls"
   | "talkTime"
   | "demosBooked"
   | "demosCompleted"
@@ -57,6 +58,8 @@ interface RepMetrics {
   totalCalls: number;
   uniqueDialed: number;
   connectedCalls: number;
+  interestedCalls: number;
+  interestedRate?: number;
   talkTimeMins: number;
   talkTimeSecs?: number;
   talkTimeFormatted?: string;
@@ -95,6 +98,7 @@ const METRICS_CONFIG: {
   { key: "totalCalls", label: "Total Calls", icon: "📞", color: "text-blue-700 bg-blue-50" },
   { key: "uniqueDialed", label: "Unique Dialed", icon: "📱", color: "text-indigo-700 bg-indigo-50" },
   { key: "connectedCalls", label: "Connected", icon: "🤝", color: "text-green-700 bg-green-50" },
+  { key: "interestedCalls", label: "Interested Leads", icon: "🔥", color: "text-amber-700 bg-amber-50" },
   { key: "talkTimeFormatted" as any, label: "Talk Time", icon: "⏱️", color: "text-teal-700 bg-teal-50" },
   { key: "demosBooked", label: "Demos Booked", icon: "📅", color: "text-purple-700 bg-purple-50" },
   { key: "demosCompleted", label: "Demos Done", icon: "✅", color: "text-violet-700 bg-violet-50" },
@@ -148,6 +152,7 @@ export default function ReportsPage() {
       "Total Calls",
       "Unique Dialed",
       "Connected",
+      "Interested Leads",
       "Talk Time (min & sec)",
       "Demos Booked",
       "Demos Done",
@@ -161,6 +166,7 @@ export default function ReportsPage() {
       r.totalCalls,
       r.uniqueDialed,
       r.connectedCalls,
+      r.interestedCalls ?? 0,
       r.talkTimeFormatted || formatDuration((r.talkTimeMins || 0) * 60),
       r.demosBooked,
       r.demosCompleted,
@@ -308,13 +314,18 @@ export default function ReportsPage() {
                   Team Totals — {data?.date || (customDateFrom === customDateTo ? customDateFrom : `${customDateFrom} to ${customDateTo}`)}
                 </h2>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                 {METRICS_CONFIG.map((m) => (
                   <MetricCard
                     key={m.key}
                     icon={m.icon}
                     label={m.label}
                     value={totals[m.key as keyof typeof totals]}
+                    subLabel={
+                      m.key === "interestedCalls" && (totals as any)?.connectedCalls > 0
+                        ? `${(totals as any)?.interestedRate || 0}% conv.`
+                        : undefined
+                    }
                     isCurrency={m.isCurrency}
                     color={m.color}
                   />
@@ -409,6 +420,20 @@ export default function ReportsPage() {
                           <span className={sortField === "connectedCalls" ? "text-emerald-700 font-bold" : ""}>Connected</span>
                           {sortField === "connectedCalls" ? (
                             sortDirection === "asc" ? <ArrowUp className="w-3.5 h-3.5 text-emerald-600" /> : <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-gray-400 opacity-40 group-hover:opacity-100 transition" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSort("interestedCalls")}
+                        className="px-3 py-3 text-center font-semibold cursor-pointer select-none group hover:bg-gray-100 transition"
+                        title="Sort by Interested Leads (Callbacks, Demos, Quotes)"
+                      >
+                        <div className="inline-flex items-center gap-1.5 justify-center">
+                          <span className={sortField === "interestedCalls" ? "text-amber-700 font-bold" : ""}>Interested 🔥</span>
+                          {sortField === "interestedCalls" ? (
+                            sortDirection === "asc" ? <ArrowUp className="w-3.5 h-3.5 text-amber-600" /> : <ArrowDown className="w-3.5 h-3.5 text-amber-600" />
                           ) : (
                             <ArrowUpDown className="w-3 h-3 text-gray-400 opacity-40 group-hover:opacity-100 transition" />
                           )}
@@ -517,6 +542,14 @@ export default function ReportsPage() {
                         <td className="px-3 py-3 text-center">
                           <span className="font-medium text-green-700">{rep.connectedCalls}</span>
                         </td>
+                        <td className="px-3 py-3 text-center">
+                          <span className="font-bold text-amber-700">{rep.interestedCalls ?? 0}</span>
+                          {rep.connectedCalls > 0 && (
+                            <span className="text-[10px] text-gray-400 block font-medium">
+                              {rep.interestedRate ?? Math.round(((rep.interestedCalls || 0) / rep.connectedCalls) * 100)}%
+                            </span>
+                          )}
+                        </td>
                         <td className="px-3 py-3 text-center text-gray-600 font-medium">
                           {rep.talkTimeFormatted || formatDuration((rep.talkTimeMins || 0) * 60)}
                         </td>
@@ -552,18 +585,20 @@ function MetricCard({
   icon,
   label,
   value,
+  subLabel,
   isCurrency,
   color,
 }: {
   icon: string;
   label: string;
   value: number | string | undefined;
+  subLabel?: string;
   isCurrency?: boolean;
   color: string;
 }) {
   const [bg, text] = color.split(" ");
   return (
-    <div className={`rounded-xl border border-gray-200 p-4 bg-white`}>
+    <div className={`rounded-xl border border-gray-200 p-4 bg-white relative overflow-hidden`}>
       <div className={`inline-flex items-center justify-center w-8 h-8 rounded-lg ${bg} mb-2`}>
         <span className="text-base">{icon}</span>
       </div>
@@ -574,7 +609,14 @@ function MetricCard({
           ? value.toLocaleString("en-IN")
           : value ?? 0}
       </p>
-      <p className="text-xs text-gray-500 mt-0.5">{label}</p>
+      <div className="flex items-center justify-between gap-1 mt-0.5">
+        <p className="text-xs text-gray-500">{label}</p>
+        {subLabel && (
+          <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200 shrink-0">
+            {subLabel}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

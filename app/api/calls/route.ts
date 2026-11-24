@@ -80,7 +80,11 @@ export async function GET(request: NextRequest) {
       }
 
       if (disposition && disposition !== "all") {
-        if (disposition === "Connected" || disposition === "connected") {
+        if (disposition === "Interested" || disposition === "interested") {
+          conditions.push(
+            `(c.disposition IN ('Demo Scheduled', 'Callback', 'Callback Requested', 'Future Requirement', 'Demo Done', 'Demo Completed', 'Quote Sent', 'Won', 'Deal Created') OR c.disposition ILIKE '%Demo%' OR c.disposition ILIKE '%Callback%' OR c.disposition ILIKE '%Future%')`
+          );
+        } else if (disposition === "Connected" || disposition === "connected") {
           conditions.push(
             `(c.disposition NOT IN ('RNR', 'Ringing No Response', 'Ring No Response', 'Invalid') AND (c.duration_seconds > 0 OR c.disposition IN ('Connected', 'Contacted', 'Answered', 'Callback', 'Callback Requested', 'Demo Scheduled', 'Demo Done', 'Demo Completed', 'Already Using Our Service', 'Already Purchased or Using Other Company Service', 'Not Interested', 'Future Requirement')))`
           );
@@ -172,7 +176,12 @@ export async function GET(request: NextRequest) {
                   WHEN c.disposition NOT IN ('RNR', 'Ringing No Response', 'Ring No Response', 'Invalid')
                    AND (c.duration_seconds > 0 OR c.disposition IN ('Connected', 'Contacted', 'Answered', 'Callback', 'Callback Requested', 'Demo Scheduled', 'Demo Done', 'Demo Completed', 'Already Using Our Service', 'Already Purchased or Using Other Company Service', 'Not Interested', 'Future Requirement'))
                   THEN 1 
-                END)::int as "connectedCount"
+                END)::int as "connectedCount",
+                COUNT(CASE 
+                  WHEN c.disposition IN ('Demo Scheduled', 'Callback', 'Callback Requested', 'Future Requirement', 'Demo Done', 'Demo Completed', 'Quote Sent', 'Won', 'Deal Created')
+                    OR c.disposition ILIKE '%Demo%' OR c.disposition ILIKE '%Callback%' OR c.disposition ILIKE '%Future%'
+                  THEN 1
+                END)::int as "interestedCount"
          FROM call_logs c
          LEFT JOIN leads l ON c.lead_id = l.id
          WHERE ${whereClause}`,
@@ -182,8 +191,10 @@ export async function GET(request: NextRequest) {
       const total = countRes.rows[0]?.total || 0;
       const totalDuration = countRes.rows[0]?.totalDuration || 0;
       const connectedCount = countRes.rows[0]?.connectedCount || 0;
+      const interestedCount = countRes.rows[0]?.interestedCount || 0;
       const avgDuration = total > 0 ? Math.round(totalDuration / total) : 0;
       const connectedRate = total > 0 ? Math.round((connectedCount / total) * 100) : 0;
+      const interestedRate = connectedCount > 0 ? Math.round((interestedCount / connectedCount) * 100) : 0;
 
       const calls = callsRes.rows.map((r) => ({
         id: r.id,
@@ -227,6 +238,8 @@ export async function GET(request: NextRequest) {
           totalCalls: total,
           connectedCalls: connectedCount,
           connectedRate,
+          interestedCalls: interestedCount,
+          interestedRate,
           totalDurationSeconds: totalDuration,
           avgDurationSeconds: avgDuration,
         },

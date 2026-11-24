@@ -157,6 +157,11 @@ export async function GET(request: NextRequest) {
                    AND (duration_seconds > 0 OR disposition IN ('Connected', 'Contacted', 'Answered', 'Callback', 'Callback Requested', 'Demo Scheduled', 'Demo Done', 'Demo Completed', 'Already Using Our Service', 'Already Purchased or Using Other Company Service', 'Not Interested', 'Future Requirement'))
                   THEN 1 
                 END)::int as "connectedCalls",
+                COUNT(CASE 
+                  WHEN disposition IN ('Demo Scheduled', 'Callback', 'Callback Requested', 'Future Requirement', 'Demo Done', 'Demo Completed', 'Quote Sent', 'Won', 'Deal Created')
+                    OR disposition ILIKE '%Demo%' OR disposition ILIKE '%Callback%' OR disposition ILIKE '%Future%'
+                  THEN 1 
+                END)::int as "interestedCalls",
                 COALESCE(SUM(duration_seconds), 0)::int as "totalDuration"
          FROM call_logs
          WHERE ${callWhereClause}`,
@@ -167,6 +172,8 @@ export async function GET(request: NextRequest) {
       const uniqueDials = callCountsRes.rows[0]?.uniqueDials || 0;
       const totalDurationSeconds = callCountsRes.rows[0]?.totalDuration || 0;
       let connectedCalls = callCountsRes.rows[0]?.connectedCalls || 0;
+      const interestedCalls = callCountsRes.rows[0]?.interestedCalls || 0;
+      const interestedRate = connectedCalls > 0 ? Math.round((interestedCalls / connectedCalls) * 100) : 0;
 
       const dispositionMap: Record<string, number> = {
         Connected: 0,
@@ -185,6 +192,8 @@ export async function GET(request: NextRequest) {
         dispositionMap[c.disposition] = c.count;
       });
       dispositionMap.Connected = connectedCalls;
+      dispositionMap["Demo Done"] = (dispositionMap["Demo Done"] || 0) + (dispositionMap["Demo Completed"] || 0);
+      dispositionMap["Interested"] = interestedCalls;
 
       const connectRate = totalCalls > 0 ? Math.round((connectedCalls / totalCalls) * 100) : 0;
       const talkTimeMins = Math.round(totalDurationSeconds / 60);
@@ -530,6 +539,7 @@ export async function GET(request: NextRequest) {
           `SELECT u.id as "repId", u.full_name as "repName", u.role as "repRole",
                   COALESCE(cl.total_calls, 0)::int as "totalCalls",
                   COALESCE(cl.connected_calls, 0)::int as "connectedCalls",
+                  COALESCE(cl.interested_calls, 0)::int as "interestedCalls",
                   COALESCE(cl.talk_time, 0)::int as "talkTimeMins",
                   COALESCE(cl.talk_time_secs, 0)::int as "talkTimeSecs",
                   COALESCE(st.demos_booked, 0)::int as "demosBooked",
@@ -543,6 +553,11 @@ export async function GET(request: NextRequest) {
              SELECT rep_id,
                     COUNT(id) as total_calls,
                     COUNT(CASE WHEN duration_seconds > 0 OR disposition ILIKE '%Connected%' OR disposition = 'Contacted' THEN 1 END) as connected_calls,
+                    COUNT(CASE 
+                      WHEN disposition IN ('Demo Scheduled', 'Callback', 'Callback Requested', 'Future Requirement', 'Demo Done', 'Demo Completed', 'Quote Sent', 'Won', 'Deal Created')
+                        OR disposition ILIKE '%Demo%' OR disposition ILIKE '%Callback%' OR disposition ILIKE '%Future%'
+                      THEN 1 
+                    END) as interested_calls,
                     ROUND(SUM(duration_seconds) / 60) as talk_time,
                     COALESCE(SUM(duration_seconds), 0) as talk_time_secs
              FROM call_logs
@@ -585,13 +600,17 @@ export async function GET(request: NextRequest) {
 
         leaderboard = boardRes.rows.map((r) => {
           const calls = r.totalCalls || 0;
+          const connected = r.connectedCalls || 0;
+          const interested = r.interestedCalls || 0;
           return {
             repId: r.repId,
             repName: r.repName,
             repRole: r.repRole,
             totalCalls: calls,
-            connectedCalls: r.connectedCalls || 0,
-            connectRate: calls > 0 ? Math.round(((r.connectedCalls || 0) / calls) * 100) : 0,
+            connectedCalls: connected,
+            connectRate: calls > 0 ? Math.round((connected / calls) * 100) : 0,
+            interestedCalls: interested,
+            interestedRate: connected > 0 ? Math.round((interested / connected) * 100) : 0,
             talkTimeMins: r.talkTimeMins || 0,
             talkTimeFormatted: formatDuration(r.talkTimeSecs || 0),
             demosBooked: r.demosBooked || 0,
@@ -621,6 +640,8 @@ export async function GET(request: NextRequest) {
         uniqueDials,
         connectedCalls,
         connectRate,
+        interestedCalls,
+        interestedRate,
         talkTimeMins,
         talkTimeFormatted,
         totalDurationSeconds,

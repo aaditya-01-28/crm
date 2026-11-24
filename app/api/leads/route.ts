@@ -8,14 +8,13 @@ export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
-  const role = request.headers.get("x-user-role") || session?.role || "";
-  const { searchParams } = new URL(request.url);
-
-  if (!tenantId) {
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const repId = session.sub;
+  const role = session.role;
+  const { searchParams } = new URL(request.url);
 
   const status = searchParams.get("status");
   const vertical = searchParams.get("vertical");
@@ -164,12 +163,12 @@ export async function GET(request: NextRequest) {
                  )
                  FROM call_logs cl
                  LEFT JOIN users ru ON cl.rep_id = ru.id
-                 WHERE cl.lead_id = l.id ${isSalesRep(role) ? `AND cl.rep_id = '${repId}'` : ""}
+                 WHERE cl.lead_id = l.id ${isSalesRep(role) ? "AND cl.rep_id = $2" : ""}
                  ORDER BY cl.call_timestamp DESC LIMIT 1
                 ) as "latestCallLog",
-                (SELECT COUNT(*)::int FROM call_logs cl WHERE cl.lead_id = l.id ${isSalesRep(role) ? `AND cl.rep_id = '${repId}'` : ""}) as "callLogsCount",
-                (SELECT COUNT(*)::int FROM scheduled_tasks st WHERE st.lead_id = l.id ${isSalesRep(role) ? `AND st.rep_id = '${repId}'` : ""}) as "tasksCount",
-                (SELECT COUNT(*)::int FROM deals d WHERE d.lead_id = l.id ${isSalesRep(role) ? `AND d.rep_id = '${repId}'` : ""}) as "dealsCount"
+                (SELECT COUNT(*)::int FROM call_logs cl WHERE cl.lead_id = l.id ${isSalesRep(role) ? "AND cl.rep_id = $2" : ""}) as "callLogsCount",
+                (SELECT COUNT(*)::int FROM scheduled_tasks st WHERE st.lead_id = l.id ${isSalesRep(role) ? "AND st.rep_id = $2" : ""}) as "tasksCount",
+                (SELECT COUNT(*)::int FROM deals d WHERE d.lead_id = l.id ${isSalesRep(role) ? "AND d.rep_id = $2" : ""}) as "dealsCount"
          FROM leads l
          LEFT JOIN users ar ON l.assigned_rep_id = ar.id
          LEFT JOIN users far ON l.first_assigned_rep_id = far.id
@@ -306,13 +305,12 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const session = await getSession(request);
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
-  const role = request.headers.get("x-user-role") || session?.role || "";
-
-  if (!tenantId || !role) {
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const repId = session.sub;
+  const role = session.role;
 
   if (!can(role, "leads:create")) {
     return NextResponse.json(
@@ -405,12 +403,11 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const session = await getSession(request);
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const role = request.headers.get("x-user-role") || session?.role || "";
-
-  if (!tenantId) {
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const role = session.role;
 
   // Only Level 3 Super Admin can delete leads
   if (!isAdmin(role)) {

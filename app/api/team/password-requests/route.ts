@@ -5,13 +5,12 @@ import { sendTemporaryPasswordEmail } from "@/lib/mail";
 import bcrypt from "bcryptjs";
 
 export async function GET(request: NextRequest) {
-  const session = await getSession();
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId;
-  const role = request.headers.get("x-user-role") || session?.role;
-
-  if (!tenantId) {
+  const session = await getSession(request);
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const role = session.role;
 
   // Only Level 3 Super Admin can view password reset requests
   if (role !== "super_admin") {
@@ -54,14 +53,13 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const session = await getSession();
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId;
-  const role = request.headers.get("x-user-role") || session?.role;
-  const currentUserId = request.headers.get("x-user-id") || session?.sub;
-
-  if (!tenantId || !currentUserId) {
+  const session = await getSession(request);
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const role = session.role;
+  const currentUserId = session.sub;
 
   // Only Level 3 Super Admin can fulfill/resolve password reset requests
   if (role !== "super_admin") {

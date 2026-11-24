@@ -53,6 +53,8 @@ export function AdminDashboardView({
     recentWonDeals = [],
     totalCalls = 0,
     connectRate = 0,
+    interestedCalls = 0,
+    interestedRate = 0,
     talkTimeMins = 0,
     totalLeadsCount = 0,
     unassignedLeadsCount = 0,
@@ -262,6 +264,7 @@ export function AdminDashboardView({
                 <th className="px-5 py-3">Team Member / Role</th>
                 <th className="px-4 py-3">Total Calls</th>
                 <th className="px-4 py-3">Talk Time</th>
+                <th className="px-4 py-3">Interested 🔥</th>
                 <th className="px-4 py-3">Demos Booked</th>
                 <th className="px-4 py-3">Deals Won</th>
                 <th className="px-5 py-3">Won Revenue</th>
@@ -271,7 +274,7 @@ export function AdminDashboardView({
             <tbody className="divide-y divide-gray-100">
               {filteredLeaderboard.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-8 text-gray-400">
+                  <td colSpan={8} className="text-center py-8 text-gray-400">
                     No team members recorded for this filter.
                   </td>
                 </tr>
@@ -323,6 +326,15 @@ export function AdminDashboardView({
 
                       <td className="px-4 py-3.5 text-gray-600 font-medium">
                         {rep.talkTimeFormatted || (rep.talkTimeMins ? `${rep.talkTimeMins} mins` : "0m 0s")}
+                      </td>
+
+                      <td className="px-4 py-3.5 text-orange-600 font-semibold">
+                        <span>{rep.interestedCalls ?? 0}</span>
+                        {rep.interestedRate !== undefined && (
+                          <span className="text-[11px] text-orange-500/80 ml-1.5 font-normal">
+                            ({rep.interestedRate}%)
+                          </span>
+                        )}
                       </td>
 
                       <td className="px-4 py-3.5 text-purple-700 font-semibold">

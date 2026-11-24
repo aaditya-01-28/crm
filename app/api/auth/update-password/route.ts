@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     let targetUserId: string | null = null;
 
     // Check if authenticated via session
-    const session = await getSession();
+    const session = await getSession(request);
     if (session) {
       targetUserId = session.sub;
     } else if (email && temporaryPassword) {

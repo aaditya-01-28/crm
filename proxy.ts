@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken, signAccessToken, SESSION_DURATION_SECONDS } from "@/lib/auth";
+import { verifyToken, signAccessToken, ACCESS_TOKEN_DURATION_SECONDS } from "@/lib/auth";
 
 const PUBLIC_PATHS = [
   "/login",
@@ -39,12 +39,12 @@ export async function proxy(request: NextRequest) {
   const cookieRefreshToken = request.cookies.get("refresh_token")?.value;
   const token = cookieAccessToken || bearerToken;
 
-  let payload = token ? await verifyToken(token) : null;
+  let payload = token ? await verifyToken(token, "access") : null;
   let renewedAccessToken: string | null = null;
 
   // Seamless auto-refresh: if access token is expired or invalid, check refresh token
   if (!payload && cookieRefreshToken) {
-    const refreshPayload = await verifyToken(cookieRefreshToken);
+    const refreshPayload = await verifyToken(cookieRefreshToken, "refresh");
     if (refreshPayload) {
       payload = refreshPayload;
       try {
@@ -79,7 +79,7 @@ export async function proxy(request: NextRequest) {
     return response;
   }
 
-  // Inject tenant and user info into request headers for downstream API routes & components
+  // Forward request
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-user-id", payload.sub);
   requestHeaders.set("x-tenant-id", payload.tenantId);
@@ -91,11 +91,13 @@ export async function proxy(request: NextRequest) {
 
   // If a renewed access token was generated, update the browser's cookie
   if (renewedAccessToken) {
+    const isProd = process.env.NODE_ENV === "production" && process.env.COOKIE_SECURE !== "false";
     response.cookies.set("access_token", renewedAccessToken, {
       httpOnly: true,
       path: "/",
-      maxAge: SESSION_DURATION_SECONDS,
+      maxAge: ACCESS_TOKEN_DURATION_SECONDS,
       sameSite: "lax",
+      secure: isProd,
     });
   }
 

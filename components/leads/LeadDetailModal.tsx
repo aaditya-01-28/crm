@@ -6,6 +6,7 @@ import {
   X,
   ArrowLeft,
   Phone,
+  PhoneIncoming,
   MessageCircle,
   Clock,
   Video,
@@ -360,6 +361,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
       durationSeconds?: number;
       meetingLink?: string | null;
       scheduledTime?: string | null;
+      logSource?: string | null;
     }> = [];
 
     // 1. Stage History records (from persistent lead_stage_history table)
@@ -527,6 +529,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
           notes: log.remark,
           durationSeconds: log.durationSeconds,
           recordingUrl: log.recordingUrl,
+          logSource: log.logSource,
         });
       });
     }
@@ -1282,9 +1285,21 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                               {item.type === "callback" && <Clock className="w-3 h-3 text-blue-600" />}
                               {item.type === "deal_stage" && <DollarSign className="w-3 h-3 text-indigo-600" />}
                               {item.type === "status_change" && <Tag className="w-3 h-3 text-orange-600" />}
-                              {item.type === "call" && <Phone className="w-3 h-3 text-emerald-600" />}
+                              {item.type === "call" && (
+                                item.logSource === "inbound_sim" ? (
+                                  <PhoneIncoming className="w-3 h-3 text-emerald-600" />
+                                ) : (
+                                  <Phone className="w-3 h-3 text-emerald-600" />
+                                )
+                              )}
                               <span>{item.badge}</span>
                             </span>
+                            {item.logSource === "inbound_sim" && (
+                              <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
+                                <PhoneIncoming className="w-2.5 h-2.5 text-emerald-600" />
+                                Inbound Call (SIM)
+                              </span>
+                            )}
                             {item.scheduledTime && (
                               <span className="text-[11px] font-medium text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200 flex items-center gap-1">
                                 <Clock className="w-2.5 h-2.5 text-purple-500" />

@@ -24,13 +24,12 @@ function cleanPhoneNumber(raw: unknown): string {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getSession();
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId;
-  const role = request.headers.get("x-user-role") || session?.role;
-
-  if (!tenantId || !role) {
+  const session = await getSession(request);
+  if (!session?.tenantId || !session?.role) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const role = session.role;
 
   if (!can(role, "leads:import")) {
     return NextResponse.json(
@@ -53,6 +52,13 @@ export async function POST(request: NextRequest) {
 
     if (!leads || !Array.isArray(leads) || leads.length === 0) {
       return NextResponse.json({ error: "No leads provided" }, { status: 400 });
+    }
+
+    if (leads.length > 5000) {
+      return NextResponse.json(
+        { error: "Batch size exceeds maximum limit of 5,000 leads per import." },
+        { status: 400 }
+      );
     }
 
     const processed = leads.map((l) => ({

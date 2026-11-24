@@ -26,6 +26,7 @@ import {
   Copy,
   Check,
   Users,
+  Flame,
 } from "lucide-react";
 import {
   formatDateTime,
@@ -77,6 +78,8 @@ interface CallsResponse {
     totalCalls: number;
     connectedCalls: number;
     connectedRate: number;
+    interestedCalls?: number;
+    interestedRate?: number;
     totalDurationSeconds: number;
     avgDurationSeconds: number;
   };
@@ -86,6 +89,12 @@ const DISPOSITION_BADGES: Record<
   string,
   { label: string; bg: string; text: string; border: string }
 > = {
+  Interested: {
+    label: "Interested Lead",
+    bg: "bg-orange-50",
+    text: "text-orange-700",
+    border: "border-orange-200",
+  },
   Connected: {
     label: "Connected",
     bg: "bg-emerald-50",
@@ -276,6 +285,8 @@ export default function CallLogsPage() {
     totalCalls: 0,
     connectedCalls: 0,
     connectedRate: 0,
+    interestedCalls: 0,
+    interestedRate: 0,
     totalDurationSeconds: 0,
     avgDurationSeconds: 0,
   };
@@ -456,7 +467,7 @@ export default function CallLogsPage() {
       )}
 
       {/* Summary KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5">
         <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-xs">
           <div className="flex items-center justify-between text-xs text-gray-500 font-medium">
             <span>Total Calls</span>
@@ -483,6 +494,19 @@ export default function CallLogsPage() {
 
         <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-xs">
           <div className="flex items-center justify-between text-xs text-gray-500 font-medium">
+            <span>Interested Leads</span>
+            <Flame className="w-4 h-4 text-orange-500" />
+          </div>
+          <p className="text-2xl font-bold text-orange-600 mt-2">
+            {(summary.interestedCalls ?? 0).toLocaleString("en-IN")}
+          </p>
+          <span className="text-[11px] text-orange-600/80 font-medium mt-0.5 block">
+            {summary.interestedRate ?? (summary.connectedCalls > 0 ? Math.round(((summary.interestedCalls ?? 0) / summary.connectedCalls) * 100) : 0)}% conversion
+          </span>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-xs">
+          <div className="flex items-center justify-between text-xs text-gray-500 font-medium">
             <span>Total Talk Time</span>
             <Clock className="w-4 h-4 text-teal-500" />
           </div>
@@ -503,7 +527,7 @@ export default function CallLogsPage() {
           <span className="text-[11px] text-gray-400 mt-0.5 block">Per call average</span>
         </div>
 
-        <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-xs col-span-2 sm:col-span-1">
+        <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-xs">
           <div className="flex items-center justify-between text-xs text-gray-500 font-medium">
             <span>No Answer (RNR)</span>
             <PhoneOff className="w-4 h-4 text-amber-500" />
@@ -605,6 +629,7 @@ export default function CallLogsPage() {
               className="px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg text-gray-800 font-medium outline-none focus:ring-2 focus:ring-emerald-500"
             >
               <option value="all">All Dispositions</option>
+              <option value="Interested">🔥 Interested (Callbacks, Demos, Quotes)</option>
               <option value="Connected">Connected</option>
               <option value="RNR">RNR (Ringing No Response)</option>
               <option value="Callback">Callback</option>
@@ -662,6 +687,32 @@ export default function CallLogsPage() {
               </select>
             </div>
           )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedDisposition(selectedDisposition === "Interested" ? "all" : "Interested");
+              setPage(1);
+            }}
+            className={cn(
+              "px-2.5 py-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer",
+              selectedDisposition === "Interested"
+                ? "bg-orange-600 text-white border-orange-600 shadow-2xs"
+                : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+            )}
+          >
+            <span>🔥 Interested Only</span>
+            {summary.interestedCalls !== undefined && summary.interestedCalls > 0 && (
+              <span
+                className={cn(
+                  "px-1.5 py-0.2 rounded-full text-[10px] font-bold",
+                  selectedDisposition === "Interested" ? "bg-orange-800 text-white" : "bg-orange-100 text-orange-800"
+                )}
+              >
+                {summary.interestedCalls}
+              </span>
+            )}
+          </button>
 
           <button
             type="button"
@@ -758,6 +809,13 @@ export default function CallLogsPage() {
                           const isRnr = ["RNR", "Ringing No Response", "Ring No Response", "Invalid"].includes(call.disposition);
                           const isConnected = call.durationSeconds > 0 && !isRnr;
 
+                          if (call.logSource === "inbound_sim") {
+                            return (
+                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-300 flex items-center gap-1 w-fit">
+                                📥 Inbound SIM Call
+                              </span>
+                            );
+                          }
                           if (call.logSource === "apk_manual") {
                             return (
                               <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">

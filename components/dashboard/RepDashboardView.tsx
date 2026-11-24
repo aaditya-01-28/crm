@@ -36,6 +36,8 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
     totalCalls = 0,
     connectedCalls = 0,
     connectRate = 0,
+    interestedCalls = 0,
+    interestedRate = 0,
     talkTimeMins = 0,
     todayCallbacksCount = 0,
     todayDemosCount = 0,
@@ -148,7 +150,7 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
           subValue={`${connectedCalls} connected (${connectRate}% pickup)`}
           icon={Phone}
           color="blue"
-          badge={`Talk Time: ${talkTimeMins} mins`}
+          badge={interestedCalls > 0 ? `🔥 ${interestedCalls} Interested (${interestedRate}%)` : `Talk: ${talkTimeMins} mins`}
         />
 
         <KpiCard
@@ -486,6 +488,29 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
             <p className="text-xs text-gray-500 mb-4">
               Distribution of dispositions recorded across your dials
             </p>
+
+            {/* 🔥 High-Level Interested Pipeline Banner */}
+            <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-orange-500/10 border border-amber-300 rounded-xl p-3 mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="text-xl">🔥</span>
+                <div>
+                  <span className="text-xs font-bold text-amber-950 block">
+                    Interested Prospects ({activePeriodLabel})
+                  </span>
+                  <span className="text-[11px] text-amber-800">
+                    Callbacks + Demos Booked + Future Requirements
+                  </span>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-lg font-black text-amber-950 block leading-tight">
+                  {interestedCalls} Leads
+                </span>
+                <span className="text-[10px] font-bold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded border border-amber-300 inline-block mt-0.5">
+                  {interestedRate}% conversion
+                </span>
+              </div>
+            </div>
 
             <div className="space-y-3">
               {[

@@ -8,12 +8,11 @@ import path from "path";
 
 export async function POST(request: NextRequest) {
   const session = await getSession(request);
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
-
-  if (!tenantId) {
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const repId = session.sub;
 
   try {
     const formData = await request.formData();
@@ -25,11 +24,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "No audio file provided" }, { status: 400 });
     }
 
+    const rawExt = (file.name || "recording.m4a").split(".").pop()?.toLowerCase() || "m4a";
+    const ext = rawExt.replace(/[^a-z0-9]/g, "");
+    const allowedAudio = ["m4a", "mp3", "wav", "aac", "ogg", "3gp", "webm"];
+    if (!allowedAudio.includes(ext)) {
+      return NextResponse.json({ error: "Only audio recording files are allowed." }, { status: 400 });
+    }
+
     const buffer = Buffer.from(await file.arrayBuffer());
-    const originalName = file.name || "recording.m4a";
-    const ext = originalName.split(".").pop() || "m4a";
     const fileName = `${uuidv4()}.${ext}`;
-    const objectName = `recordings/${fileName}`;
+    const objectName = `${tenantId}/recordings/${fileName}`;
 
     let recordingUrl = "";
 
@@ -85,12 +89,10 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const { searchParams } = new URL(request.url);
-
-  if (!tenantId) {
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
 
   const callLogId = searchParams.get("callLogId");
   const leadId = searchParams.get("leadId");

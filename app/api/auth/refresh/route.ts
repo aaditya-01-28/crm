@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Refresh token is required" }, { status: 400 });
     }
 
-    const payload = await verifyToken(tokenToVerify);
+    const payload = await verifyToken(tokenToVerify, "refresh");
     if (!payload || !payload.sub) {
       return NextResponse.json({ error: "Invalid or expired session. Please log in again." }, { status: 401 });
     }
