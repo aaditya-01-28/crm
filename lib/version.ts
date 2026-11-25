@@ -1,7 +1,8 @@
-export const APP_VERSION = "1.3.0";
-export const APP_BUILD = 14;
+export const APP_VERSION = "1.3.1";
+export const APP_BUILD = 15;
 export const APP_RELEASE_DATE = "2026-11-25";
 export const APP_RELEASE_NOTES = [
+  "Fixed Post-Call Save & Sync reliability, 20s request timeout, and visible inline error reporting",
   "Added explicit Interested disposition with 1-follow-up multi-select across Web CRM and Mobile Dialer",
   "Added Interested Leads filter tab in Leads Directory and Mobile Calling Queue",
   "Preserved historical Interested analytics while applying explicit Interested tracking for all new calls",

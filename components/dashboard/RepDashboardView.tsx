@@ -98,42 +98,40 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
 
   return (
     <div className="space-y-6">
-      {/* 🚀 Hero Action Banner — Fast Call Console Trigger */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-emerald-950 text-white rounded-3xl p-6 md:p-8 shadow-xl border border-slate-700/60 flex flex-col md:flex-row md:items-center justify-between gap-6 relative overflow-hidden">
-        <div className="absolute right-0 top-0 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-
-        <div className="space-y-2 relative z-10 max-w-xl">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-semibold border border-emerald-500/30">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            Active Calling Console
+      {/* Hero Action Banner — Fast Call Console Trigger */}
+      <div className="bg-slate-900 text-white rounded-xl p-6 border border-slate-800 border-l-2 border-l-emerald-500 flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="space-y-2 max-w-xl">
+          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-slate-800 text-emerald-400 text-xs font-medium border border-slate-700">
+            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+            Calling Console
           </div>
-          <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight">
-            Ready to call your leads?
+          <h2 className="text-2xl font-medium tracking-tight text-white">
+            Dialer Queue
           </h2>
-          <p className="text-sm text-slate-300">
-            You currently have <strong className="text-emerald-400 font-bold">{queueRemainingCount} assigned leads</strong> waiting in your dialer queue.
+          <p className="text-sm text-slate-300 tabular-nums">
+            <strong className="text-emerald-400 font-medium">{queueRemainingCount} assigned leads</strong> waiting in your dialer queue.
           </p>
         </div>
 
-        <div className="flex items-center gap-3 relative z-10">
+        <div className="flex items-center gap-3">
           <Link
             href="/dialer"
-            className="flex items-center gap-2.5 px-6 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-bold text-sm transition shadow-lg shadow-emerald-900/40 hover:scale-[1.02] active:scale-[0.98]"
+            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium text-sm transition-colors duration-150"
           >
-            <Play className="w-4 h-4 fill-white" />
+            <Play className="w-4 h-4 fill-white" strokeWidth={1.5} />
             Resume Calling Queue
           </Link>
           <Link
             href="/agenda"
-            className="flex items-center gap-2 px-4 py-3.5 bg-slate-800/80 hover:bg-slate-700 text-slate-200 rounded-2xl font-semibold text-sm transition border border-slate-700"
+            className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-medium text-sm transition-colors duration-150 border border-slate-700"
           >
-            <Calendar className="w-4 h-4 text-emerald-400" />
+            <Calendar className="w-4 h-4 text-slate-300" strokeWidth={1.5} />
             View Agenda
           </Link>
         </div>
       </div>
 
-      {/* 📊 Key Performance Metrics Grid */}
+      {/* Key Performance Metrics Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard
           label="Queue Pending"
@@ -150,7 +148,7 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
           subValue={`${connectedCalls} connected (${connectRate}% pickup)`}
           icon={Phone}
           color="blue"
-          badge={interestedCalls > 0 ? `🔥 ${interestedCalls} Interested (${interestedRate}%)` : `Talk: ${talkTimeMins} mins`}
+          badge={interestedCalls > 0 ? `${interestedCalls} Interested (${interestedRate}%)` : `Talk: ${talkTimeMins} mins`}
         />
 
         <KpiCard
@@ -158,16 +156,16 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
           value={todayCallbacksCount + todayDemosCount + todayDemosDoneCount}
           subValue={
             overdueTasksCount > 0
-              ? `⚠️ ${overdueTasksCount} overdue follow-up(s)`
+              ? `${overdueTasksCount} overdue follow-up(s)`
               : todayDemosDoneCount > 0
-              ? `✅ ${todayDemosDoneCount} demo(s) completed today`
+              ? `${todayDemosDoneCount} demo(s) completed today`
               : "All follow-ups on track"
           }
           icon={Calendar}
           color={overdueTasksCount > 0 ? "rose" : todayDemosDoneCount > 0 ? "emerald" : "amber"}
           badge={
             todayDemosDoneCount > 0
-              ? `${todayDemosDoneCount} Done • ${todayDemosCount} Pending`
+              ? `${todayDemosDoneCount} Done · ${todayDemosCount} Pending`
               : `${todayDemosCount} Demos Scheduled`
           }
         />
@@ -489,24 +487,21 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
               Distribution of dispositions recorded across your dials
             </p>
 
-            {/* 🔥 High-Level Interested Pipeline Banner */}
-            <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-orange-500/10 border border-amber-300 rounded-xl p-3 mb-4 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <span className="text-xl">🔥</span>
-                <div>
-                  <span className="text-xs font-bold text-amber-950 block">
-                    Interested Prospects ({activePeriodLabel})
-                  </span>
-                  <span className="text-[11px] text-amber-800">
-                    Callbacks + Demos Booked + Future Requirements
-                  </span>
-                </div>
+            {/* High-Level Interested Pipeline Banner */}
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3.5 mb-4 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-medium text-gray-900 block">
+                  Interested Prospects ({activePeriodLabel})
+                </span>
+                <span className="text-xs text-gray-500">
+                  Callbacks + Demos Booked + Future Requirements
+                </span>
               </div>
               <div className="text-right">
-                <span className="text-lg font-black text-amber-950 block leading-tight">
+                <span className="text-lg font-medium text-gray-900 block leading-tight tabular-nums">
                   {interestedCalls} Leads
                 </span>
-                <span className="text-[10px] font-bold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded border border-amber-300 inline-block mt-0.5">
+                <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 inline-block mt-1 tabular-nums">
                   {interestedRate}% conversion
                 </span>
               </div>
@@ -545,7 +540,7 @@ export function RepDashboardView({ metrics, period, periodLabel }: RepDashboardV
                     </div>
                     <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
                       <div
-                        className={`h-full ${item.color} rounded-full transition-all duration-300`}
+                        className={`h-full ${item.color} rounded-full transition-[width] duration-300`}
                         style={{ width: `${percent}%` }}
                       />
                     </div>

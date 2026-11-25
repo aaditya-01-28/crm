@@ -169,9 +169,13 @@ export async function PATCH(
       // 5. Or any call logged for this lead and rep in the last 10 minutes that was not yet manually disposed with a finalized remark.
       let targetCallId: string | null = null;
 
-      if (callLogId && typeof callLogId === "string" && callLogId.length > 10 && !callLogId.startsWith("manual_")) {
+      const isUuid = (v: unknown): v is string =>
+        typeof v === "string" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+
+      if (isUuid(callLogId)) {
         const idCheck = await client.query(
-          `SELECT id FROM call_logs WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          `SELECT id FROM call_logs WHERE id = $1::uuid AND tenant_id = $2::uuid LIMIT 1`,
           [callLogId, tenantId]
         ).catch(() => null);
         if (idCheck && idCheck.rows.length > 0) {
@@ -206,13 +210,13 @@ export async function PATCH(
       if (targetCallId) {
         await client.query(
           `UPDATE call_logs
-           SET disposition = $1,
-               duration_seconds = GREATEST(duration_seconds, $2),
-               remark = COALESCE($3, remark),
-               recording_url = COALESCE($4, recording_url),
-               log_source = $5,
-               is_interested = $6
-           WHERE id = $7`,
+           SET disposition = $1::varchar,
+               duration_seconds = GREATEST(duration_seconds, $2::int),
+               remark = COALESCE($3::text, remark),
+               recording_url = COALESCE($4::text, recording_url),
+               log_source = $5::text,
+               is_interested = $6::boolean
+           WHERE id = $7::uuid`,
           [disposition, durationSeconds, remark || null, recordingUrl || null, logSource, isExplicitInterested, targetCallId]
         );
       } else {
@@ -221,7 +225,7 @@ export async function PATCH(
 
         await client.query(
           `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, is_interested, call_timestamp)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4::varchar, $5::int, $6::text, $7::text, $8::text, $9::boolean, $10::timestamptz)`,
           [tenantId, id, repId, disposition, durationSeconds, remark || null, recordingUrl || null, logSource, isExplicitInterested, finalTimestamp]
         );
       }
@@ -309,18 +313,19 @@ export async function PATCH(
       }
 
       // Synchronize lead status, explicit interested flag, and exact rnr_count from call_logs
+      const shouldClearInterested = ["rnr", "not_interested", "invalid", "already_using", "lost"].includes(newStatus);
       await client.query(
         `UPDATE leads
-         SET status = $1,
+         SET status = $1::varchar,
              is_interested = CASE
                WHEN $3::boolean THEN true
-               WHEN $1 IN ('rnr', 'not_interested', 'invalid', 'already_using', 'lost') THEN false
+               WHEN $4::boolean THEN false
                ELSE COALESCE(is_interested, false)
              END,
-             rnr_count = (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $2 AND disposition = 'RNR'),
+             rnr_count = (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $2::uuid AND disposition = 'RNR'),
              updated_at = NOW()
-         WHERE id = $2`,
-        [newStatus, id, isExplicitInterested]
+         WHERE id = $2::uuid`,
+        [newStatus, id, isExplicitInterested, shouldClearInterested]
       );
 
       // Create scheduled task if needed
@@ -540,8 +545,11 @@ export async function PATCH(
 
       return NextResponse.json({ success: true, nextLead });
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[DISPOSE]", error);
-    return NextResponse.json({ error: "Failed to log disposition" }, { status: 500 });
+    return NextResponse.json(
+      { error: error?.message || "Failed to log disposition" },
+      { status: 500 }
+    );
   }
 }

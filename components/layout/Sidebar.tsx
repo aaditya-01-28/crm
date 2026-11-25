@@ -143,10 +143,10 @@ export default function Sidebar({ role }: SidebarProps) {
               className="h-8 w-8 rounded-lg object-contain"
             />
             <div className="flex flex-col">
-              <span className="font-bold text-sm tracking-tight text-white group-hover:text-emerald-400 transition-colors">
+              <span className="font-medium text-sm tracking-tight text-white group-hover:text-emerald-400 transition-colors">
                 Textora Engage
               </span>
-              <span className="text-[10px] text-emerald-400 uppercase tracking-widest font-semibold">
+              <span className="text-xs text-slate-400">
                 Enterprise CRM
               </span>
             </div>
@@ -222,7 +222,7 @@ export default function Sidebar({ role }: SidebarProps) {
         {/* Brand Logo Header */}
         <div
           className={cn(
-            "border-b border-slate-900/90 flex transition-all",
+            "border-b border-slate-900/90 flex",
             isCollapsed
               ? "px-3 py-4 flex-col items-center justify-center gap-2"
               : "px-5 py-4 flex-col gap-1.5"
@@ -233,7 +233,7 @@ export default function Sidebar({ role }: SidebarProps) {
             <div className="flex flex-col items-center gap-2">
               <Link
                 href="/dashboard"
-                className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center hover:scale-105 hover:border-emerald-500/50 transition-all shadow-sm"
+                className="w-10 h-10 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center hover:border-emerald-500/50 transition-colors duration-150"
                 title="Textora Engage — Click for Dashboard"
               >
                 <img

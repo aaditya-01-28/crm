@@ -140,7 +140,7 @@ export function AdminDashboardView({
           value={totalLeadsCount}
           subValue={
             unassignedLeadsCount > 0
-              ? `⚠️ ${unassignedLeadsCount} unassigned in pool`
+              ? `${unassignedLeadsCount} unassigned in pool`
               : "All leads assigned to reps"
           }
           icon={Database}
@@ -149,45 +149,45 @@ export function AdminDashboardView({
         />
       </div>
 
-      {/* ⚡ Executive Control Center & Quick Actions */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white rounded-2xl p-5 shadow-sm border border-slate-700/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Executive Control Center & Quick Actions */}
+      <div className="bg-slate-900 text-white rounded-xl p-5 border border-slate-800 border-l-2 border-l-emerald-500 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h3 className="text-base font-bold flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+          <h3 className="text-base font-medium flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400" />
             Executive Quick Controls
           </h3>
-          <p className="text-xs text-slate-300 mt-0.5">
-            Manage your sales operations, audit team allocations, and verify incoming receipts
+          <p className="text-xs text-slate-400 mt-1">
+            Manage sales operations, audit team allocations, and verify incoming receipts
           </p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
           <Link
             href="/team"
-            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-semibold rounded-xl border border-slate-600 transition flex items-center gap-1.5"
+            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-medium rounded-lg border border-slate-700 transition-colors duration-150 flex items-center gap-2"
           >
-            <Users className="w-3.5 h-3.5 text-indigo-400" />
+            <Users className="w-3.5 h-3.5 text-slate-300" strokeWidth={1.5} />
             Manage Team
           </Link>
           <Link
             href="/leads"
-            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-semibold rounded-xl border border-slate-600 transition flex items-center gap-1.5"
+            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-medium rounded-lg border border-slate-700 transition-colors duration-150 flex items-center gap-2"
           >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+            <FileSpreadsheet className="w-3.5 h-3.5 text-slate-300" strokeWidth={1.5} />
             Import & Leads
           </Link>
           <Link
             href="/reports"
-            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-semibold rounded-xl border border-slate-600 transition flex items-center gap-1.5"
+            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-medium rounded-lg border border-slate-700 transition-colors duration-150 flex items-center gap-2"
           >
-            <BarChart3 className="w-3.5 h-3.5 text-purple-400" />
+            <BarChart3 className="w-3.5 h-3.5 text-slate-300" strokeWidth={1.5} />
             EOD Reports
           </Link>
           <Link
             href="/payments"
-            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-sm"
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-xs font-medium rounded-lg transition-colors duration-150 flex items-center gap-2 tabular-nums"
           >
-            <CreditCard className="w-3.5 h-3.5" />
+            <CreditCard className="w-3.5 h-3.5" strokeWidth={1.5} />
             Payments ({pendingPaymentsCount} pending)
           </Link>
         </div>
@@ -259,12 +259,12 @@ export function AdminDashboardView({
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 font-semibold uppercase tracking-wider">
+            <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 font-medium">
               <tr>
                 <th className="px-5 py-3">Team Member / Role</th>
                 <th className="px-4 py-3">Total Calls</th>
                 <th className="px-4 py-3">Talk Time</th>
-                <th className="px-4 py-3">Interested 🔥</th>
+                <th className="px-4 py-3">Interested</th>
                 <th className="px-4 py-3">Demos Booked</th>
                 <th className="px-4 py-3">Deals Won</th>
                 <th className="px-5 py-3">Won Revenue</th>
@@ -426,7 +426,7 @@ export function AdminDashboardView({
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 font-semibold uppercase tracking-wider">
+              <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 font-medium">
                 <tr>
                   <th className="px-5 py-3">Client / Company</th>
                   <th className="px-4 py-3">Service Quoted</th>
@@ -522,7 +522,7 @@ export function AdminDashboardView({
                     </div>
                     <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+                        className="h-full bg-emerald-500 rounded-full transition-[width] duration-300"
                         style={{ width: `${percent}%` }}
                       />
                     </div>
@@ -534,8 +534,8 @@ export function AdminDashboardView({
         </div>
 
         {/* Lead Status Health Distribution */}
-        <div className="bg-white rounded-2xl border border-gray-200/90 shadow-xs p-5">
-          <h3 className="text-base font-bold text-gray-900 mb-1">
+        <div className="bg-white rounded-xl border border-gray-200/90 shadow-xs p-5">
+          <h3 className="text-base font-medium text-gray-900 mb-1">
             Database Status Health
           </h3>
           <p className="text-xs text-gray-500 mb-4">
@@ -554,13 +554,13 @@ export function AdminDashboardView({
                     <span className="text-gray-800 capitalize font-medium">
                       {item.status.replace(/_/g, " ")}
                     </span>
-                    <span className="text-gray-500 font-semibold">
+                    <span className="text-gray-500 tabular-nums">
                       {item.count} ({percent}%)
                     </span>
                   </div>
                   <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
                     <div
-                      className={`h-full rounded-full transition-all duration-300 ${
+                      className={`h-full rounded-full transition-[width] duration-300 ${
                         isPositive ? "bg-emerald-500" : isNegative ? "bg-rose-400" : "bg-blue-400"
                       }`}
                       style={{ width: `${percent}%` }}

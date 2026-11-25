@@ -31,10 +31,10 @@ interface DashboardHeaderProps {
 }
 
 const ROLE_BADGES: Record<string, { label: string; style: string }> = {
-  super_admin: { label: "Level 3 • Super Admin", style: "bg-purple-100 text-purple-800 border-purple-200" },
-  sales_manager: { label: "Level 2 • Sales Manager", style: "bg-blue-100 text-blue-800 border-blue-200" },
-  sales_rep: { label: "Level 1 • Sales Representative", style: "bg-emerald-100 text-emerald-800 border-emerald-200" },
-  accounts_ops: { label: "Support • Accounts & Ops", style: "bg-amber-100 text-amber-800 border-amber-200" },
+  super_admin: { label: "Level 3 · Super Admin", style: "bg-gray-100 text-gray-700 border-gray-200" },
+  sales_manager: { label: "Level 2 · Sales Manager", style: "bg-gray-100 text-gray-700 border-gray-200" },
+  sales_rep: { label: "Level 1 · Sales Representative", style: "bg-emerald-50 text-emerald-700 border-emerald-200/80" },
+  accounts_ops: { label: "Accounts & Ops", style: "bg-gray-100 text-gray-700 border-gray-200" },
 };
 
 export function DashboardHeader({
@@ -61,42 +61,42 @@ export function DashboardHeader({
   const selectedMember = teamMembers.find((m) => m.id === selectedUserId);
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200/90 p-4 sm:p-5 shadow-xs mb-6 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
-      {/* Left: User Welcome & Role Badge */}
-      <div className="space-y-1 shrink-0">
+    <div className="bg-white rounded-xl border border-gray-200/90 p-5 shadow-xs mb-6 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+      {/* Left: Context & Role */}
+      <div className="space-y-1.5 shrink-0">
         <div className="flex items-center gap-2">
           <span
             className={cn(
-              "text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider",
+              "text-xs font-medium px-2 py-0.5 rounded-md border",
               roleBadge.style
             )}
           >
             {roleBadge.label}
           </span>
-          <span className="text-xs text-gray-400 font-medium">Textora Engage Operations</span>
+          <span className="text-xs text-gray-500">Textora Engage Operations</span>
         </div>
-        <div className="flex items-baseline gap-2 flex-wrap">
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">
+        <div className="flex items-baseline gap-2.5 flex-wrap">
+          <h1 className="text-2xl font-medium tracking-tight text-gray-900">
             Dashboard
           </h1>
-          <span className="text-sm text-gray-400 font-normal">
-            — Welcome, {userName}
+          <span className="text-sm text-gray-500">
+            {userName}
           </span>
         </div>
         {selectedMember && (
-          <p className="text-xs text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-2.5 py-1 inline-flex items-center gap-1.5 font-medium mt-1">
+          <p className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1 inline-flex items-center gap-1.5 font-medium mt-1">
             <span>
-              Viewing: <strong>{selectedMember.fullName}</strong>{" "}
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border bg-white text-indigo-800 border-indigo-200">
-                {selectedMember.role === "sales_manager" ? "Level 2 • Manager" : "Level 1 • Rep"}
+              Viewing: <strong className="font-medium text-gray-900">{selectedMember.fullName}</strong>{" "}
+              <span className="text-xs font-medium px-1.5 py-0.5 rounded border bg-white text-gray-700 border-gray-200">
+                {selectedMember.role === "sales_manager" ? "Level 2 · Manager" : "Level 1 · Rep"}
               </span>
             </span>
             <button
               onClick={() => onUserChange(null)}
-              className="text-indigo-400 hover:text-indigo-800 ml-1 p-0.5 cursor-pointer"
+              className="text-gray-400 hover:text-gray-700 ml-1 p-0.5 cursor-pointer transition-colors duration-150"
               title="Clear user filter"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-3.5 h-3.5" strokeWidth={1.5} />
             </button>
           </p>
         )}

@@ -79,14 +79,14 @@ export function ManagerDashboardView({
     <div className="space-y-6">
       {/* 🚨 Lead Allocation Alert Banner */}
       {unassignedLeadsCount > 0 ? (
-        <div className="bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-orange-500/15 border-2 border-amber-300 rounded-2xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs">
+        <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-3">
-            <div className="p-2.5 rounded-xl bg-amber-500 text-white shadow-sm shrink-0">
-              <AlertTriangle className="w-5 h-5" />
+            <div className="p-2 rounded-lg bg-amber-100 text-amber-800 shrink-0">
+              <AlertTriangle className="w-4 h-4" strokeWidth={1.5} />
             </div>
             <div>
-              <h3 className="text-base font-bold text-amber-950">
-                Action Required: {unassignedLeadsCount} Unassigned Leads in Pool
+              <h3 className="text-sm font-medium text-amber-950 tabular-nums">
+                Action required: {unassignedLeadsCount} unassigned leads in pool
               </h3>
               <p className="text-xs text-amber-800 mt-0.5">
                 Fresh imported leads are waiting in the unassigned pool. Distribute them across your sales representatives to keep queues active.
@@ -96,10 +96,10 @@ export function ManagerDashboardView({
 
           <Link
             href="/leads?repId=unassigned"
-            className="flex items-center gap-2 px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition shadow-sm shrink-0"
+            className="flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-medium transition-colors duration-150 shrink-0"
           >
-            <UserPlus className="w-4 h-4" />
-            Allocate Leads Now
+            <UserPlus className="w-4 h-4" strokeWidth={1.5} />
+            Allocate Leads
           </Link>
         </div>
       ) : (
@@ -136,7 +136,7 @@ export function ManagerDashboardView({
           subValue={`${connectedCalls} connected (${connectRate}% pickup)`}
           icon={Phone}
           color="blue"
-          badge={interestedCalls > 0 ? `🔥 ${interestedCalls} Interested (${interestedRate}%)` : `Talk Time: ${talkTimeMins}m`}
+          badge={interestedCalls > 0 ? `${interestedCalls} Interested (${interestedRate}%)` : `Talk Time: ${talkTimeMins}m`}
         />
 
         <KpiCard
@@ -195,12 +195,12 @@ export function ManagerDashboardView({
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 font-semibold uppercase tracking-wider">
+            <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 font-medium">
               <tr>
                 <th className="px-5 py-3">Representative</th>
                 <th className="px-4 py-3">Total Dials</th>
                 <th className="px-4 py-3">Talk Time</th>
-                <th className="px-4 py-3">Interested 🔥</th>
+                <th className="px-4 py-3">Interested</th>
                 <th className="px-4 py-3">Demos Booked</th>
                 <th className="px-4 py-3">Deals Won</th>
                 <th className="px-5 py-3">Won Revenue</th>
@@ -369,7 +369,7 @@ export function ManagerDashboardView({
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 font-semibold uppercase tracking-wider">
+              <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 font-medium">
                 <tr>
                   <th className="px-5 py-3">Client / Company</th>
                   <th className="px-4 py-3">Service Quoted</th>
@@ -449,24 +449,21 @@ export function ManagerDashboardView({
             Aggregated call disposition distribution across all active representatives
           </p>
 
-          {/* 🔥 High-Level Interested Pipeline Banner */}
-          <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-orange-500/10 border border-amber-300 rounded-xl p-3 mb-4 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <span className="text-xl">🔥</span>
-              <div>
-                <span className="text-xs font-bold text-amber-950 block">
-                  Total Interested Customers ({activePeriodLabel})
-                </span>
-                <span className="text-[11px] text-amber-800">
-                  Callbacks + Demos Booked + Future Requirements
-                </span>
-              </div>
+          {/* High-Level Interested Pipeline Banner */}
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-3.5 mb-4 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-medium text-gray-900 block">
+                Total Interested Customers ({activePeriodLabel})
+              </span>
+              <span className="text-xs text-gray-500">
+                Callbacks + Demos Booked + Future Requirements
+              </span>
             </div>
             <div className="text-right">
-              <span className="text-lg font-black text-amber-950 block leading-tight">
+              <span className="text-lg font-medium text-gray-900 block leading-tight tabular-nums">
                 {interestedCalls} Leads
               </span>
-              <span className="text-[10px] font-bold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded border border-amber-300 inline-block mt-0.5">
+              <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 inline-block mt-1 tabular-nums">
                 {interestedRate}% of connected
               </span>
             </div>
@@ -505,7 +502,7 @@ export function ManagerDashboardView({
                   </div>
                   <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
                     <div
-                      className={`h-full ${item.color} rounded-full transition-all duration-300`}
+                      className={`h-full ${item.color} rounded-full transition-[width] duration-300`}
                       style={{ width: `${percent}%` }}
                     />
                   </div>

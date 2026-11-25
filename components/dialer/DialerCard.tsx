@@ -312,21 +312,21 @@ export function DialerCard({ lead: initialLead, onDisposed, onCallLogged }: Dial
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
+    <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
       {/* Card Header */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-850 to-emerald-950 px-6 py-5 border-b border-emerald-500/20">
+      <div className="bg-slate-900 px-6 py-5 border-b border-slate-800 border-t-2 border-t-emerald-500">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span
                 className={cn(
-                  "text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                  "text-xs font-medium px-2 py-0.5 rounded-md bg-slate-800 text-emerald-400 border border-slate-700 capitalize"
                 )}
               >
-                {lead.status.replace("_", " ").toUpperCase()}
+                {lead.status.replace(/_/g, " ")}
               </span>
               {lead.businessVertical && (
-                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700">
                   {lead.businessVertical}
                 </span>
               )}
@@ -498,39 +498,33 @@ export function DialerCard({ lead: initialLead, onDisposed, onCallLogged }: Dial
 
         {/* ACTIVE CALL HUD (When call is active or ringing) */}
         {callStarted && (
-          <div className="p-4 rounded-xl bg-gradient-to-r from-slate-900 via-slate-850 to-emerald-950 text-white border border-emerald-500/30 shadow-md animate-in fade-in duration-200 space-y-3">
+          <div className="p-4 rounded-xl bg-slate-900 text-white border border-slate-800 border-l-2 border-l-emerald-500 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                {/* Waveform indicator */}
-                <div className="flex items-end gap-1 h-6">
-                  <span className="w-1 bg-emerald-400 rounded-full animate-pulse h-4" />
-                  <span className="w-1 bg-emerald-400 rounded-full animate-bounce h-6" />
-                  <span className="w-1 bg-emerald-400 rounded-full animate-pulse h-3" />
-                  <span className="w-1 bg-emerald-400 rounded-full animate-bounce h-5" />
-                  <span className="w-1 bg-emerald-400 rounded-full animate-pulse h-4" />
-                </div>
+                {/* Live indicator */}
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0" />
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                    <span className="text-xs font-medium text-emerald-400">
                       {pushStatus === "dispatching"
                         ? "Signal Dispatched"
                         : pushStatus === "ringing"
                         ? "Phone Companion Ringing"
                         : "Live SIM Telephony"}
                     </span>
-                    <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" /> REC
+                    <span className="px-1.5 py-0.5 rounded text-[11px] font-mono font-medium bg-rose-500/20 text-rose-300 border border-rose-500/30 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-400" /> Rec
                     </span>
                   </div>
-                  <p className="text-sm font-mono mt-0.5">
-                    Connected to <strong className="text-white">{lead.phoneNumber}</strong>
+                  <p className="text-sm font-mono mt-0.5 tabular-nums">
+                    Connected to <strong className="text-white font-medium">{lead.phoneNumber}</strong>
                   </p>
                 </div>
               </div>
 
               {/* Call Duration */}
               <div className="text-right">
-                <span className="text-[10px] uppercase tracking-widest text-slate-400 font-mono block">
+                <span className="text-xs text-slate-400 font-mono block">
                   Duration
                 </span>
                 <span className="font-mono text-2xl font-black text-emerald-400">
