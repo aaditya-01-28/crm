@@ -482,6 +482,17 @@ export async function PATCH(
         }
       }
 
+      // Auto-resolve any active push-to-dial job for this rep & lead so the Web Dialer timer stops immediately
+      if (!isManualNote) {
+        await client.query(
+          `UPDATE push_to_dial_jobs
+           SET status = 'completed', updated_at = NOW()
+           WHERE rep_id = $1 AND lead_id = $2 AND tenant_id = $3
+             AND status IN ('pending', 'ringing', 'in_call')`,
+          [repId, id, tenantId]
+        ).catch(() => {});
+      }
+
       // Fetch next queued lead for this rep
       const nextLeadRes = await client.query(
         `SELECT l.id, l.tenant_id as "tenantId", l.assigned_rep_id as "assignedRepId",

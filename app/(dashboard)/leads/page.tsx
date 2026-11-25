@@ -450,6 +450,30 @@ export default function LeadsDirectoryPage() {
     }
   }
 
+  async function handlePushToDial(lead: LeadRecord) {
+    if (!lead.phoneNumber) return;
+    try {
+      const res = await fetch("/api/telephony/push-to-dial", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leadId: lead.id,
+          phoneNumber: lead.phoneNumber,
+          contactName: lead.contactName,
+          companyName: lead.companyName,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Failed to trigger Textora Dialer");
+        return;
+      }
+      toast.success(`📲 Calling ${lead.phoneNumber} via your paired Textora Dialer phone!`);
+    } catch {
+      toast.error("Network error triggering call");
+    }
+  }
+
   function handleExportCSV() {
     if (!canAssign) {
       toast.error("Export is restricted to Sales Managers and Super Admins.");
@@ -812,7 +836,6 @@ export default function LeadsDirectoryPage() {
                     label: lead.status,
                     color: "bg-gray-100 text-gray-700 border-gray-200",
                   };
-                  const telLink = buildTelLink(lead.phoneNumber);
                   const waLink = buildWALink(lead.phoneNumber, {
                     repName: userName,
                     repEmail: userEmail,
@@ -860,14 +883,15 @@ export default function LeadsDirectoryPage() {
                       {/* Quick Call & WhatsApp CTA buttons */}
                       <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1.5">
-                          <a
-                            href={telLink}
-                            title={`Call +91 ${lead.phoneNumber}`}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 font-semibold text-xs transition"
+                          <button
+                            type="button"
+                            onClick={() => handlePushToDial(lead)}
+                            title={`Call +91 ${lead.phoneNumber} via Textora Dialer`}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 font-semibold text-xs transition cursor-pointer"
                           >
                             <Phone className="w-3.5 h-3.5" />
                             <span>{lead.phoneNumber}</span>
-                          </a>
+                          </button>
                           <a
                             href={waLink}
                             target="_blank"

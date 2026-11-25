@@ -126,9 +126,9 @@ export function DialerCard({ lead: initialLead, onDisposed, onCallLogged }: Dial
     };
   }, [callStarted, callStartTime]);
 
-  // Push-to-dial status poller — only starts timer when call confirmed live (avoids premature duration)
+  // Push-to-dial status poller — tracks ringing -> in_call -> completed (auto-ends when disposed from APK)
   useEffect(() => {
-    if (!pushJobId || pushStatus === "idle" || pushStatus === "in_call") return;
+    if (!pushJobId || pushStatus === "idle") return;
 
     const interval = setInterval(async () => {
       try {
@@ -138,24 +138,37 @@ export function DialerCard({ lead: initialLead, onDisposed, onCallLogged }: Dial
         const job = data.job;
         if (!job) return;
 
-        if (job.status === "ringing") {
+        if (job.status === "ringing" && pushStatus !== "ringing") {
           setPushStatus("ringing");
         } else if (job.status === "in_call") {
-          setPushStatus("in_call");
-          // Only start call timer once call is actually live (fix: duration was inflating from dispatch time)
-          if (!callStarted) {
-            setCallStarted(true);
-            setCallStartTime(new Date());
+          if (pushStatus !== "in_call") {
+            setPushStatus("in_call");
+            if (!callStarted) {
+              setCallStarted(true);
+              setCallStartTime(new Date());
+            }
+            toast.success("📱 Phone Companion Connected! Call is now live on SIM.");
           }
-          toast.success("📱 Phone Companion Connected! Call is now live on SIM.");
-        } else if (job.status === "completed" || job.status === "cancelled") {
+        } else if (job.status === "completed") {
           clearInterval(interval);
+          setCallStarted(false);
+          setCallStartTime(null);
+          setPushStatus("idle");
+          setPushJobId(null);
+          toast.success("📱 Call ended & logged from Textora Dialer! Loading next lead...");
+          onDisposed(null);
+        } else if (job.status === "cancelled") {
+          clearInterval(interval);
+          setCallStarted(false);
+          setCallStartTime(null);
+          setPushStatus("idle");
+          setPushJobId(null);
         }
       } catch (_) {}
     }, 1500);
 
     return () => clearInterval(interval);
-  }, [pushJobId, pushStatus, callStarted, callStartTime]);
+  }, [pushJobId, pushStatus, callStarted, callStartTime, onDisposed]);
 
   // Option B: Trigger call via Android phone companion
   // Fix: Do NOT start timer here — wait until telephony confirms call is live

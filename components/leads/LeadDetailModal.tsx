@@ -756,13 +756,6 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
               <MessageCircle className="w-4 h-4" />
               WhatsApp Pitch
             </a>
-            <a
-              href={telLink}
-              className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
-              title="Direct Softphone / tel: Link fallback"
-            >
-              <Phone className="w-4 h-4" />
-            </a>
           </div>
         </div>
 
