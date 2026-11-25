@@ -15,13 +15,21 @@ function getPool(): Pool {
     }
 
     const isLocal = connectionString.includes("localhost") || connectionString.includes("127.0.0.1");
-    const forceSsl = connectionString.includes("sslmode=require") || connectionString.includes("ssl=true");
-    const ssl = forceSsl ? { rejectUnauthorized: false } : isLocal ? false : (process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false);
+    const forceSsl = connectionString.includes("sslmode=require") || connectionString.includes("ssl=true") || connectionString.includes("supabase.com");
+    const ssl = isLocal ? false : (forceSsl || process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false);
+
+    // Strip sslmode from URL so pg-connection-string doesn't override ssl: { rejectUnauthorized: false }
+    // (fixes "self-signed certificate in certificate chain" on Supabase pooler)
+    const cleanConnectionString = isLocal
+      ? connectionString
+      : connectionString.replace(/([?&])sslmode=[^&]*(&?)/gi, (_, prefix, suffix) =>
+          suffix ? prefix : ""
+        ).replace(/[?&]$/, "");
 
     global._pgPool = new Pool({
-      connectionString,
+      connectionString: cleanConnectionString,
       ssl,
-      max: 20, // Maintain up to 20 hot, ready connections
+      max: 10, // Safe limit for Supabase Session Pooler on Vercel serverless
       idleTimeoutMillis: 30000, // Reclaim idle connection after 30s
       connectionTimeoutMillis: 5000,
     });
