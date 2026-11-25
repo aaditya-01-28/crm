@@ -1,7 +1,10 @@
-export const APP_VERSION = "1.2.9";
-export const APP_BUILD = 12;
-export const APP_RELEASE_DATE = "2026-11-24";
+export const APP_VERSION = "1.2.10";
+export const APP_BUILD = 13;
+export const APP_RELEASE_DATE = "2026-11-25";
 export const APP_RELEASE_NOTES = [
+  "Auto-resolve pending Agenda callbacks & demos when disposed from Mobile Dialer (including RNR)",
+  "New Agenda & Reminders tab in Mobile Dialer with overdue/today badge & notification bell",
+  "Enhanced Agenda push notifications for overdue, 5-min warning, and exact scheduled time alerts",
   "Real-time Interested Leads tracking and conversion rate metrics on Dashboard and EOD Reports with quick-filter in Call Logs",
   "Automatic detection and duration capture for inbound customer callbacks after RNR",
   "Instant talk time crediting directly to sales rep daily performance dashboard & leaderboards",

@@ -315,15 +315,14 @@ export async function PATCH(
           `ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_source TEXT DEFAULT 'dialer';`
         ).catch(() => {});
 
-        // If creating a callback task, check if there's already a pending callback for this lead
-        let alreadyHasPendingCb = false;
+        let updatedExistingTask = false;
         if (taskToCreate.taskType === "callback") {
           const existingCb = await client.query(
             `SELECT id FROM scheduled_tasks WHERE lead_id = $1 AND task_type = 'callback' AND status = 'pending' LIMIT 1`,
             [id]
           );
           if (existingCb.rows.length > 0) {
-            alreadyHasPendingCb = true;
+            updatedExistingTask = true;
             if (taskToCreate.scheduledTime) {
               await client.query(
                 `UPDATE scheduled_tasks
@@ -335,9 +334,36 @@ export async function PATCH(
               );
             }
           }
+        } else if (taskToCreate.taskType === "product_demo") {
+          // If a pending callback converted to a demo, close out the pending callback
+          await client.query(
+            `UPDATE scheduled_tasks
+             SET status = 'completed',
+                 notes = CASE WHEN notes IS NOT NULL AND notes <> '' THEN notes || ' [Converted to Demo]' ELSE 'Converted to Demo Scheduled' END,
+                 updated_at = NOW()
+             WHERE lead_id = $1 AND task_type = 'callback' AND status = 'pending'`,
+            [id]
+          ).catch(() => {});
+
+          const existingDemo = await client.query(
+            `SELECT id FROM scheduled_tasks WHERE lead_id = $1 AND task_type = 'product_demo' AND status = 'pending' LIMIT 1`,
+            [id]
+          );
+          if (existingDemo.rows.length > 0) {
+            updatedExistingTask = true;
+            await client.query(
+              `UPDATE scheduled_tasks
+               SET scheduled_time = COALESCE($1, scheduled_time),
+                   meeting_link = COALESCE($2, meeting_link),
+                   notes = COALESCE($3, notes),
+                   updated_at = NOW()
+               WHERE id = $4`,
+              [taskToCreate.scheduledTime, taskToCreate.meetingLink || null, taskToCreate.notes || null, existingDemo.rows[0].id]
+            );
+          }
         }
 
-        if (!alreadyHasPendingCb) {
+        if (!updatedExistingTask) {
           await client.query(
             `INSERT INTO scheduled_tasks (tenant_id, lead_id, rep_id, task_type, scheduled_time, meeting_link, notes, status, task_source, created_at, updated_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', 'dialer', NOW(), NOW())`,
@@ -360,6 +386,37 @@ export async function PATCH(
           "UPDATE scheduled_tasks SET status = 'completed', updated_at = NOW() WHERE lead_id = $1 AND task_type = 'product_demo' AND status = 'pending'",
           [id]
         );
+      }
+
+      // Auto-resolve pending agenda tasks when a follow-up call is disposed from the dialer/APK
+      // so the rep doesn't have to manually log the outcome a second time in the Web App Agenda.
+      if (!isManualNote) {
+        const shouldAutoCompletePending =
+          disposition === "RNR" ||
+          disposition === "Not Interested" ||
+          disposition === "Invalid" ||
+          disposition === "Switched Off" ||
+          disposition === "Connected" ||
+          newStatus === "already_using" ||
+          newStatus === "already_purchased" ||
+          (disposition === "Future Requirement" && !callbackDatetime);
+
+        if (shouldAutoCompletePending) {
+          const resolutionTag = remark
+            ? `[Dialer: ${disposition} — ${remark}]`
+            : `[Dialer: ${disposition}]`;
+          await client.query(
+            `UPDATE scheduled_tasks
+             SET status = 'completed',
+                 notes = CASE
+                   WHEN notes IS NOT NULL AND notes <> '' THEN notes || ' ' || $2
+                   ELSE $2
+                 END,
+                 updated_at = NOW()
+             WHERE lead_id = $1 AND tenant_id = $3 AND status = 'pending'`,
+            [id, resolutionTag, tenantId]
+          ).catch(() => {});
+        }
       }
 
       // Sync Deal Pipeline for pipeline stages
