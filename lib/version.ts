@@ -1,7 +1,9 @@
-export const APP_VERSION = "1.3.2";
-export const APP_BUILD = 16;
+export const APP_VERSION = "1.3.3";
+export const APP_BUILD = 17;
 export const APP_RELEASE_DATE = "2026-11-25";
 export const APP_RELEASE_NOTES = [
+  "Scheduled Callback & Demo calls now show the exact Update Outcome options (Completed, RNR, Reschedule, Not Interested) in Mobile Dialer",
+  "Added post-call disposition sheet directly when calling from the Mobile Agenda tab",
   "Fixed duplicate post-call disposition prompt & duplicate call log creation after Push-to-Dial calls",
   "Dynamic Daily Calling Progress synced with live total calls & Level 2/3 Daily Calling Target assignment",
   "Cleaned up Live SIM Telephony card and removed unused Telephony Status header dropdown",

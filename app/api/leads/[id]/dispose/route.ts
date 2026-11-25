@@ -69,6 +69,13 @@ export async function PATCH(
         case "RNR":
           newStatus = "rnr";
           rnrCount += 1;
+          if (callbackDatetime) {
+            taskToCreate = {
+              taskType: "callback",
+              scheduledTime: parseScheduledDateTime(callbackDatetime),
+              notes: remark ? `RNR Retry: ${remark}` : "RNR Retry Callback",
+            };
+          }
           break;
         case "Not Interested":
           newStatus = "not_interested";
@@ -412,7 +419,7 @@ export async function PATCH(
       // so the rep doesn't have to manually log the outcome a second time in the Web App Agenda.
       if (!isManualNote) {
         const shouldAutoCompletePending =
-          disposition === "RNR" ||
+          (disposition === "RNR" && !callbackDatetime) ||
           disposition === "Not Interested" ||
           disposition === "Invalid" ||
           disposition === "Switched Off" ||
