@@ -91,6 +91,47 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Delete timeline log state (Level 3 Super Admin only)
+  const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
+  const [deletingLogId, setDeletingLogId] = useState<string | null>(null);
+
+  const handleDeleteTimelineItem = async (item: {
+    id: string;
+    sourceRefs: {
+      callLogIds: string[];
+      stageHistoryIds: string[];
+      revertTaskIds: string[];
+      deleteTaskIds: string[];
+      dealIds: string[];
+      isDemoDone: boolean;
+    };
+  }) => {
+    setDeletingLogId(item.id);
+    try {
+      const res = await fetch(`/api/leads/${leadId}/timeline/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(item.sourceRefs),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to delete log entry");
+      }
+      toast.success("Activity log deleted & reports updated");
+      setConfirmDeleteLogId(null);
+      queryClient.invalidateQueries({ queryKey: ["lead-detail", leadId] });
+      queryClient.invalidateQueries({ queryKey: ["leads-directory"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["call-logs"] });
+      queryClient.invalidateQueries({ queryKey: ["eod-reports"] });
+      onLeadUpdated?.();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete log entry");
+    } finally {
+      setDeletingLogId(null);
+    }
+  };
+
   const handleDeleteLead = async () => {
     setIsDeleting(true);
     try {
@@ -368,6 +409,14 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
       scheduledTime?: string | null;
       logSource?: string | null;
       isInterested?: boolean;
+      sourceRefs: {
+        callLogIds: string[];
+        stageHistoryIds: string[];
+        revertTaskIds: string[];
+        deleteTaskIds: string[];
+        dealIds: string[];
+        isDemoDone: boolean;
+      };
     }> = [];
 
     // 1. Stage History records (from persistent lead_stage_history table)
@@ -413,6 +462,14 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
           meetingLink: meta?.meetingLink || null,
           scheduledTime: meta?.demoDatetime || meta?.callbackDatetime || null,
           isInterested: Boolean(meta?.isInterested),
+          sourceRefs: {
+            callLogIds: [],
+            stageHistoryIds: [h.id],
+            revertTaskIds: [],
+            deleteTaskIds: [],
+            dealIds: [],
+            isDemoDone: h.stageName === "Demo Done" || h.stageName === "Demo Completed",
+          },
         });
       });
     }
@@ -434,6 +491,14 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
             notes: t.notes,
             meetingLink: t.meetingLink,
             scheduledTime: t.scheduledTime,
+            sourceRefs: {
+              callLogIds: [],
+              stageHistoryIds: [],
+              revertTaskIds: [],
+              deleteTaskIds: [t.id],
+              dealIds: [],
+              isDemoDone: false,
+            },
           });
 
           // If completed, Demo Done event
@@ -448,6 +513,14 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
               title: "Product Demo Completed",
               repName: t.rep?.fullName,
               notes: t.notes || "Product demo conducted and completed.",
+              sourceRefs: {
+                callLogIds: [],
+                stageHistoryIds: [],
+                revertTaskIds: [t.id],
+                deleteTaskIds: [],
+                dealIds: [],
+                isDemoDone: true,
+              },
             });
           }
         } else if (t.taskType === "callback") {
@@ -462,6 +535,14 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
             repName: t.rep?.fullName,
             notes: t.notes,
             scheduledTime: t.scheduledTime,
+            sourceRefs: {
+              callLogIds: [],
+              stageHistoryIds: [],
+              revertTaskIds: [],
+              deleteTaskIds: [t.id],
+              dealIds: [],
+              isDemoDone: false,
+            },
           });
         }
       });
@@ -491,6 +572,14 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
             title: `Deal Stage: ${stageLabel}`,
             repName: d.rep?.fullName,
             notes: d.closingNotes || `${d.serviceType} (${d.quantity} credits / units)`,
+            sourceRefs: {
+              callLogIds: [],
+              stageHistoryIds: [],
+              revertTaskIds: [],
+              deleteTaskIds: [],
+              dealIds: [d.id],
+              isDemoDone: false,
+            },
           });
         }
       });
@@ -541,6 +630,14 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
           recordingUrl: log.recordingUrl,
           logSource: log.logSource,
           isInterested: Boolean(log.isInterested),
+          sourceRefs: {
+            callLogIds: [log.id],
+            stageHistoryIds: [],
+            revertTaskIds: [],
+            deleteTaskIds: [],
+            dealIds: [],
+            isDemoDone: log.disposition === "Demo Done" || log.disposition === "Demo Completed",
+          },
         });
       });
     }
@@ -632,8 +729,28 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
         if (item.type === "call" && itemTime < new Date(prev.timestamp).getTime()) {
           prev.timestamp = item.timestamp;
         }
+
+        // Merge sourceRefs so deleting this merged card removes all companion records
+        prev.sourceRefs = {
+          callLogIds: Array.from(new Set([...prev.sourceRefs.callLogIds, ...item.sourceRefs.callLogIds])),
+          stageHistoryIds: Array.from(new Set([...prev.sourceRefs.stageHistoryIds, ...item.sourceRefs.stageHistoryIds])),
+          revertTaskIds: Array.from(new Set([...prev.sourceRefs.revertTaskIds, ...item.sourceRefs.revertTaskIds])),
+          deleteTaskIds: Array.from(new Set([...prev.sourceRefs.deleteTaskIds, ...item.sourceRefs.deleteTaskIds])),
+          dealIds: Array.from(new Set([...prev.sourceRefs.dealIds, ...item.sourceRefs.dealIds])),
+          isDemoDone: prev.sourceRefs.isDemoDone || item.sourceRefs.isDemoDone,
+        };
       } else {
-        deduped.push({ ...item });
+        deduped.push({
+          ...item,
+          sourceRefs: {
+            callLogIds: [...item.sourceRefs.callLogIds],
+            stageHistoryIds: [...item.sourceRefs.stageHistoryIds],
+            revertTaskIds: [...item.sourceRefs.revertTaskIds],
+            deleteTaskIds: [...item.sourceRefs.deleteTaskIds],
+            dealIds: [...item.sourceRefs.dealIds],
+            isDemoDone: item.sourceRefs.isDemoDone,
+          },
+        });
       }
     });
 
@@ -1374,10 +1491,53 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                               </span>
                             )}
                           </div>
-                          <span className="text-xs text-gray-400 shrink-0">
-                            {formatDateTime(item.timestamp)}
-                          </span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-xs text-gray-400">
+                              {formatDateTime(item.timestamp)}
+                            </span>
+                            {isLevel3Admin && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setConfirmDeleteLogId(
+                                    confirmDeleteLogId === item.id ? null : item.id
+                                  )
+                                }
+                                disabled={deletingLogId === item.id}
+                                title="Delete log entry (Level 3 Super Admin only)"
+                                className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
+
+                        {isLevel3Admin && confirmDeleteLogId === item.id && (
+                          <div className="flex items-center justify-between gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs">
+                            <span className="text-red-800 font-medium">
+                              Delete this log from lead history &amp; reports?
+                            </span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteLogId(null)}
+                                disabled={deletingLogId === item.id}
+                                className="px-2 py-1 rounded bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 font-medium"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteTimelineItem(item)}
+                                disabled={deletingLogId === item.id}
+                                className="px-2.5 py-1 rounded bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-50"
+                              >
+                                {deletingLogId === item.id ? "Deleting..." : "Confirm Delete"}
+                              </button>
+                            </div>
+                          </div>
+                        )}
 
                         {/* Meeting Link for Demo Scheduled */}
                         {item.meetingLink && (

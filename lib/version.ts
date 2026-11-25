@@ -1,7 +1,8 @@
-export const APP_VERSION = "1.3.3";
-export const APP_BUILD = 17;
+export const APP_VERSION = "1.3.4";
+export const APP_BUILD = 18;
 export const APP_RELEASE_DATE = "2026-11-25";
 export const APP_RELEASE_NOTES = [
+  "Added Level 3 Super Admin permission to delete mistaken activity/call logs from Lead Dossier (automatically cleans up reports & pipeline)",
   "Scheduled Callback & Demo calls now show the exact Update Outcome options (Completed, RNR, Reschedule, Not Interested) in Mobile Dialer",
   "Added post-call disposition sheet directly when calling from the Mobile Agenda tab",
   "Fixed duplicate post-call disposition prompt & duplicate call log creation after Push-to-Dial calls",
