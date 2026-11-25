@@ -95,15 +95,24 @@ export async function GET(request: NextRequest) {
             [tenantId, repIds, startOfDay, endOfDay]
           ),
           client.query(
-            `SELECT rep_id, COUNT(id)::int as count
-             FROM scheduled_tasks
-             WHERE tenant_id = $1 AND rep_id = ANY($2::uuid[])
-               AND task_type = 'product_demo'
-               AND status = 'pending'
-               AND (
-                 (scheduled_time >= $3 AND scheduled_time <= $4)
-                 OR (created_at >= $3 AND created_at <= $4)
-               )
+            `SELECT rep_id, COUNT(DISTINCT lead_id)::int as count
+             FROM (
+               SELECT rep_id, lead_id
+               FROM scheduled_tasks
+               WHERE tenant_id = $1 AND rep_id = ANY($2::uuid[])
+                 AND task_type = 'product_demo'
+                 AND status = 'pending'
+                 AND (
+                   (scheduled_time >= $3 AND scheduled_time <= $4)
+                   OR (created_at >= $3 AND created_at <= $4)
+                 )
+               UNION
+               SELECT rep_id, lead_id
+               FROM call_logs
+               WHERE tenant_id = $1 AND rep_id = ANY($2::uuid[])
+                 AND disposition = 'Demo Scheduled'
+                 AND call_timestamp >= $3 AND call_timestamp <= $4
+             ) booked_demos
              GROUP BY rep_id`,
             [tenantId, repIds, startOfDay, endOfDay]
           ),

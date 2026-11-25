@@ -473,9 +473,16 @@ export async function GET(request: NextRequest) {
              GROUP BY rep_id
            ) cl ON u.id = cl.rep_id
            LEFT JOIN (
-             SELECT rep_id, COUNT(id) as demos_booked
-             FROM scheduled_tasks
-             WHERE tenant_id = $1 AND task_type = 'product_demo' AND status = 'pending' AND scheduled_time >= $2 AND scheduled_time <= $3
+             SELECT rep_id, COUNT(DISTINCT lead_id) as demos_booked
+             FROM (
+               SELECT rep_id, lead_id FROM scheduled_tasks
+               WHERE tenant_id = $1 AND task_type = 'product_demo' AND status = 'pending'
+                 AND ((scheduled_time >= $2 AND scheduled_time <= $3) OR (created_at >= $2 AND created_at <= $3))
+               UNION
+               SELECT rep_id, lead_id FROM call_logs
+               WHERE tenant_id = $1 AND disposition = 'Demo Scheduled'
+                 AND call_timestamp >= $2 AND call_timestamp <= $3
+             ) db_agg
              GROUP BY rep_id
            ) st ON u.id = st.rep_id
            LEFT JOIN (
