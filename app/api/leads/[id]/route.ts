@@ -51,6 +51,7 @@ export async function GET(
         `SELECT c.id, c.tenant_id as "tenantId", c.lead_id as "leadId", c.rep_id as "repId",
                 c.disposition, c.duration_seconds as "durationSeconds", c.remark,
                 c.recording_url as "recordingUrl",
+                COALESCE(c.is_interested, false) as "isInterested",
                 c.call_timestamp as "callTimestamp",
                 u.full_name as "repFullName", u.email as "repEmail"
          FROM call_logs c
@@ -69,6 +70,7 @@ export async function GET(
         durationSeconds: c.durationSeconds,
         remark: c.remark,
         recordingUrl: c.recordingUrl || null,
+        isInterested: Boolean(c.isInterested),
         callTimestamp: c.callTimestamp,
         rep: { fullName: c.repFullName, email: c.repEmail },
       }));

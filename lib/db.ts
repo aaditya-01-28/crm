@@ -39,7 +39,9 @@ async function ensureCoreSchema(client: PoolClient) {
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false;`);
     await client.query(`ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;`);
     await client.query(`ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS log_source TEXT DEFAULT 'dialer_web';`);
+    await client.query(`ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS is_interested BOOLEAN DEFAULT NULL;`);
     await client.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ;`);
+    await client.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS is_interested BOOLEAN DEFAULT false;`);
     await client.query(`ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_source TEXT DEFAULT 'dialer';`);
 
     // 2. Push to dial table & composite index

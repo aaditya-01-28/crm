@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { normalizeRole, isManagerOrAdmin, isSalesRep } from "@/lib/rbac";
 import { getSession } from "@/lib/auth";
-import { formatDuration, getISTDateRange } from "@/lib/utils";
+import { formatDuration, getISTDateRange, interestedCallSql } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
@@ -64,12 +64,11 @@ export async function GET(request: NextRequest) {
                 COUNT(DISTINCT lead_id)::int as "uniqueDials",
                 COUNT(CASE 
                   WHEN disposition NOT IN ('RNR', 'Ringing No Response', 'Ring No Response', 'Invalid')
-                   AND (duration_seconds > 0 OR disposition IN ('Connected', 'Contacted', 'Answered', 'Callback', 'Callback Requested', 'Demo Scheduled', 'Demo Done', 'Demo Completed', 'Already Using Our Service', 'Already Purchased or Using Other Company Service', 'Not Interested', 'Future Requirement'))
+                   AND (duration_seconds > 0 OR disposition IN ('Connected', 'Interested', 'Contacted', 'Answered', 'Callback', 'Callback Requested', 'Demo Scheduled', 'Demo Done', 'Demo Completed', 'Already Using Our Service', 'Already Purchased or Using Other Company Service', 'Not Interested', 'Future Requirement'))
                   THEN 1 
                 END)::int as "connectedCalls",
                 COUNT(CASE 
-                  WHEN disposition IN ('Demo Scheduled', 'Callback', 'Callback Requested', 'Future Requirement', 'Demo Done', 'Demo Completed', 'Quote Sent', 'Won', 'Deal Created')
-                    OR disposition ILIKE '%Demo%' OR disposition ILIKE '%Callback%' OR disposition ILIKE '%Future%'
+                  WHEN ${interestedCallSql()}
                   THEN 1 
                 END)::int as "interestedCalls",
                 COALESCE(SUM(duration_seconds), 0)::int as "totalDuration"
@@ -462,10 +461,9 @@ export async function GET(request: NextRequest) {
            LEFT JOIN (
              SELECT rep_id,
                     COUNT(id) as total_calls,
-                    COUNT(CASE WHEN duration_seconds > 0 OR disposition ILIKE '%Connected%' OR disposition = 'Contacted' THEN 1 END) as connected_calls,
+                    COUNT(CASE WHEN duration_seconds > 0 OR disposition ILIKE '%Connected%' OR disposition = 'Contacted' OR disposition = 'Interested' THEN 1 END) as connected_calls,
                     COUNT(CASE 
-                      WHEN disposition IN ('Demo Scheduled', 'Callback', 'Callback Requested', 'Future Requirement', 'Demo Done', 'Demo Completed', 'Quote Sent', 'Won', 'Deal Created')
-                        OR disposition ILIKE '%Demo%' OR disposition ILIKE '%Callback%' OR disposition ILIKE '%Future%'
+                      WHEN ${interestedCallSql()}
                       THEN 1 
                     END) as interested_calls,
                     ROUND(SUM(duration_seconds) / 60) as talk_time,

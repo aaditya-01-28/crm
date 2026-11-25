@@ -56,6 +56,7 @@ interface LeadDetailModalProps {
 
 const STATUS_OPTIONS = [
   { value: "new", label: "New Lead", color: "bg-blue-100 text-blue-800" },
+  { value: "interested", label: "Interested 🔥", color: "bg-orange-100 text-orange-800" },
   { value: "callback", label: "Callback Required", color: "bg-indigo-100 text-indigo-800" },
   { value: "demo_scheduled", label: "Demo Scheduled", color: "bg-purple-100 text-purple-800" },
   { value: "demo_done", label: "Demo Done", color: "bg-teal-100 text-teal-800" },
@@ -75,6 +76,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
   const [activeTab, setActiveTab] = useState<"timeline" | "tasks" | "deals">("timeline");
   const [showLogNote, setShowLogNote] = useState(false);
   const [disposition, setDisposition] = useState("Connected");
+  const [isInterested, setIsInterested] = useState(false);
   const [remark, setRemark] = useState("");
   const [callbackDatetime, setCallbackDatetime] = useState("");
   const [demoDatetime, setDemoDatetime] = useState("");
@@ -290,6 +292,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           disposition,
+          isInterested: isInterested || disposition === "Interested",
           remark,
           durationSeconds: 0,
           forceNewLog: true,
@@ -309,6 +312,8 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
           : "Activity logged to timeline ✅"
       );
       setRemark("");
+      setIsInterested(false);
+      setDisposition("Connected");
       setCallbackDatetime("");
       setDemoDatetime("");
       setDecisionMakerName("");
@@ -362,6 +367,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
       meetingLink?: string | null;
       scheduledTime?: string | null;
       logSource?: string | null;
+      isInterested?: boolean;
     }> = [];
 
     // 1. Stage History records (from persistent lead_stage_history table)
@@ -406,6 +412,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
           notes: h.notes,
           meetingLink: meta?.meetingLink || null,
           scheduledTime: meta?.demoDatetime || meta?.callbackDatetime || null,
+          isInterested: Boolean(meta?.isInterested),
         });
       });
     }
@@ -515,6 +522,9 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
         } else if (log.disposition === "RNR") {
           badgeColor = "bg-amber-100 text-amber-800 border-amber-200";
           iconColor = "bg-amber-600 ring-amber-100";
+        } else if (log.disposition === "Interested") {
+          badgeColor = "bg-orange-100 text-orange-800 border-orange-200";
+          iconColor = "bg-orange-600 ring-orange-100";
         }
 
         items.push({
@@ -530,6 +540,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
           durationSeconds: log.durationSeconds,
           recordingUrl: log.recordingUrl,
           logSource: log.logSource,
+          isInterested: Boolean(log.isInterested),
         });
       });
     }
@@ -1076,23 +1087,81 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                   onSubmit={handleLogInteraction}
                   className="bg-emerald-50/60 border border-emerald-200 rounded-xl p-4 space-y-3 animate-in fade-in duration-150"
                 >
-                  <div className="flex items-center gap-3">
-                    <label className="text-xs font-semibold text-gray-700">Disposition:</label>
-                    <select
-                      value={disposition}
-                      onChange={(e) => setDisposition(e.target.value)}
-                      className="px-2.5 py-1 text-xs border border-gray-300 rounded-lg bg-white font-medium"
-                    >
-                      <option value="Connected">Connected</option>
-                      <option value="Callback">Callback Requested</option>
-                      <option value="Demo Scheduled">Demo Scheduled</option>
-                      <option value="Demo Done">Demo Done</option>
-                      <option value="RNR">RNR (Ringing No Response)</option>
-                      <option value="Not Interested">Not Interested</option>
-                      <option value="Already Using Our Service">Already Using: Our Service</option>
-                      <option value="Already Purchased or Using Other Company Service">Already Using: Other Company Service</option>
-                      <option value="Future Requirement">Future Requirement</option>
-                    </select>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-semibold text-gray-700">
+                        Call Disposition:
+                      </label>
+                      {isInterested && (
+                        <span className="text-[11px] text-orange-700 font-medium bg-orange-50 px-2 py-0.5 rounded-full border border-orange-200">
+                          🔥 Interested active — optionally pick 1 follow-up
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { value: "Interested", label: "🔥 Interested", compatible: true },
+                        { value: "Connected", label: "Connected", compatible: true },
+                        { value: "Callback", label: "Callback Requested", compatible: true },
+                        { value: "Demo Scheduled", label: "Demo Scheduled", compatible: true },
+                        { value: "Demo Done", label: "Demo Done", compatible: true },
+                        { value: "Future Requirement", label: "Future Requirement", compatible: true },
+                        { value: "Already Purchased or Using Other Company Service", label: "Using Other Service", compatible: true },
+                        { value: "Already Using Our Service", label: "Using Our Service", compatible: false },
+                        { value: "RNR", label: "RNR", compatible: false },
+                        { value: "Not Interested", label: "Not Interested", compatible: false },
+                      ].map((opt) => {
+                        const isSelected =
+                          opt.value === "Interested"
+                            ? isInterested || disposition === "Interested"
+                            : disposition === opt.value;
+
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => {
+                              if (opt.value === "Interested") {
+                                if (isInterested || disposition === "Interested") {
+                                  // Turn off Interested
+                                  setIsInterested(false);
+                                  if (disposition === "Interested") setDisposition("Connected");
+                                } else {
+                                  // Turn on Interested; clear incompatible single-select options
+                                  setIsInterested(true);
+                                  const incompatible = ["RNR", "Not Interested", "Already Using Our Service"];
+                                  if (incompatible.includes(disposition) || disposition === "Connected") {
+                                    setDisposition("Interested");
+                                  }
+                                }
+                              } else if (!opt.compatible) {
+                                // Negative / terminal single-select clears Interested
+                                setIsInterested(false);
+                                setDisposition(opt.value);
+                              } else {
+                                // Compatible follow-up option
+                                if (isInterested) {
+                                  // Toggle the 1 additional option when Interested is selected
+                                  setDisposition(disposition === opt.value ? "Interested" : opt.value);
+                                } else {
+                                  setDisposition(opt.value);
+                                }
+                              }
+                            }}
+                            className={cn(
+                              "px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer",
+                              isSelected
+                                ? opt.value === "Interested"
+                                  ? "bg-orange-600 text-white border-orange-600 shadow-xs"
+                                  : "bg-emerald-600 text-white border-emerald-600 shadow-xs"
+                                : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                            )}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
                   {/* Callback Follow-Up Section */}
@@ -1287,6 +1356,11 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                               )}
                               <span>{item.badge}</span>
                             </span>
+                            {item.isInterested && item.badge !== "Interested" && (
+                              <span className="text-[10px] font-semibold text-orange-700 bg-orange-50 px-2 py-0.5 rounded border border-orange-200 flex items-center gap-1">
+                                🔥 Interested
+                              </span>
+                            )}
                             {item.logSource === "inbound_sim" && (
                               <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
                                 <PhoneIncoming className="w-2.5 h-2.5 text-emerald-600" />

@@ -354,4 +354,14 @@ export function getISTDateRange(
   return { startOfPeriod, endOfPeriod, istTodayStr };
 }
 
+/**
+ * Shared SQL predicate for counting "Interested" calls.
+ * - For new calls (is_interested IS NOT NULL): strictly uses explicit is_interested = true.
+ * - For historical calls before this feature (is_interested IS NULL): preserves legacy disposition-based criteria.
+ */
+export function interestedCallSql(alias = ""): string {
+  const p = alias ? `${alias}.` : "";
+  return `(${p}is_interested = true OR (${p}is_interested IS NULL AND (${p}disposition IN ('Interested', 'Demo Scheduled', 'Callback', 'Callback Requested', 'Future Requirement', 'Demo Done', 'Demo Completed', 'Quote Sent', 'Won', 'Deal Created') OR ${p}disposition ILIKE '%Demo%' OR ${p}disposition ILIKE '%Callback%' OR ${p}disposition ILIKE '%Future%')))`;
+}
+
 

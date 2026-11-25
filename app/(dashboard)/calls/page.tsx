@@ -51,6 +51,7 @@ interface CallLogItem {
   remark: string | null;
   recordingUrl?: string | null;
   logSource?: string | null;
+  isInterested?: boolean;
   callTimestamp: string;
   lead: {
     id: string;
@@ -881,16 +882,23 @@ export default function CallLogsPage() {
 
                       {/* Disposition */}
                       <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                        <span
-                          className={cn(
-                            "inline-flex items-center px-2.5 py-1 rounded-full font-semibold border text-xs shadow-2xs",
-                            badge.bg,
-                            badge.text,
-                            badge.border
+                        <div className="inline-flex flex-col items-center gap-1">
+                          <span
+                            className={cn(
+                              "inline-flex items-center px-2.5 py-1 rounded-full font-semibold border text-xs shadow-2xs",
+                              badge.bg,
+                              badge.text,
+                              badge.border
+                            )}
+                          >
+                            {badge.label}
+                          </span>
+                          {call.isInterested && call.disposition !== "Interested" && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-orange-50 text-orange-700 border border-orange-200">
+                              🔥 Interested
+                            </span>
                           )}
-                        >
-                          {badge.label}
-                        </span>
+                        </div>
                       </td>
 
                       {/* Duration */}

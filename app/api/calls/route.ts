@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
-import { getISTDateRange } from "@/lib/utils";
+import { getISTDateRange, interestedCallSql } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
@@ -81,12 +81,10 @@ export async function GET(request: NextRequest) {
 
       if (disposition && disposition !== "all") {
         if (disposition === "Interested" || disposition === "interested") {
-          conditions.push(
-            `(c.disposition IN ('Demo Scheduled', 'Callback', 'Callback Requested', 'Future Requirement', 'Demo Done', 'Demo Completed', 'Quote Sent', 'Won', 'Deal Created') OR c.disposition ILIKE '%Demo%' OR c.disposition ILIKE '%Callback%' OR c.disposition ILIKE '%Future%')`
-          );
+          conditions.push(interestedCallSql("c"));
         } else if (disposition === "Connected" || disposition === "connected") {
           conditions.push(
-            `(c.disposition NOT IN ('RNR', 'Ringing No Response', 'Ring No Response', 'Invalid') AND (c.duration_seconds > 0 OR c.disposition IN ('Connected', 'Contacted', 'Answered', 'Callback', 'Callback Requested', 'Demo Scheduled', 'Demo Done', 'Demo Completed', 'Already Using Our Service', 'Already Purchased or Using Other Company Service', 'Not Interested', 'Future Requirement')))`
+            `(c.disposition NOT IN ('RNR', 'Ringing No Response', 'Ring No Response', 'Invalid') AND (c.duration_seconds > 0 OR c.disposition IN ('Connected', 'Interested', 'Contacted', 'Answered', 'Callback', 'Callback Requested', 'Demo Scheduled', 'Demo Done', 'Demo Completed', 'Already Using Our Service', 'Already Purchased or Using Other Company Service', 'Not Interested', 'Future Requirement')))`
           );
         } else if (
           disposition === "RNR" ||
@@ -153,6 +151,7 @@ export async function GET(request: NextRequest) {
         `SELECT c.id, c.tenant_id as "tenantId", c.lead_id as "leadId", c.rep_id as "repId",
                 c.disposition, c.duration_seconds as "durationSeconds", c.remark, c.recording_url as "recordingUrl",
                 COALESCE(c.log_source, 'dialer_web') as "logSource",
+                COALESCE(c.is_interested, false) as "isInterested",
                 c.call_timestamp as "callTimestamp",
                 l.id as "lead_id", l.phone_number as "lead_phoneNumber", l.contact_name as "lead_contactName",
                 l.company_name as "lead_companyName", l.business_vertical as "lead_businessVertical",
@@ -172,12 +171,11 @@ export async function GET(request: NextRequest) {
                 COALESCE(SUM(c.duration_seconds), 0)::int as "totalDuration",
                 COUNT(CASE 
                   WHEN c.disposition NOT IN ('RNR', 'Ringing No Response', 'Ring No Response', 'Invalid')
-                   AND (c.duration_seconds > 0 OR c.disposition IN ('Connected', 'Contacted', 'Answered', 'Callback', 'Callback Requested', 'Demo Scheduled', 'Demo Done', 'Demo Completed', 'Already Using Our Service', 'Already Purchased or Using Other Company Service', 'Not Interested', 'Future Requirement'))
+                   AND (c.duration_seconds > 0 OR c.disposition IN ('Connected', 'Interested', 'Contacted', 'Answered', 'Callback', 'Callback Requested', 'Demo Scheduled', 'Demo Done', 'Demo Completed', 'Already Using Our Service', 'Already Purchased or Using Other Company Service', 'Not Interested', 'Future Requirement'))
                   THEN 1 
                 END)::int as "connectedCount",
                 COUNT(CASE 
-                  WHEN c.disposition IN ('Demo Scheduled', 'Callback', 'Callback Requested', 'Future Requirement', 'Demo Done', 'Demo Completed', 'Quote Sent', 'Won', 'Deal Created')
-                    OR c.disposition ILIKE '%Demo%' OR c.disposition ILIKE '%Callback%' OR c.disposition ILIKE '%Future%'
+                  WHEN ${interestedCallSql("c")}
                   THEN 1
                 END)::int as "interestedCount"
          FROM call_logs c
@@ -204,6 +202,7 @@ export async function GET(request: NextRequest) {
         remark: r.remark,
         recordingUrl: r.recordingUrl || null,
         logSource: r.logSource || "dialer_web",
+        isInterested: Boolean(r.isInterested),
         callTimestamp: r.callTimestamp,
         lead: r.lead_id
           ? {
@@ -277,6 +276,10 @@ export async function POST(request: NextRequest) {
         const remark = item.remark || null;
         const recordingUrl = item.recordingUrl || item.recording_url || null;
         const logSource = item.logSource || "apk_manual";
+        const isPendingAutoCapture = logSource === "apk_connected" || logSource === "dialer_connected";
+        const explicitInterestedVal: boolean | null = isPendingAutoCapture
+          ? null
+          : Boolean(item.isInterested) || disposition === "Interested";
 
         // Timezone-safe timestamp parsing:
         // Indian clients often serialize local ISO strings without trailing Z (e.g. "2026-11-23T11:34:00.000").
@@ -360,12 +363,13 @@ export async function POST(request: NextRequest) {
                  remark = $3,
                  recording_url = $4,
                  log_source = $5,
-                 call_timestamp = $6
-             WHERE id = $7
+                 call_timestamp = $6,
+                 is_interested = COALESCE($7, is_interested)
+             WHERE id = $8
              RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
                        disposition, duration_seconds as "durationSeconds", remark,
-                       recording_url as "recordingUrl", log_source as "logSource", call_timestamp as "callTimestamp"`,
-            [finalDisposition, newDuration, finalRemark, finalRecording, finalSource, finalTimestamp, existing.id]
+                       recording_url as "recordingUrl", log_source as "logSource", COALESCE(is_interested, false) as "isInterested", call_timestamp as "callTimestamp"`,
+            [finalDisposition, newDuration, finalRemark, finalRecording, finalSource, finalTimestamp, isManualDisposed ? null : explicitInterestedVal, existing.id]
           );
           finalLog = updatedRes.rows[0];
 
@@ -379,12 +383,12 @@ export async function POST(request: NextRequest) {
           );
         } else {
           const logRes = await client.query(
-            `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, call_timestamp)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, is_interested, call_timestamp)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
              RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
                        disposition, duration_seconds as "durationSeconds", remark,
-                       recording_url as "recordingUrl", log_source as "logSource", call_timestamp as "callTimestamp"`,
-            [tenantId, targetLeadId, repId, disposition, durationSeconds, remark, recordingUrl, logSource, callTimestamp]
+                       recording_url as "recordingUrl", log_source as "logSource", COALESCE(is_interested, false) as "isInterested", call_timestamp as "callTimestamp"`,
+            [tenantId, targetLeadId, repId, disposition, durationSeconds, remark, recordingUrl, logSource, explicitInterestedVal, callTimestamp]
           );
           finalLog = logRes.rows[0];
 

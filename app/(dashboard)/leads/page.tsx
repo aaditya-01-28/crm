@@ -87,6 +87,7 @@ interface LeadsResponse {
 const STATUS_FILTERS = [
   { key: "all", label: "All Leads" },
   { key: "new", label: "New" },
+  { key: "interested", label: "Interested 🔥" },
   { key: "callback", label: "Callbacks" },
   { key: "demo_scheduled", label: "Demos" },
   { key: "demo_done", label: "Demo Done" },
@@ -115,6 +116,7 @@ const VERTICALS = [
 
 const STATUS_BADGES: Record<string, { label: string; color: string }> = {
   new: { label: "New", color: "bg-blue-100 text-blue-700 border-blue-200" },
+  interested: { label: "Interested 🔥", color: "bg-orange-100 text-orange-800 border-orange-200" },
   callback: { label: "Callback", color: "bg-indigo-100 text-indigo-700 border-indigo-200" },
   demo_scheduled: { label: "Demo Booked", color: "bg-purple-100 text-purple-700 border-purple-200" },
   demo_done: { label: "Demo Done", color: "bg-teal-100 text-teal-700 border-teal-200" },

@@ -31,7 +31,10 @@ export async function PATCH(
       callLogId,
       forceNewLog = false,
       isManualNote = false,
+      isInterested = false,
     } = body;
+
+    const isExplicitInterested = Boolean(isInterested) || disposition === "Interested";
 
     if (!disposition) {
       return NextResponse.json(
@@ -114,6 +117,9 @@ export async function PATCH(
         case "Connected":
           newStatus = "callback";
           break;
+        case "Interested":
+          newStatus = "interested";
+          break;
         case "Callback":
           newStatus = "callback";
           taskToCreate = {
@@ -152,6 +158,8 @@ export async function PATCH(
       // Create or update call log: attach disposition and remarks to the call from this active session
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
       await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS log_source TEXT DEFAULT 'dialer_web';").catch(() => {});
+      await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS is_interested BOOLEAN DEFAULT NULL;").catch(() => {});
+      await client.query("ALTER TABLE leads ADD COLUMN IF NOT EXISTS is_interested BOOLEAN DEFAULT false;").catch(() => {});
 
       // Attach disposition, notes, and duration to the call from this active session.
       // 1. If explicit callLogId is passed and exists, use it.
@@ -202,18 +210,19 @@ export async function PATCH(
                duration_seconds = GREATEST(duration_seconds, $2),
                remark = COALESCE($3, remark),
                recording_url = COALESCE($4, recording_url),
-               log_source = $5
-           WHERE id = $6`,
-          [disposition, durationSeconds, remark || null, recordingUrl || null, logSource, targetCallId]
+               log_source = $5,
+               is_interested = $6
+           WHERE id = $7`,
+          [disposition, durationSeconds, remark || null, recordingUrl || null, logSource, isExplicitInterested, targetCallId]
         );
       } else {
         const parsedTimestamp = callTimestamp ? parseScheduledDateTime(callTimestamp) : null;
         const finalTimestamp = parsedTimestamp && !isNaN(parsedTimestamp.getTime()) ? parsedTimestamp : new Date();
 
         await client.query(
-          `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, call_timestamp)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-          [tenantId, id, repId, disposition, durationSeconds, remark || null, recordingUrl || null, logSource, finalTimestamp]
+          `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, is_interested, call_timestamp)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [tenantId, id, repId, disposition, durationSeconds, remark || null, recordingUrl || null, logSource, isExplicitInterested, finalTimestamp]
         );
       }
 
@@ -277,6 +286,7 @@ export async function PATCH(
       const stageMeta = JSON.stringify({
         previousStatus: lead.status,
         newStatus,
+        isInterested: isExplicitInterested,
         demoDatetime: demoDatetime || null,
         callbackDatetime: callbackDatetime || null,
         decisionMakerName: decisionMakerName || null,
@@ -298,14 +308,19 @@ export async function PATCH(
         ).catch(() => {});
       }
 
-      // Synchronize lead status and exact rnr_count from call_logs
+      // Synchronize lead status, explicit interested flag, and exact rnr_count from call_logs
       await client.query(
         `UPDATE leads
          SET status = $1,
+             is_interested = CASE
+               WHEN $3::boolean THEN true
+               WHEN $1 IN ('rnr', 'not_interested', 'invalid', 'already_using', 'lost') THEN false
+               ELSE COALESCE(is_interested, false)
+             END,
              rnr_count = (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $2 AND disposition = 'RNR'),
              updated_at = NOW()
          WHERE id = $2`,
-        [newStatus, id]
+        [newStatus, id, isExplicitInterested]
       );
 
       // Create scheduled task if needed

@@ -1,7 +1,10 @@
-export const APP_VERSION = "1.2.10";
-export const APP_BUILD = 13;
+export const APP_VERSION = "1.3.0";
+export const APP_BUILD = 14;
 export const APP_RELEASE_DATE = "2026-11-25";
 export const APP_RELEASE_NOTES = [
+  "Added explicit Interested disposition with 1-follow-up multi-select across Web CRM and Mobile Dialer",
+  "Added Interested Leads filter tab in Leads Directory and Mobile Calling Queue",
+  "Preserved historical Interested analytics while applying explicit Interested tracking for all new calls",
   "Auto-resolve pending Agenda callbacks & demos when disposed from Mobile Dialer (including RNR)",
   "New Agenda & Reminders tab in Mobile Dialer with overdue/today badge & notification bell",
   "Enhanced Agenda push notifications for overdue, 5-min warning, and exact scheduled time alerts",

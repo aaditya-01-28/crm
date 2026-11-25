@@ -104,7 +104,11 @@ export async function GET(request: NextRequest) {
       const params: any[] = [...baseParams];
 
       if (status && status !== "all") {
-        conditions.push(`l.status = $${params.push(status)}`);
+        if (status === "interested") {
+          conditions.push(`(l.status = 'interested' OR l.is_interested = true)`);
+        } else {
+          conditions.push(`l.status = $${params.push(status)}`);
+        }
       }
 
       if (vertical && vertical !== "all" && vertical !== "All Verticals") {
@@ -209,6 +213,10 @@ export async function GET(request: NextRequest) {
         `SELECT status, COUNT(id)::int as count FROM leads l WHERE ${statusWhereClause} GROUP BY status`,
         statusBaseParams
       );
+      const interestedLeadsRes = await client.query(
+        `SELECT COUNT(id)::int as count FROM leads l WHERE ${statusWhereClause} AND (l.status = 'interested' OR l.is_interested = true)`,
+        statusBaseParams
+      );
 
       let unassignedTotal = 0;
       if (!isSalesRep(role)) {
@@ -239,6 +247,7 @@ export async function GET(request: NextRequest) {
         already_using: 0,
         already_purchased: 0,
         future_requirement: 0,
+        interested: interestedLeadsRes.rows[0]?.count || 0,
         unassigned: unassignedTotal,
       };
 
