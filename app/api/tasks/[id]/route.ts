@@ -202,7 +202,7 @@ export async function PATCH(
           } else {
             await client.query(
               `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes, created_at, updated_at)
-               VALUES ($1, $2, $3, $4, 10000, 0, 'demo_done', 'Product demo completed', NOW(), NOW())`,
+               VALUES ($1, $2, $3, $4, 0, 0, 'demo_done', 'Product demo completed', NOW(), NOW())`,
               [
                 tenantId,
                 lead.id,

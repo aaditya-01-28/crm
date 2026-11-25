@@ -70,7 +70,7 @@ export async function PATCH(
             } else {
               const newDeal = await client.query(
                 `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes, created_at, updated_at)
-                 SELECT p.tenant_id, p.lead_id, COALESCE(p.rep_id, $2), COALESCE(l.service_type, 'WhatsApp API'), COALESCE(p.credits_to_add, 10000), COALESCE(p.original_amount, p.final_amount, 0), 'closed_won', 'Approved Payment Onboarding', NOW(), NOW()
+                 SELECT p.tenant_id, p.lead_id, COALESCE(p.rep_id, $2), COALESCE(l.service_type, 'WhatsApp API'), COALESCE(p.credits_to_add, 0), COALESCE(p.original_amount, p.final_amount, 0), 'closed_won', 'Approved Payment Onboarding', NOW(), NOW()
                  FROM payments p
                  LEFT JOIN leads l ON p.lead_id = l.id
                  WHERE p.id = $1

@@ -275,7 +275,7 @@ export function DealModal({
       pay?.creditsToAdd?.toString() ||
       parsedDossier?.creditsToAdd ||
       deal?.quantity?.toString() ||
-      "10000";
+      "0";
     const originalAmount = pay?.originalAmount
       ? parseFloat(pay.originalAmount).toFixed(2)
       : parsedDossier?.originalAmount ||
@@ -455,7 +455,7 @@ export function DealModal({
     setCommercials([
       {
         serviceType: "WhatsApp API",
-        quantity: "10000",
+        quantity: "0",
         quotedPrice: "0",
         stage: "quote_sent",
         closingDate: "",
@@ -495,7 +495,7 @@ export function DealModal({
       ...prev,
       {
         serviceType: targetService,
-        quantity: "10000",
+        quantity: "0",
         quotedPrice: "0",
         stage: "quote_sent",
         closingDate: prev[0]?.closingDate || "",
