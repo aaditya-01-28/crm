@@ -23,10 +23,9 @@ export async function GET(request: NextRequest) {
       await client.query("ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_source TEXT DEFAULT 'dialer';").catch(() => {});
       const isRep = role === "sales_rep";
 
-      // Issue 6 Fix: Filter out pipeline deal updates from the Follow-Up Agenda
-      // Agenda displays only dialer callbacks/demos/follow-ups unless specifically requesting pipeline tasks
+      // Agenda displays dialer/manual callbacks & demos, plus pipeline product_demo tasks (which auto-sync with Agenda)
       const queryParams: any[] = [tenantId];
-      let sourceFilter = "AND (t.task_source IS NULL OR t.task_source = 'dialer' OR t.task_source = 'manual')";
+      let sourceFilter = "AND (t.task_source IS NULL OR t.task_source = 'dialer' OR t.task_source = 'manual' OR (t.task_source = 'pipeline' AND t.task_type = 'product_demo'))";
       if (source) {
         sourceFilter = `AND t.task_source = $${queryParams.push(source)}`;
       }

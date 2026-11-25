@@ -172,9 +172,9 @@ function getDefaultNextDayFollowup(): string {
 function getDefaultTomorrowDemo(): string {
   const d = new Date();
   d.setDate(d.getDate() + 1);
-  d.setHours(15, 0, 0, 0);
+  d.setHours(11, 0, 0, 0);
   const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T15:00`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T11:00`;
 }
 
 export function DealModal({

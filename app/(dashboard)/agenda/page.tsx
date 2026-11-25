@@ -18,13 +18,14 @@ import {
   Check,
   Phone,
   MessageCircle,
+  Filter,
 } from "lucide-react";
 import { formatDateTime, toUtcIsoString, cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
 import { LeadDetailModal } from "@/components/leads/LeadDetailModal";
 
-import { useSession } from "@/components/layout/SessionProvider";
+import { useSession, useCanAssignLeads } from "@/components/layout/SessionProvider";
 
 interface TaskLead {
   id?: string;
@@ -63,8 +64,11 @@ async function fetchAgenda(): Promise<AgendaData> {
 export default function AgendaPage() {
   const queryClient = useQueryClient();
   const { userId: currentUserId } = useSession();
+  const canFilterAgenda = useCanAssignLeads();
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [outcomeTask, setOutcomeTask] = useState<Task | null>(null);
+  const [typeFilter, setTypeFilter] = useState<"all" | "product_demo" | "callback">("all");
+  const [repFilter, setRepFilter] = useState<string>("all");
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["agenda"],
@@ -107,12 +111,42 @@ export default function AgendaPage() {
     );
   }
 
-  const { unconfirmed = [], overdue = [], today = [], upcoming = [] } = data || {};
+  const {
+    unconfirmed: rawUnconfirmed = [],
+    overdue: rawOverdue = [],
+    today: rawToday = [],
+    upcoming: rawUpcoming = [],
+  } = data || {};
+
+  // Build unique list of reps for Level 2 & Level 3 filter dropdown
+  const allTasks = [...rawUnconfirmed, ...rawOverdue, ...rawToday, ...rawUpcoming];
+  const repOptions = Array.from(
+    new Map(
+      allTasks
+        .filter((t) => (t.rep?.id || t.repId) && t.rep?.fullName)
+        .map((t) => [t.rep?.id || t.repId!, t.rep!.fullName])
+    ).entries()
+  ).sort((a, b) => a[1].localeCompare(b[1]));
+
+  const applyFilters = (list: Task[]) => {
+    if (!canFilterAgenda) return list;
+    return list.filter((t) => {
+      if (typeFilter !== "all" && t.taskType !== typeFilter) return false;
+      if (repFilter !== "all" && (t.rep?.id || t.repId) !== repFilter) return false;
+      return true;
+    });
+  };
+
+  const unconfirmed = applyFilters(rawUnconfirmed);
+  const overdue = applyFilters(rawOverdue);
+  const today = applyFilters(rawToday);
+  const upcoming = applyFilters(rawUpcoming);
+  const hasActiveFilter = canFilterAgenda && (typeFilter !== "all" || repFilter !== "all");
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-7xl mx-auto space-y-5">
       {/* Page Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
             <CalendarClock className="w-6 h-6 text-emerald-600" />
@@ -126,7 +160,7 @@ export default function AgendaPage() {
         <button
           onClick={handleRefresh}
           disabled={isFetching}
-          className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition shadow-2xs disabled:opacity-50 cursor-pointer"
+          className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition shadow-2xs disabled:opacity-50 cursor-pointer self-start sm:self-auto"
           title="Refresh Agenda Tasks"
         >
           <RefreshCw
@@ -136,54 +170,110 @@ export default function AgendaPage() {
         </button>
       </div>
 
-      {/* Unconfirmed / Pending Date Confirmation */}
-      {unconfirmed.length > 0 && (
+      {/* Level 2 & Level 3 Filter Bar + Quick Summary Strip */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-3.5 shadow-2xs space-y-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200">
+            <span className="text-xs font-semibold text-emerald-800">Today&apos;s Schedule</span>
+            <span className="text-sm font-bold text-emerald-700">{today.length}</span>
+          </div>
+          <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-purple-50 border border-purple-200">
+            <span className="text-xs font-semibold text-purple-800">Upcoming</span>
+            <span className="text-sm font-bold text-purple-700">{upcoming.length}</span>
+          </div>
+          <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-red-50 border border-red-200">
+            <span className="text-xs font-semibold text-red-800">Overdue / Missed</span>
+            <span className="text-sm font-bold text-red-700">{overdue.length}</span>
+          </div>
+          <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-amber-50 border border-amber-200">
+            <span className="text-xs font-semibold text-amber-800">Pending Date</span>
+            <span className="text-sm font-bold text-amber-700">{unconfirmed.length}</span>
+          </div>
+        </div>
+
+        {canFilterAgenda && (
+          <div className="flex flex-wrap items-center justify-between gap-2.5 pt-2 border-t border-slate-100">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-slate-500 flex items-center gap-1 mr-1">
+                <Filter className="w-3.5 h-3.5 text-emerald-600" />
+                Filters:
+              </span>
+
+              {/* Type Filter Pills */}
+              <div className="inline-flex rounded-lg bg-slate-100 p-0.5 border border-slate-200">
+                {(
+                  [
+                    { key: "all", label: "All Types" },
+                    { key: "product_demo", label: "Demos Only" },
+                    { key: "callback", label: "Callbacks Only" },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => setTypeFilter(opt.key)}
+                    className={cn(
+                      "px-2.5 py-1 text-xs font-semibold rounded-md transition cursor-pointer",
+                      typeFilter === opt.key
+                        ? "bg-white text-emerald-700 shadow-2xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* User / Rep Filter Dropdown */}
+              <select
+                value={repFilter}
+                onChange={(e) => setRepFilter(e.target.value)}
+                className="text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 cursor-pointer"
+                aria-label="Filter by User"
+              >
+                <option value="all">All Users ({repOptions.length})</option>
+                {repOptions.map(([id, name]) => (
+                  <option key={id} value={id}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {hasActiveFilter && (
+              <button
+                type="button"
+                onClick={() => {
+                  setTypeFilter("all");
+                  setRepFilter("all");
+                }}
+                className="text-xs font-semibold text-rose-600 hover:text-rose-700 flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-rose-50 transition cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+                Clear Filters
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Primary Row: Today's Schedule + Upcoming Demos & Follow-Ups side-by-side */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
         <AgendaSection
-          title={`Follow-Ups Pending Date Confirmation (${unconfirmed.length})`}
-          icon={AlertTriangle}
-          iconClass="text-amber-600"
-          headerClass="border-amber-300 bg-amber-50"
-          tasks={unconfirmed}
+          title={`Today's Schedule (${today.length})`}
+          icon={Clock}
+          iconClass="text-emerald-600"
+          headerClass="border-emerald-200 bg-emerald-50"
+          tasks={today}
           currentUserId={currentUserId}
           onComplete={(id) => completeMutation.mutate(id)}
           onOpenLead={(leadId) => setSelectedLeadId(leadId)}
           onUpdateOutcome={(task) => setOutcomeTask(task)}
+          emptyMessage="No tasks scheduled for today"
         />
-      )}
 
-      {/* Overdue */}
-      {overdue.length > 0 && (
         <AgendaSection
-          title={`Overdue / Missed (${overdue.length})`}
-          icon={AlertTriangle}
-          iconClass="text-red-500"
-          headerClass="border-red-200 bg-red-50"
-          tasks={overdue}
-          currentUserId={currentUserId}
-          onComplete={(id) => completeMutation.mutate(id)}
-          onOpenLead={(leadId) => setSelectedLeadId(leadId)}
-          onUpdateOutcome={(task) => setOutcomeTask(task)}
-        />
-      )}
-
-      {/* Today */}
-      <AgendaSection
-        title={`Today's Schedule (${today.length})`}
-        icon={Clock}
-        iconClass="text-emerald-600"
-        headerClass="border-emerald-200 bg-emerald-50"
-        tasks={today}
-        currentUserId={currentUserId}
-        onComplete={(id) => completeMutation.mutate(id)}
-        onOpenLead={(leadId) => setSelectedLeadId(leadId)}
-        onUpdateOutcome={(task) => setOutcomeTask(task)}
-        emptyMessage="No tasks scheduled for today"
-      />
-
-      {/* Upcoming Demos */}
-      {upcoming.length > 0 && (
-        <AgendaSection
-          title={`Upcoming (${upcoming.length})`}
+          title={`Upcoming Demos & Follow-Ups (${upcoming.length})`}
           icon={Video}
           iconClass="text-purple-500"
           headerClass="border-purple-200 bg-purple-50"
@@ -192,18 +282,56 @@ export default function AgendaPage() {
           onComplete={(id) => completeMutation.mutate(id)}
           onOpenLead={(leadId) => setSelectedLeadId(leadId)}
           onUpdateOutcome={(task) => setOutcomeTask(task)}
+          emptyMessage="No upcoming tasks scheduled"
         />
+      </div>
+
+      {/* Secondary Row: Overdue + Pending Date Confirmation side-by-side */}
+      {(overdue.length > 0 || unconfirmed.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+          {overdue.length > 0 && (
+            <AgendaSection
+              title={`Overdue / Missed (${overdue.length})`}
+              icon={AlertTriangle}
+              iconClass="text-red-500"
+              headerClass="border-red-200 bg-red-50"
+              tasks={overdue}
+              currentUserId={currentUserId}
+              onComplete={(id) => completeMutation.mutate(id)}
+              onOpenLead={(leadId) => setSelectedLeadId(leadId)}
+              onUpdateOutcome={(task) => setOutcomeTask(task)}
+            />
+          )}
+
+          {unconfirmed.length > 0 && (
+            <AgendaSection
+              title={`Pending Date Confirmation (${unconfirmed.length})`}
+              icon={AlertTriangle}
+              iconClass="text-amber-600"
+              headerClass="border-amber-300 bg-amber-50"
+              tasks={unconfirmed}
+              currentUserId={currentUserId}
+              onComplete={(id) => completeMutation.mutate(id)}
+              onOpenLead={(leadId) => setSelectedLeadId(leadId)}
+              onUpdateOutcome={(task) => setOutcomeTask(task)}
+            />
+          )}
+        </div>
       )}
 
       {unconfirmed.length === 0 &&
         overdue.length === 0 &&
         today.length === 0 &&
         upcoming.length === 0 && (
-          <div className="text-center py-16 text-gray-400">
-            <CalendarClock className="w-12 h-12 mx-auto mb-3 opacity-30" />
-            <p className="font-medium">No pending tasks</p>
-            <p className="text-sm">
-              Schedule callbacks and demos from the Dialer or Leads Directory
+          <div className="text-center py-12 text-gray-400 bg-white rounded-2xl border border-dashed border-gray-200">
+            <CalendarClock className="w-10 h-10 mx-auto mb-2.5 opacity-30" />
+            <p className="font-medium text-gray-600">
+              {hasActiveFilter ? "No tasks match the selected filters" : "No pending tasks"}
+            </p>
+            <p className="text-sm mt-0.5">
+              {hasActiveFilter
+                ? "Try clearing the type or user filter above"
+                : "Schedule callbacks and demos from the Dialer or Leads Directory"}
             </p>
           </div>
         )}
@@ -261,16 +389,16 @@ function AgendaSection({
   emptyMessage?: string;
 }) {
   return (
-    <div className="mb-6">
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-2xs">
       <div
-        className={`flex items-center gap-2 px-4 py-2.5 rounded-t-xl border ${headerClass}`}
+        className={`flex items-center gap-2 px-4 py-2.5 border-b ${headerClass}`}
       >
         <Icon className={`w-4 h-4 ${iconClass}`} />
         <h2 className="font-semibold text-sm text-gray-700">{title}</h2>
       </div>
-      <div className="border border-t-0 border-gray-200 rounded-b-xl overflow-hidden bg-white">
+      <div className="max-h-[460px] overflow-y-auto">
         {tasks.length === 0 ? (
-          <p className="text-center text-gray-400 text-sm py-6">
+          <p className="text-center text-gray-400 text-sm py-8">
             {emptyMessage || "No tasks"}
           </p>
         ) : (
