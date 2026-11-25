@@ -1,5 +1,7 @@
 export const APP_VERSION = "1.3.4";
 export const APP_BUILD = 18;
+export const APK_VERSION = "1.3.4";
+export const APK_BUILD = 18;
 export const APP_RELEASE_DATE = "2026-11-25";
 export const APP_RELEASE_NOTES = [
   "Added Level 3 Super Admin permission to delete mistaken activity/call logs from Lead Dossier (automatically cleans up reports & pipeline)",

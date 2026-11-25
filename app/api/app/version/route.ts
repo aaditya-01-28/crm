@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { APP_VERSION, APP_BUILD, APP_RELEASE_DATE, APP_RELEASE_NOTES } from "@/lib/version";
+import { APK_VERSION, APK_BUILD, APP_RELEASE_DATE, APP_RELEASE_NOTES } from "@/lib/version";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   return NextResponse.json(
     {
-      version: APP_VERSION,
-      buildNumber: APP_BUILD,
+      version: APK_VERSION,
+      buildNumber: APK_BUILD,
       downloadUrl: "https://crm.textorasms.com/downloads/textora-dialer.apk",
       releaseNotes: APP_RELEASE_NOTES,
       isMandatory: false,
