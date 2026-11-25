@@ -29,9 +29,9 @@ function getPool(): Pool {
     global._pgPool = new Pool({
       connectionString: cleanConnectionString,
       ssl,
-      max: 10, // Safe limit for Supabase Session Pooler on Vercel serverless
-      idleTimeoutMillis: 30000, // Reclaim idle connection after 30s
-      connectionTimeoutMillis: 5000,
+      max: isLocal ? 20 : 3, // Keep per-lambda pool small so serverless concurrency never exhausts Supabase pool_size
+      idleTimeoutMillis: isLocal ? 30000 : 5000, // Release idle connections quickly in serverless
+      connectionTimeoutMillis: 8000,
     });
   }
   return global._pgPool;
