@@ -324,23 +324,25 @@ export function getISTDateRange(
     endOfPeriod = createISTDate(lmYear, lmMonth, daysInLastMonth, true);
   } else if (period === "custom") {
     if (dateFromParam) {
-      const match = dateFromParam.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+      const trimmedFrom = dateFromParam.trim();
+      const match = trimmedFrom.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
       if (match) {
         startOfPeriod = createISTDate(Number(match[1]), Number(match[2]), Number(match[3]), false);
       } else {
-        const d = new Date(dateFromParam);
-        if (!isNaN(d.getTime())) {
+        const d = parseScheduledDateTime(trimmedFrom);
+        if (d) {
           startOfPeriod = d;
         }
       }
     }
     if (dateToParam) {
-      const match = dateToParam.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+      const trimmedTo = dateToParam.trim();
+      const match = trimmedTo.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
       if (match) {
         endOfPeriod = createISTDate(Number(match[1]), Number(match[2]), Number(match[3]), true);
       } else {
-        const d = new Date(dateToParam);
-        if (!isNaN(d.getTime())) {
+        const d = parseScheduledDateTime(trimmedTo);
+        if (d) {
           endOfPeriod = d;
         }
       }
