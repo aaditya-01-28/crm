@@ -17,9 +17,11 @@ export async function GET(request: NextRequest) {
 
   try {
     return await withClient(async (client) => {
+      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_call_target INTEGER DEFAULT 60;`).catch(() => {});
       const res = await client.query(
         `SELECT u.id, u.full_name as "fullName", u.email, u.phone_number as "phoneNumber",
                 u.role, u.language, u.is_active as "isActive", u.created_at as "createdAt",
+                COALESCE(u.daily_call_target, 60)::int as "dailyCallTarget",
                 (SELECT COUNT(*)::int FROM leads WHERE assigned_rep_id = u.id) as "assignedLeadsCount",
                 (SELECT COUNT(*)::int FROM call_logs WHERE rep_id = u.id) as "callLogsCount",
                 (SELECT COUNT(*)::int FROM deals WHERE rep_id = u.id) as "dealsCount"
@@ -36,6 +38,7 @@ export async function GET(request: NextRequest) {
         phoneNumber: r.phoneNumber,
         role: r.role,
         language: r.language,
+        dailyCallTarget: r.dailyCallTarget ?? 60,
         isActive: r.isActive,
         createdAt: r.createdAt,
         _count: {

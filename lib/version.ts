@@ -1,7 +1,10 @@
-export const APP_VERSION = "1.3.1";
-export const APP_BUILD = 15;
+export const APP_VERSION = "1.3.2";
+export const APP_BUILD = 16;
 export const APP_RELEASE_DATE = "2026-11-25";
 export const APP_RELEASE_NOTES = [
+  "Fixed duplicate post-call disposition prompt & duplicate call log creation after Push-to-Dial calls",
+  "Dynamic Daily Calling Progress synced with live total calls & Level 2/3 Daily Calling Target assignment",
+  "Cleaned up Live SIM Telephony card and removed unused Telephony Status header dropdown",
   "Fixed Post-Call Save & Sync reliability, 20s request timeout, and visible inline error reporting",
   "Added explicit Interested disposition with 1-follow-up multi-select across Web CRM and Mobile Dialer",
   "Added Interested Leads filter tab in Leads Directory and Mobile Calling Queue",

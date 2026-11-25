@@ -14,12 +14,14 @@ interface SalesScriptAssistantProps {
   };
   onOpenWhatsAppModal: () => void;
   sessionCallCount?: number;
+  dailyCallTarget?: number;
 }
 
 export function SalesScriptAssistant({
   lead,
   onOpenWhatsAppModal,
   sessionCallCount = 0,
+  dailyCallTarget = 60,
 }: SalesScriptAssistantProps) {
   const [activeTab, setActiveTab] = useState<"pitch" | "qualify" | "objections">("pitch");
   const [copiedPitch, setCopiedPitch] = useState(false);
@@ -36,7 +38,7 @@ export function SalesScriptAssistant({
     setTimeout(() => setCopiedPitch(false), 2000);
   }
 
-  const targetCalls = 60;
+  const targetCalls = dailyCallTarget > 0 ? dailyCallTarget : 60;
   const progressPercent = Math.min(100, Math.round((sessionCallCount / targetCalls) * 100));
 
   return (

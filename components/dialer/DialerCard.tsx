@@ -538,48 +538,6 @@ export function DialerCard({ lead: initialLead, onDisposed, onCallLogged }: Dial
                 </span>
               </div>
             </div>
-
-            {/* In-Call Telephony Controls */}
-            <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsMuted(!isMuted)}
-                  className={cn(
-                    "px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer",
-                    isMuted
-                      ? "bg-rose-500 text-white"
-                      : "bg-slate-800 hover:bg-slate-700 text-slate-200"
-                  )}
-                >
-                  {isMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
-                  <span>{isMuted ? "Muted" : "Mute"}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setIsOnHold(!isOnHold)}
-                  className={cn(
-                    "px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer",
-                    isOnHold
-                      ? "bg-amber-500 text-white"
-                      : "bg-slate-800 hover:bg-slate-700 text-slate-200"
-                  )}
-                >
-                  {isOnHold ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
-                  <span>{isOnHold ? "Unhold" : "Hold"}</span>
-                </button>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleEndActiveCall}
-                className="px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition cursor-pointer"
-              >
-                <PhoneOff className="w-3.5 h-3.5" />
-                <span>End Call & Log Outcome</span>
-              </button>
-            </div>
           </div>
         )}
 

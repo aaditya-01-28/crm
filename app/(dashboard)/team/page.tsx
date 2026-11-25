@@ -36,6 +36,7 @@ interface TeamUser {
   phoneNumber: string | null;
   role: string;
   language?: string | null;
+  dailyCallTarget?: number;
   isActive: boolean;
   createdAt: string;
   _count: {
@@ -91,8 +92,11 @@ async function fetchTeam(): Promise<{ users: TeamUser[] }> {
 
 export default function TeamPage() {
   const queryClient = useQueryClient();
-  const { userId: currentUserId } = useSession();
+  const { userId: currentUserId, role: currentUserRole } = useSession();
   const isAdmin = useIsAdmin();
+  const canManageTargets = isAdmin || currentUserRole === "sales_manager";
+  const [editingTargetUserId, setEditingTargetUserId] = useState<string | null>(null);
+  const [targetInputValue, setTargetInputValue] = useState<string>("60");
 
   // Add Member Modal State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -242,6 +246,28 @@ export default function TeamPage() {
   });
 
   // Update team member details mutation (Level 3 Super Admin)
+  const updateTargetMutation = useMutation({
+    mutationFn: async ({ userId, dailyCallTarget }: { userId: string; dailyCallTarget: number }) => {
+      const res = await fetch(`/api/team/${userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dailyCallTarget }),
+      });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error || "Failed to update daily calling target");
+      return resData;
+    },
+    onSuccess: (_, vars) => {
+      toast.success(`Daily calling target updated to ${vars.dailyCallTarget} calls/day ✅`);
+      setEditingTargetUserId(null);
+      queryClient.invalidateQueries({ queryKey: ["team"] });
+      queryClient.invalidateQueries({ queryKey: ["dialer-daily-progress"] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Failed to update target");
+    },
+  });
+
   const updateMemberDetailsMutation = useMutation({
     mutationFn: async ({
       userId,
@@ -511,7 +537,7 @@ export default function TeamPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2 border-t border-gray-100 pt-3 text-center text-xs">
+                <div className="grid grid-cols-4 gap-2 border-t border-gray-100 pt-3 text-center text-xs">
                   <div className="bg-gray-50 rounded-lg p-2">
                     <p className="text-gray-400 font-medium">Assigned Leads</p>
                     <p className="text-sm font-bold text-gray-700">
@@ -529,6 +555,64 @@ export default function TeamPage() {
                     <p className="text-sm font-bold text-gray-700">
                       {u._count.deals}
                     </p>
+                  </div>
+                  <div className="bg-emerald-50/70 border border-emerald-100 rounded-lg p-2">
+                    <p className="text-emerald-700 font-medium">Daily Target</p>
+                    {editingTargetUserId === u.id ? (
+                      <div className="flex items-center justify-center gap-1 mt-1">
+                        <input
+                          type="number"
+                          min={1}
+                          max={1000}
+                          value={targetInputValue}
+                          onChange={(e) => setTargetInputValue(e.target.value)}
+                          className="w-14 px-1.5 py-0.5 text-xs font-bold text-center border border-emerald-300 rounded bg-white outline-none"
+                        />
+                        <button
+                          type="button"
+                          disabled={updateTargetMutation.isPending}
+                          onClick={() => {
+                            const val = parseInt(targetInputValue, 10);
+                            if (!val || val < 1 || val > 1000) {
+                              toast.error("Enter a target between 1 and 1000");
+                              return;
+                            }
+                            updateTargetMutation.mutate({ userId: u.id, dailyCallTarget: val });
+                          }}
+                          className="p-1 bg-emerald-600 text-white rounded hover:bg-emerald-700 cursor-pointer"
+                          title="Save target"
+                        >
+                          <Check className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingTargetUserId(null)}
+                          className="p-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 cursor-pointer"
+                          title="Cancel"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center gap-1 mt-0.5">
+                        <p className="text-sm font-bold text-emerald-800">
+                          {u.dailyCallTarget ?? 60}/day
+                        </p>
+                        {canManageTargets && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingTargetUserId(u.id);
+                              setTargetInputValue(String(u.dailyCallTarget ?? 60));
+                            }}
+                            className="p-0.5 text-emerald-600 hover:text-emerald-900 rounded hover:bg-emerald-100 cursor-pointer"
+                            title="Assign Daily Calling Target (Level 2 & Level 3)"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 

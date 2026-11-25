@@ -31,10 +31,9 @@ async function fetchNextLead(): Promise<{ lead: Lead | null }> {
 
 export default function DialerPage() {
   const queryClient = useQueryClient();
-  const { role } = useSession();
+  const { role, userId } = useSession();
   const [showImporter, setShowImporter] = useState(false);
   const [showWAModal, setShowWAModal] = useState(false);
-  const [sessionCalls, setSessionCalls] = useState(0);
   const canImport = useCanImportLeads();
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -43,10 +42,39 @@ export default function DialerPage() {
     refetchOnWindowFocus: false,
   });
 
+  // Fetch today's actual call stats + assigned daily calling target
+  const { data: todayProgressData, refetch: refetchProgress } = useQuery({
+    queryKey: ["dialer-daily-progress", userId],
+    queryFn: async () => {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const callsParams = new URLSearchParams({
+        dateFrom: todayStart.toISOString(),
+        limit: "1",
+      });
+      if (userId) callsParams.set("repId", userId);
+
+      const [callsRes, profileRes] = await Promise.all([
+        fetch(`/api/calls?${callsParams.toString()}`),
+        fetch("/api/profile"),
+      ]);
+      const callsJson = callsRes.ok ? await callsRes.json() : null;
+      const profileJson = profileRes.ok ? await profileRes.json() : null;
+      return {
+        todayCalls: callsJson?.summary?.totalCalls ?? 0,
+        dailyCallTarget: profileJson?.user?.dailyCallTarget ?? 60,
+      };
+    },
+    refetchInterval: 20000,
+  });
+
+  const todayCallsCount = todayProgressData?.todayCalls ?? 0;
+  const dailyCallTarget = todayProgressData?.dailyCallTarget ?? 60;
+
   const lead = data?.lead;
 
   function onDisposed(nextLead: Lead | null) {
-    setSessionCalls((prev) => prev + 1);
+    refetchProgress();
     if (nextLead) {
       queryClient.setQueryData(["dialer-queue"], { lead: nextLead });
     } else {
@@ -165,7 +193,8 @@ export default function DialerPage() {
             <SalesScriptAssistant
               lead={lead}
               onOpenWhatsAppModal={() => setShowWAModal(true)}
-              sessionCallCount={sessionCalls}
+              sessionCallCount={todayCallsCount}
+              dailyCallTarget={dailyCallTarget}
             />
           </div>
         </div>

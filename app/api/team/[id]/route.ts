@@ -18,17 +18,33 @@ export async function PATCH(
   const role = session.role;
   const currentUserId = session.sub;
 
-  // Only Level 3 Super Admin can manage user access control and reset team passwords
-  if (role !== "super_admin") {
+  // Level 3 Super Admin can manage all user fields; Level 2 Sales Manager can update dailyCallTarget
+  if (!["super_admin", "sales_manager"].includes(role)) {
     return NextResponse.json(
-      { error: "Forbidden: Only Level 3 Super Admin can manage user access and passwords." },
+      { error: "Forbidden: Only Level 2 Sales Managers and Level 3 Super Admins can manage team targets." },
       { status: 403 }
     );
   }
 
   try {
     const body = await request.json();
-    const { fullName, email, phoneNumber, isActive, role: newRole, newPassword } = body;
+    const { fullName, email, phoneNumber, isActive, role: newRole, newPassword, dailyCallTarget } = body;
+
+    if (role === "sales_manager") {
+      const hasRestrictedFields =
+        fullName !== undefined ||
+        email !== undefined ||
+        phoneNumber !== undefined ||
+        isActive !== undefined ||
+        newRole !== undefined ||
+        newPassword !== undefined;
+      if (hasRestrictedFields) {
+        return NextResponse.json(
+          { error: "Forbidden: Level 2 Sales Managers can only update daily calling targets." },
+          { status: 403 }
+        );
+      }
+    }
 
     // Guard: Prevent Super Admin from blocking or demoting their own active account
     if (id === currentUserId) {
@@ -57,7 +73,7 @@ export async function PATCH(
 
     return await withClient(async (client) => {
       const targetRes = await client.query(
-        "SELECT id, full_name, email, phone_number, role, is_active FROM users WHERE id = $1 AND tenant_id = $2",
+        "SELECT id, full_name, email, phone_number, role, is_active, COALESCE(daily_call_target, 60) as daily_call_target FROM users WHERE id = $1 AND tenant_id = $2",
         [id, tenantId]
       );
 
@@ -122,12 +138,25 @@ export async function PATCH(
         targetPhone = phoneNumber ? String(phoneNumber).trim() : null;
       }
 
+      let targetDailyCallTarget = existing.daily_call_target ?? 60;
+      if (dailyCallTarget !== undefined) {
+        const parsedTarget = Number(dailyCallTarget);
+        if (!Number.isFinite(parsedTarget) || parsedTarget < 1 || parsedTarget > 1000) {
+          return NextResponse.json(
+            { error: "Daily calling target must be between 1 and 1000 calls/day." },
+            { status: 400 }
+          );
+        }
+        targetDailyCallTarget = Math.round(parsedTarget);
+      }
+
       let passwordHash: string | null = null;
       if (newPassword) {
         passwordHash = await bcrypt.hash(newPassword, 12);
       }
 
       await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false;").catch(() => {});
+      await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_call_target INTEGER DEFAULT 60;").catch(() => {});
 
       const updateRes = await client.query(
         `UPDATE users
@@ -136,14 +165,16 @@ export async function PATCH(
              full_name = $3,
              email = $4,
              phone_number = $5,
-             password_hash = COALESCE($6, password_hash),
-             must_change_password = CASE WHEN $6 IS NOT NULL THEN true ELSE must_change_password END,
+             daily_call_target = $6,
+             password_hash = COALESCE($7, password_hash),
+             must_change_password = CASE WHEN $7 IS NOT NULL THEN true ELSE must_change_password END,
              reset_token = NULL,
              reset_token_expiry = NULL
-         WHERE id = $7 AND tenant_id = $8
+         WHERE id = $8 AND tenant_id = $9
          RETURNING id, full_name as "fullName", email, phone_number as "phoneNumber",
-                   role, language, is_active as "isActive", created_at as "createdAt"`,
-        [targetIsActive, targetRole, targetFullName, targetEmail, targetPhone, passwordHash, id, tenantId]
+                   role, language, COALESCE(daily_call_target, 60)::int as "dailyCallTarget",
+                   is_active as "isActive", created_at as "createdAt"`,
+        [targetIsActive, targetRole, targetFullName, targetEmail, targetPhone, targetDailyCallTarget, passwordHash, id, tenantId]
       );
 
       const updatedUser = updateRes.rows[0];

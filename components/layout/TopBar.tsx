@@ -145,41 +145,8 @@ export default function TopBar({ user }: { user: JWTPayload }) {
         </div>
       </div>
 
-      {/* Right: rep status + last login + user info + profile + logout */}
+      {/* Right: last login + user info + profile + logout */}
       <div className="flex items-center gap-2 sm:gap-3">
-        {/* Representative Calling Availability Dropdown (Stacked 2-line layout) */}
-        <div className="hidden lg:flex items-center gap-2 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 shadow-2xs">
-          <span
-            className={cn(
-              "w-2 h-2 rounded-full shrink-0",
-              repStatus === "available"
-                ? "bg-emerald-500 animate-pulse"
-                : repStatus === "in_call"
-                ? "bg-blue-500 animate-pulse"
-                : repStatus === "break"
-                ? "bg-amber-500"
-                : "bg-purple-500"
-            )}
-          />
-          <div className="flex flex-col text-left leading-tight">
-            <span className="text-[9px] uppercase font-bold tracking-wider text-slate-400">Telephony Status</span>
-            <select
-              value={repStatus}
-              onChange={(e) => {
-                const newStatus = e.target.value as any;
-                setRepStatus(newStatus);
-                toast.info(`Status updated to: ${newStatus.toUpperCase()}`);
-              }}
-              className="bg-transparent outline-none cursor-pointer text-xs font-semibold text-slate-800 -ml-0.5"
-            >
-              <option value="available">Ready to Call</option>
-              <option value="in_call">In Live Call</option>
-              <option value="wrapup">Call Wrap-up</option>
-              <option value="break">Short Break</option>
-            </select>
-          </div>
-        </div>
-
         {/* Last Login Timestamp Badge (Stacked 2-line layout) */}
         <div
           className="hidden md:flex items-center gap-2 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg shadow-2xs hover:bg-slate-100/70 transition-colors"
