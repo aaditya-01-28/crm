@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LogOut, Menu, Smartphone, Clock } from "lucide-react";
@@ -69,6 +69,32 @@ export default function TopBar({ user }: { user: JWTPayload }) {
   const [repStatus, setRepStatus] = useState<"available" | "in_call" | "break" | "wrapup">("available");
   const lastLoginTimestamp = user.lastLoginAt;
   const lastLoginInfo = formatLastLogin(lastLoginTimestamp);
+
+  // Enforce strict 6-hour automatic webapp logout from loginAt
+  useEffect(() => {
+    if (!user.loginAt) return;
+    const loginMs = new Date(user.loginAt).getTime();
+    if (isNaN(loginMs)) return;
+
+    const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+    const expireAt = loginMs + SIX_HOURS_MS;
+
+    const forceLogout = async () => {
+      try {
+        await fetch("/api/auth/logout", { method: "POST" });
+      } catch {}
+      window.location.href = "/login?expired=1";
+    };
+
+    const remaining = expireAt - Date.now();
+    if (remaining <= 0) {
+      forceLogout();
+      return;
+    }
+
+    const timer = setTimeout(forceLogout, remaining);
+    return () => clearTimeout(timer);
+  }, [user.loginAt]);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -157,7 +183,7 @@ export default function TopBar({ user }: { user: JWTPayload }) {
         {/* Last Login Timestamp Badge (Stacked 2-line layout) */}
         <div
           className="hidden md:flex items-center gap-2 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg shadow-2xs hover:bg-slate-100/70 transition-colors"
-          title={`Last login recorded: ${lastLoginInfo.full} • Session token valid for 9 hours`}
+          title={`Last login recorded: ${lastLoginInfo.full} • Session token valid for 6 hours`}
         >
           <Clock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
           <div className="flex flex-col text-left leading-tight">

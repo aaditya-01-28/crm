@@ -3,6 +3,8 @@
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { formatDateTime } from "@/lib/utils";
+import { useSession } from "@/components/layout/SessionProvider";
+import { isManagerOrAdmin } from "@/lib/rbac";
 
 // Web Audio API Polyphonic Chime Synthesizer
 function playChime(type: "reminder" | "now") {
@@ -98,6 +100,8 @@ async function triggerPushToDial(phoneNumber: string, leadId?: string, contactNa
 }
 
 export function AgendaNotificationListener() {
+  const { role } = useSession();
+  const canCallFromNotification = !isManagerOrAdmin(role);
   const notified5MinRef = useRef<Set<string>>(new Set());
   const notifiedNowRef = useRef<Set<string>>(new Set());
 
@@ -164,7 +168,7 @@ export function AgendaNotificationListener() {
               toast.warning(`⏰ Reminder (in 5 min): ${taskLabel}`, {
                 description: `${targetName} scheduled for ${formatDateTime(task.scheduledTime)}`,
                 duration: 12000,
-                action: phone
+                action: canCallFromNotification && phone
                   ? {
                       label: "📞 Push to Dial",
                       onClick: () =>
@@ -219,7 +223,7 @@ export function AgendaNotificationListener() {
                         window.open(task.meetingLink!, "_blank", "noopener,noreferrer");
                       },
                     }
-                  : phone
+                  : canCallFromNotification && phone
                   ? {
                       label: "📞 Call Now",
                       onClick: () =>

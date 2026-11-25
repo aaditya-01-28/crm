@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Bell, Calendar, Phone, Video, CheckCircle2, Clock, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { formatDateTime } from "@/lib/utils";
+import { useSession } from "@/components/layout/SessionProvider";
+import { isManagerOrAdmin } from "@/lib/rbac";
 
 interface TaskItem {
   id: string;
@@ -24,6 +26,8 @@ interface TaskItem {
 }
 
 export function NotificationBell() {
+  const { role } = useSession();
+  const canCallFromNotification = !isManagerOrAdmin(role);
   const [isOpen, setIsOpen] = useState(false);
   const [tasks, setTasks] = useState<{ overdue: TaskItem[]; today: TaskItem[] }>({ overdue: [], today: [] });
   const [readTaskIds, setReadTaskIds] = useState<Set<string>>(new Set());
@@ -227,35 +231,37 @@ export function NotificationBell() {
                     </div>
 
                     {/* Action buttons */}
-                    <div className="flex items-center gap-2 mt-1">
-                      {task.lead?.phoneNumber && (
-                        <button
-                          onClick={() =>
-                            triggerPushToDial(
-                              task.lead?.phoneNumber,
-                              task.leadId,
-                              task.lead?.contactName || undefined,
-                              task.lead?.companyName || undefined
-                            )
-                          }
-                          className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md transition shadow-2xs"
-                        >
-                          <Phone className="w-3 h-3" />
-                          Call Now
-                        </button>
-                      )}
-                      {task.meetingLink && (
-                        <a
-                          href={task.meetingLink}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md transition"
-                        >
-                          <Video className="w-3 h-3" />
-                          Join Meeting
-                        </a>
-                      )}
-                    </div>
+                    {(canCallFromNotification && task.lead?.phoneNumber) || task.meetingLink ? (
+                      <div className="flex items-center gap-2 mt-1">
+                        {canCallFromNotification && task.lead?.phoneNumber && (
+                          <button
+                            onClick={() =>
+                              triggerPushToDial(
+                                task.lead?.phoneNumber,
+                                task.leadId,
+                                task.lead?.contactName || undefined,
+                                task.lead?.companyName || undefined
+                              )
+                            }
+                            className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md transition shadow-2xs"
+                          >
+                            <Phone className="w-3 h-3" />
+                            Call Now
+                          </button>
+                        )}
+                        {task.meetingLink && (
+                          <a
+                            href={task.meetingLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md transition"
+                          >
+                            <Video className="w-3 h-3" />
+                            Join Meeting
+                          </a>
+                        )}
+                      </div>
+                    ) : null}
                   </div>
                 );
               })

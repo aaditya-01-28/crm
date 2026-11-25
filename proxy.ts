@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken, signAccessToken, ACCESS_TOKEN_DURATION_SECONDS } from "@/lib/auth";
+import { verifyToken, signAccessToken, WEB_SESSION_DURATION_SECONDS } from "@/lib/auth";
 
 const PUBLIC_PATHS = [
   "/login",
@@ -39,13 +39,24 @@ export async function proxy(request: NextRequest) {
   const cookieRefreshToken = request.cookies.get("refresh_token")?.value;
   const token = cookieAccessToken || bearerToken;
 
+  const isWebCookieSession = Boolean(cookieAccessToken || (!bearerToken && cookieRefreshToken));
+  const isWebSessionExpired = (p: { loginAt?: string | null } | null) => {
+    if (!p?.loginAt) return false;
+    const loginMs = new Date(p.loginAt).getTime();
+    if (isNaN(loginMs)) return false;
+    return Date.now() - loginMs >= WEB_SESSION_DURATION_SECONDS * 1000;
+  };
+
   let payload = token ? await verifyToken(token, "access") : null;
+  if (payload && isWebCookieSession && isWebSessionExpired(payload)) {
+    payload = null;
+  }
   let renewedAccessToken: string | null = null;
 
-  // Seamless auto-refresh: if access token is expired or invalid, check refresh token
-  if (!payload && cookieRefreshToken) {
+  // Seamless auto-refresh only within the 6-hour webapp login window
+  if (!payload && !bearerToken && cookieRefreshToken) {
     const refreshPayload = await verifyToken(cookieRefreshToken, "refresh");
-    if (refreshPayload) {
+    if (refreshPayload && !isWebSessionExpired(refreshPayload)) {
       payload = refreshPayload;
       try {
         renewedAccessToken = await signAccessToken({
@@ -89,13 +100,16 @@ export async function proxy(request: NextRequest) {
 
   const response = NextResponse.next({ request: { headers: requestHeaders } });
 
-  // If a renewed access token was generated, update the browser's cookie
+  // If a renewed access token was generated, update the browser's cookie with remaining 6-hr window
   if (renewedAccessToken) {
     const isProd = process.env.NODE_ENV === "production" && process.env.COOKIE_SECURE !== "false";
+    const remainingSeconds = payload.loginAt
+      ? Math.max(1, Math.floor((new Date(payload.loginAt).getTime() + WEB_SESSION_DURATION_SECONDS * 1000 - Date.now()) / 1000))
+      : WEB_SESSION_DURATION_SECONDS;
     response.cookies.set("access_token", renewedAccessToken, {
       httpOnly: true,
       path: "/",
-      maxAge: ACCESS_TOKEN_DURATION_SECONDS,
+      maxAge: remainingSeconds,
       sameSite: "lax",
       secure: isProd,
     });
