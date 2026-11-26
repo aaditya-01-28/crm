@@ -118,6 +118,35 @@ export async function PATCH(
            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
           [tenantId, task.lead_id, task.rep_id, stageName, stageType, logRemark, JSON.stringify({ taskId: id, scheduledTime: finalScheduledTime })]
         ).catch(() => {});
+
+        if (task.task_type === "product_demo") {
+          const closingNotesJson = JSON.stringify({
+            demoDate: finalScheduledTime ? new Date(finalScheduledTime).toISOString() : null,
+            meetingLink: task.meeting_link || null,
+            notes: finalNotes || logRemark,
+          });
+          const dealCheck = await client.query(
+            "SELECT id FROM deals WHERE lead_id = $1 AND tenant_id = $2 LIMIT 1",
+            [task.lead_id, tenantId]
+          );
+          if (dealCheck.rows.length > 0) {
+            await client.query(
+              `UPDATE deals
+               SET stage = 'demo_scheduled',
+                   closing_notes = $1,
+                   updated_at = NOW()
+               WHERE id = $2`,
+              [closingNotesJson, dealCheck.rows[0].id]
+            ).catch(() => {});
+          } else {
+            await client.query(
+              `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes, created_at, updated_at)
+               SELECT tenant_id, id, COALESCE(assigned_rep_id, $2), COALESCE(service_type, 'WhatsApp API'), 0, 0, 'demo_scheduled', $3, NOW(), NOW()
+               FROM leads WHERE id = $1`,
+              [task.lead_id, task.rep_id, closingNotesJson]
+            ).catch(() => {});
+          }
+        }
       }
 
       // 2. Action: Customer Not Picking / RNR

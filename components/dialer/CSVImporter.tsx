@@ -31,10 +31,31 @@ import { useSession } from "@/components/layout/SessionProvider";
 
 interface ExtractedLead {
   phone: string;
+  secondaryPhone?: string;
   name: string;
   company: string;
+  email?: string;
   vertical: string;
   service: string;
+  website?: string;
+  remark?: string;
+  leadDate?: string;
+  closeDate?: string;
+  userId?: string;
+  password?: string;
+  credits?: number;
+  amount?: number;
+  stage?: string;
+}
+
+type SheetType = "auto" | "cold" | "followup" | "interested" | "closed_deal";
+
+interface ExistingLeadMatch {
+  id: string;
+  phone: string;
+  contactName: string | null;
+  companyName: string | null;
+  status: string;
 }
 
 interface CSVImporterProps {
@@ -44,7 +65,9 @@ interface CSVImporterProps {
 
 interface ImportResult {
   imported: number;
+  updated?: number;
   duplicates: number;
+  pendingApprovals?: number;
   invalid: number;
   total: number;
   durationMs?: number;
@@ -54,66 +77,90 @@ interface ImportResult {
 function cleanCell(val: unknown): string {
   if (val === null || val === undefined) return "";
   let str = String(val).trim();
-  // Strip Excel floating numbers like 9876543210.0
-  if (str.includes(".") && !str.toLowerCase().includes("e")) {
+  // Strip Excel trailing .0 on numeric IDs/phones
+  if (/^\d+\.0+$/.test(str)) {
     str = str.split(".")[0];
   }
   return str;
 }
 
-/**
- * Universal matrix parser that handles:
- * 1. CSV/Excel with standard headers (Phone, Name, Company, Vertical, Service)
- * 2. Raw phone numbers in 1st column without any headers
- * 3. Raw phone numbers in 1st column with random headers
- * 4. Partially filled sheets where name and company are empty
- */
-function parseRawMatrix(matrix: (string | number)[][]): ExtractedLead[] {
-  if (!matrix || matrix.length === 0) return [];
+function parseNumericCell(val: unknown): number {
+  const s = cleanCell(val).replace(/,/g, "").replace(/[^\d.]/g, "");
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
 
-  // Filter out completely empty rows
-  const cleanRows = matrix.filter((row) =>
-    row && row.some((cell) => cell !== null && cell !== undefined && String(cell).trim() !== "")
+/**
+ * Universal matrix parser supporting:
+ * - Simple cold calling lists (Phone only or Phone/Name/Company/Vertical/Service)
+ * - Google Sheet ClosedDeal export (CUSTOMER NAME, CONTACT NUMBER, COMPANY NAME, MAIL ID, USER ID, PASSWORD, PRODUCT, CREDITS, AMOUNT(inc GST), CLOSE DATE, LEAD DATE, REMARK)
+ * - Google Sheet Interested export (Phone, Remark, Other details, Bussiness type, Service + date divider rows)
+ * - Google Sheet followup export (DATE, Number, Remark, Name)
+ */
+function parseRawMatrix(
+  matrix: (string | number)[][],
+  fileNameHint = ""
+): { leads: ExtractedLead[]; detectedSheetType: SheetType } {
+  if (!matrix || matrix.length === 0) {
+    return { leads: [], detectedSheetType: "cold" };
+  }
+
+  const cleanRows = matrix.filter(
+    (row) =>
+      row &&
+      row.some(
+        (cell) => cell !== null && cell !== undefined && String(cell).trim() !== ""
+      )
   );
 
-  if (cleanRows.length === 0) return [];
+  if (cleanRows.length === 0) {
+    return { leads: [], detectedSheetType: "cold" };
+  }
 
   const firstRow = cleanRows[0].map(cleanCell);
-
-  // Check if first row is a header or if it's already a phone number
   const firstCellDigits = cleanCell(firstRow[0]).replace(/\D/g, "");
   const isFirstRowPhone = firstCellDigits.length >= 10;
 
   let phoneColIdx = -1;
   let nameColIdx = -1;
   let companyColIdx = -1;
+  let emailColIdx = -1;
+  let userIdColIdx = -1;
+  let passwordColIdx = -1;
   let verticalColIdx = -1;
   let serviceColIdx = -1;
+  let creditsColIdx = -1;
+  let amountColIdx = -1;
+  let closeDateColIdx = -1;
+  let leadDateColIdx = -1;
+  let remarkColIdx = -1;
+  let otherDetailsColIdx = -1;
+  let stageColIdx = -1;
 
   let hasHeaders = false;
 
   if (!isFirstRowPhone) {
-    // Attempt to match header keywords
     firstRow.forEach((colName, idx) => {
       const lower = colName.toLowerCase().replace(/[\s_-]/g, "");
+      if (!lower) return;
       if (
         phoneColIdx === -1 &&
         (lower.includes("phone") ||
           lower.includes("mobile") ||
           lower.includes("contactnumber") ||
+          lower === "number" ||
           lower.includes("cell") ||
-          lower.includes("number") ||
           lower.includes("tel") ||
-          lower.includes("msisdn") ||
-          lower.includes("calling"))
+          lower.includes("msisdn"))
       ) {
         phoneColIdx = idx;
         hasHeaders = true;
       } else if (
         nameColIdx === -1 &&
-        (lower.includes("name") ||
-          lower.includes("person") ||
+        (lower.includes("customername") ||
           lower.includes("contactname") ||
+          lower === "name" ||
+          lower.includes("person") ||
           lower.includes("client"))
       ) {
         nameColIdx = idx;
@@ -122,18 +169,34 @@ function parseRawMatrix(matrix: (string | number)[][]): ExtractedLead[] {
         companyColIdx === -1 &&
         (lower.includes("company") ||
           lower.includes("org") ||
-          lower.includes("business") ||
           lower.includes("firm") ||
           lower.includes("enterprise"))
       ) {
         companyColIdx = idx;
         hasHeaders = true;
       } else if (
+        emailColIdx === -1 &&
+        (lower.includes("mail") || lower.includes("email"))
+      ) {
+        emailColIdx = idx;
+        hasHeaders = true;
+      } else if (
+        userIdColIdx === -1 &&
+        (lower === "userid" || lower.includes("paneluser"))
+      ) {
+        userIdColIdx = idx;
+        hasHeaders = true;
+      } else if (passwordColIdx === -1 && lower.includes("password")) {
+        passwordColIdx = idx;
+        hasHeaders = true;
+      } else if (
         verticalColIdx === -1 &&
         (lower.includes("vertical") ||
           lower.includes("industry") ||
           lower.includes("category") ||
-          lower.includes("sector"))
+          lower.includes("sector") ||
+          lower.includes("businesstype") ||
+          lower.includes("bussinesstype"))
       ) {
         verticalColIdx = idx;
         hasHeaders = true;
@@ -145,24 +208,77 @@ function parseRawMatrix(matrix: (string | number)[][]): ExtractedLead[] {
       ) {
         serviceColIdx = idx;
         hasHeaders = true;
+      } else if (
+        creditsColIdx === -1 &&
+        (lower.includes("credit") || lower.includes("quantity") || lower.includes("qty"))
+      ) {
+        creditsColIdx = idx;
+        hasHeaders = true;
+      } else if (
+        amountColIdx === -1 &&
+        (lower.includes("amount") || lower.includes("price") || lower.includes("value"))
+      ) {
+        amountColIdx = idx;
+        hasHeaders = true;
+      } else if (closeDateColIdx === -1 && lower.includes("closedate")) {
+        closeDateColIdx = idx;
+        hasHeaders = true;
+      } else if (
+        leadDateColIdx === -1 &&
+        (lower.includes("leaddate") || lower === "date")
+      ) {
+        leadDateColIdx = idx;
+        hasHeaders = true;
+      } else if (
+        remarkColIdx === -1 &&
+        (lower.includes("remark") ||
+          lower.includes("comment") ||
+          lower.includes("note") ||
+          lower.includes("feedback"))
+      ) {
+        remarkColIdx = idx;
+        hasHeaders = true;
+      } else if (otherDetailsColIdx === -1 && lower.includes("otherdetail")) {
+        otherDetailsColIdx = idx;
+        hasHeaders = true;
+      } else if (
+        stageColIdx === -1 &&
+        (lower.includes("stage") || lower.includes("status"))
+      ) {
+        stageColIdx = idx;
+        hasHeaders = true;
       }
     });
   }
 
-  // If no phone column header detected, default phone to column 0 (1st column)
   if (phoneColIdx === -1) {
     phoneColIdx = 0;
   }
 
-  // If the first row was a valid header, start reading data from row 1, else row 0
   const dataRows = hasHeaders ? cleanRows.slice(1) : cleanRows;
-
   const leads: ExtractedLead[] = [];
+  let currentSectionDate = "";
 
   for (const row of dataRows) {
-    let rawPhone = cleanCell(row[phoneColIdx]);
+    const firstCell = cleanCell(row[0]);
+    // Detect date-divider rows like "18-08-26" in the Interested sheet
+    if (/^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/.test(firstCell) && !cleanCell(row[1])) {
+      currentSectionDate = firstCell;
+      continue;
+    }
 
-    // If designated phone column is empty in this row, scan other columns for a 10-digit number
+    let rawPhone = cleanCell(row[phoneColIdx]);
+    let secondaryPhone = "";
+
+    if (rawPhone.includes("/") || rawPhone.includes(",")) {
+      const parts = rawPhone.split(/[\/,]/).map((p) => p.trim());
+      rawPhone = parts[0] || "";
+      if (parts[1]) {
+        const secNorm = normalizePhone(parts[1]);
+        if (secNorm && secNorm.length === 10) secondaryPhone = secNorm;
+      }
+    }
+
     if (!rawPhone || rawPhone.replace(/\D/g, "").length < 10) {
       for (let c = 0; c < row.length; c++) {
         const candidate = cleanCell(row[c]);
@@ -175,17 +291,50 @@ function parseRawMatrix(matrix: (string | number)[][]): ExtractedLead[] {
 
     const normPhone = normalizePhone(rawPhone);
     if (normPhone && normPhone.length === 10) {
+      const rawVertical = verticalColIdx >= 0 ? cleanCell(row[verticalColIdx]) : "";
+      const isUrl = /^https?:\/\//i.test(rawVertical) || /^www\./i.test(rawVertical);
+      const remarkParts = [
+        remarkColIdx >= 0 ? cleanCell(row[remarkColIdx]) : "",
+        otherDetailsColIdx >= 0 ? cleanCell(row[otherDetailsColIdx]) : "",
+      ].filter(Boolean);
+
       leads.push({
         phone: normPhone,
+        secondaryPhone: secondaryPhone || undefined,
         name: nameColIdx >= 0 ? cleanCell(row[nameColIdx]) : "",
         company: companyColIdx >= 0 ? cleanCell(row[companyColIdx]) : "",
-        vertical: verticalColIdx >= 0 ? cleanCell(row[verticalColIdx]) : "",
+        email: emailColIdx >= 0 ? cleanCell(row[emailColIdx]) : undefined,
+        vertical: isUrl ? "" : rawVertical,
+        website: isUrl ? rawVertical : undefined,
         service: serviceColIdx >= 0 ? cleanCell(row[serviceColIdx]) : "",
+        remark: remarkParts.join(" | ") || undefined,
+        leadDate:
+          (leadDateColIdx >= 0 ? cleanCell(row[leadDateColIdx]) : "") ||
+          currentSectionDate ||
+          undefined,
+        closeDate: closeDateColIdx >= 0 ? cleanCell(row[closeDateColIdx]) : undefined,
+        userId: userIdColIdx >= 0 ? cleanCell(row[userIdColIdx]) : undefined,
+        password: passwordColIdx >= 0 ? cleanCell(row[passwordColIdx]) : undefined,
+        credits: creditsColIdx >= 0 ? parseNumericCell(row[creditsColIdx]) : undefined,
+        amount: amountColIdx >= 0 ? parseNumericCell(row[amountColIdx]) : undefined,
+        stage: stageColIdx >= 0 ? cleanCell(row[stageColIdx]) : undefined,
       });
     }
   }
 
-  return leads;
+  const lowerName = fileNameHint.toLowerCase();
+  let detectedSheetType: SheetType = "cold";
+  if (amountColIdx >= 0 || creditsColIdx >= 0 || closeDateColIdx >= 0 || userIdColIdx >= 0 || lowerName.includes("closed")) {
+    detectedSheetType = "closed_deal";
+  } else if (lowerName.includes("interest")) {
+    detectedSheetType = "interested";
+  } else if (lowerName.includes("follow")) {
+    detectedSheetType = "followup";
+  } else if (remarkColIdx >= 0 || leadDateColIdx >= 0 || stageColIdx >= 0) {
+    detectedSheetType = "auto";
+  }
+
+  return { leads, detectedSheetType };
 }
 
 export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
@@ -197,6 +346,13 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
   // Progressive UX tracking
   const [importProgress, setImportProgress] = useState(0);
   const [importStatusText, setImportStatusText] = useState("");
+
+  // Google Sheet migration & duplicate resolution state
+  const [sheetType, setSheetType] = useState<SheetType>("cold");
+  const [existingMatches, setExistingMatches] = useState<Record<string, ExistingLeadMatch>>({});
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
+  const [defaultDuplicateAction, setDefaultDuplicateAction] = useState<"skip" | "update">("skip");
+  const [perLeadAction, setPerLeadAction] = useState<Record<string, "skip" | "update">>({});
 
   const { userId } = useSession();
 
@@ -256,6 +412,48 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
     setResult(null);
     setImportProgress(0);
     setImportStatusText("");
+    setExistingMatches({});
+    setPerLeadAction({});
+    setDefaultDuplicateAction("skip");
+    setSheetType("cold");
+  }
+
+  async function checkDuplicatesInCrm(leads: ExtractedLead[]) {
+    if (leads.length === 0) {
+      setExistingMatches({});
+      return;
+    }
+    setCheckingDuplicates(true);
+    try {
+      const phones = Array.from(new Set(leads.map((l) => l.phone)));
+      const res = await fetch("/api/leads/import/check-duplicates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phones }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const map: Record<string, ExistingLeadMatch> = {};
+        for (const item of data.existing || []) {
+          map[item.phone] = item;
+        }
+        setExistingMatches(map);
+        setPerLeadAction({});
+      }
+    } catch (e) {
+      console.error("Failed to check duplicates", e);
+    } finally {
+      setCheckingDuplicates(false);
+    }
+  }
+
+  function applyDuplicateActionToAll(action: "skip" | "update") {
+    setDefaultDuplicateAction(action);
+    const next: Record<string, "skip" | "update"> = {};
+    Object.keys(existingMatches).forEach((phone) => {
+      next[phone] = action;
+    });
+    setPerLeadAction(next);
   }
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -263,6 +461,8 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
     if (!file) return;
     setFileName(file.name);
     setResult(null);
+    setExistingMatches({});
+    setPerLeadAction({});
 
     const ext = file.name.split(".").pop()?.toLowerCase();
 
@@ -271,12 +471,17 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
         header: false,
         skipEmptyLines: true,
         complete: (results) => {
-          const parsed = parseRawMatrix(results.data as (string | number)[][]);
+          const { leads: parsed, detectedSheetType } = parseRawMatrix(
+            results.data as (string | number)[][],
+            file.name
+          );
           setExtractedLeads(parsed);
+          setSheetType(detectedSheetType);
           if (parsed.length === 0) {
             toast.error("No valid 10-digit phone numbers found in this CSV.");
           } else {
             toast.success(`Found ${parsed.length} valid phone numbers!`);
+            checkDuplicatesInCrm(parsed);
           }
         },
       });
@@ -290,12 +495,14 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
           header: 1,
           defval: "",
         });
-        const parsed = parseRawMatrix(matrix);
+        const { leads: parsed, detectedSheetType } = parseRawMatrix(matrix, file.name);
         setExtractedLeads(parsed);
+        setSheetType(detectedSheetType);
         if (parsed.length === 0) {
           toast.error("No valid 10-digit phone numbers found in this Excel file.");
         } else {
           toast.success(`Found ${parsed.length} valid phone numbers!`);
+          checkDuplicatesInCrm(parsed);
         }
       };
       reader.readAsArrayBuffer(file);
@@ -336,10 +543,19 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
           setImportProgress((prev) => (prev < 85 ? prev + 15 : prev));
         }, 120);
 
+        const payloadLeads = extractedLeads.map((l) => ({
+          ...l,
+          duplicateAction: existingMatches[l.phone]
+            ? perLeadAction[l.phone] || defaultDuplicateAction
+            : undefined,
+        }));
+
         const payload = {
-          leads: extractedLeads,
+          leads: payloadLeads,
           assignmentMode,
           assignToRepId: assignmentMode === "specific" ? selectedRepId : null,
+          sheetType,
+          defaultDuplicateAction,
         };
 
         const res = await fetch("/api/leads/import", {
@@ -368,14 +584,21 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
         const totalChunks = Math.ceil(totalLeads / CHUNK_SIZE);
         const accumulatedResult: ImportResult = {
           imported: 0,
+          updated: 0,
           duplicates: 0,
+          pendingApprovals: 0,
           invalid: 0,
           total: totalLeads,
           durationMs: 0,
         };
 
         for (let i = 0; i < totalLeads; i += CHUNK_SIZE) {
-          const chunk = extractedLeads.slice(i, i + CHUNK_SIZE);
+          const chunk = extractedLeads.slice(i, i + CHUNK_SIZE).map((l) => ({
+            ...l,
+            duplicateAction: existingMatches[l.phone]
+              ? perLeadAction[l.phone] || defaultDuplicateAction
+              : undefined,
+          }));
           const chunkIndex = Math.floor(i / CHUNK_SIZE) + 1;
 
           setImportStatusText(
@@ -386,6 +609,8 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
             leads: chunk,
             assignmentMode,
             assignToRepId: assignmentMode === "specific" ? selectedRepId : null,
+            sheetType,
+            defaultDuplicateAction,
           };
 
           const res = await fetch("/api/leads/import", {
@@ -402,7 +627,9 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
           }
 
           accumulatedResult.imported += data.imported || 0;
+          accumulatedResult.updated = (accumulatedResult.updated || 0) + (data.updated || 0);
           accumulatedResult.duplicates += data.duplicates || 0;
+          accumulatedResult.pendingApprovals = (accumulatedResult.pendingApprovals || 0) + (data.pendingApprovals || 0);
           accumulatedResult.invalid += data.invalid || 0;
 
           const progressPercent = Math.min(
@@ -675,16 +902,23 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
                   </div>
                   <p className="text-2xl font-black text-emerald-800 font-mono">
                     +{result.imported.toLocaleString()}
+                    {(result.updated || 0) > 0 && (
+                      <span className="text-sm font-bold text-teal-700 ml-1.5">
+                        (+{result.updated} updated)
+                      </span>
+                    )}
                   </p>
                   <p className="text-[11px] text-emerald-700 font-medium mt-0.5">
-                    Added to dialer queue
+                    {(result.pendingApprovals || 0) > 0
+                      ? `${result.pendingApprovals} closed deals sent for Ops approval`
+                      : "Added to dialer queue"}
                   </p>
                 </div>
 
                 <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5">
                   <div className="flex items-center justify-between text-amber-700 mb-1">
                     <span className="text-[11px] font-bold uppercase tracking-wider">
-                      Duplicates
+                      Skipped Duplicates
                     </span>
                     <Users className="w-4 h-4" />
                   </div>
@@ -692,7 +926,7 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
                     {result.duplicates.toLocaleString()}
                   </p>
                   <p className="text-[11px] text-amber-700 font-medium mt-0.5">
-                    Already in CRM (skipped)
+                    Skipped per duplicate rule
                   </p>
                 </div>
 
@@ -810,6 +1044,142 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
                   </>
                 )}
               </div>
+
+              {/* Google Sheet Type / Stage Selector */}
+              {extractedLeads.length > 0 && (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                      Sheet Type / Target Stage:
+                    </span>
+                    <span className="text-[11px] text-emerald-700 font-semibold">
+                      Auto-detected from columns
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+                    {(
+                      [
+                        { id: "cold", label: "Cold List (New)" },
+                        { id: "followup", label: "Follow-Up" },
+                        { id: "interested", label: "Interested" },
+                        { id: "closed_deal", label: "Closed Deals" },
+                        { id: "auto", label: "Auto-Detect" },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setSheetType(opt.id)}
+                        className={`px-2 py-1.5 rounded-lg text-[11px] font-semibold border transition cursor-pointer ${
+                          sheetType === opt.id
+                            ? "bg-white border-emerald-500 text-emerald-700 shadow-xs ring-1 ring-emerald-500"
+                            : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  {sheetType === "closed_deal" && (
+                    <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                      Closed deals will be uploaded to <strong>Payments (Pending Approval)</strong> &amp; Pipeline (<strong>Payment Pending</strong>). Once approved, they automatically move to <strong>Closed Won</strong>.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Duplicate Leads Resolution (Skip or Update per lead + Apply to All) */}
+              {extractedLeads.length > 0 && (checkingDuplicates || Object.keys(existingMatches).length > 0) && (
+                <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 text-amber-600" />
+                      {checkingDuplicates
+                        ? "Checking existing CRM leads..."
+                        : `${Object.keys(existingMatches).length} Existing Lead(s) Found in CRM`}
+                    </span>
+                    {!checkingDuplicates && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] text-amber-800 font-medium">Apply to all:</span>
+                        <button
+                          type="button"
+                          onClick={() => applyDuplicateActionToAll("skip")}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition cursor-pointer ${
+                            defaultDuplicateAction === "skip"
+                              ? "bg-amber-600 text-white border-amber-600"
+                              : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                          }`}
+                        >
+                          Skip All
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => applyDuplicateActionToAll("update")}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition cursor-pointer ${
+                            defaultDuplicateAction === "update"
+                              ? "bg-emerald-600 text-white border-emerald-600"
+                              : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                          }`}
+                        >
+                          Update All
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {!checkingDuplicates && (
+                    <div className="max-h-40 overflow-y-auto bg-white rounded-lg border border-amber-200 divide-y divide-gray-100">
+                      {Object.values(existingMatches).map((match) => {
+                        const action = perLeadAction[match.phone] || defaultDuplicateAction;
+                        return (
+                          <div
+                            key={match.id}
+                            className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs"
+                          >
+                            <div className="min-w-0">
+                              <span className="font-mono font-semibold text-gray-800">
+                                {match.phone}
+                              </span>
+                              <span className="text-gray-500 ml-2 truncate">
+                                {match.contactName || match.companyName || "Unnamed Lead"} ({match.status})
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPerLeadAction((prev) => ({ ...prev, [match.phone]: "skip" }))
+                                }
+                                className={`px-2 py-0.5 rounded text-[11px] font-semibold border cursor-pointer ${
+                                  action === "skip"
+                                    ? "bg-amber-100 text-amber-800 border-amber-300"
+                                    : "bg-white text-gray-500 border-gray-200"
+                                }`}
+                              >
+                                Skip
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setPerLeadAction((prev) => ({ ...prev, [match.phone]: "update" }))
+                                }
+                                className={`px-2 py-0.5 rounded text-[11px] font-semibold border cursor-pointer ${
+                                  action === "update"
+                                    ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                                    : "bg-white text-gray-500 border-gray-200"
+                                }`}
+                              >
+                                Update
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Lead Assignment Option (Level 2/3 Feature) */}
               {extractedLeads.length > 0 && (
@@ -950,9 +1320,9 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
                       <thead className="bg-gray-50 border-b border-gray-200 text-gray-500 font-semibold">
                         <tr>
                           <th className="px-3 py-2 text-left">Phone</th>
-                          <th className="px-3 py-2 text-left">Name</th>
-                          <th className="px-3 py-2 text-left">Company</th>
-                          <th className="px-3 py-2 text-left">Vertical</th>
+                          <th className="px-3 py-2 text-left">Name / Company</th>
+                          <th className="px-3 py-2 text-left">Service / Vertical</th>
+                          <th className="px-3 py-2 text-left">Remark / Deal</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
@@ -962,25 +1332,27 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
                               {lead.phone}
                             </td>
                             <td className="px-3 py-2 text-gray-700">
-                              {lead.name ? (
-                                lead.name
+                              {lead.name || lead.company ? (
+                                <span>{[lead.name, lead.company].filter(Boolean).join(" • ")}</span>
                               ) : (
                                 <span className="text-gray-400 italic text-[11px]">
-                                  — (blank, rep can add)
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 text-gray-700">
-                              {lead.company ? (
-                                lead.company
-                              ) : (
-                                <span className="text-gray-400 italic text-[11px]">
-                                  — (blank, rep can add)
+                                  — (blank)
                                 </span>
                               )}
                             </td>
                             <td className="px-3 py-2 text-gray-600">
-                              {lead.vertical || <span className="text-gray-300">—</span>}
+                              {[lead.service, lead.vertical].filter(Boolean).join(" • ") || (
+                                <span className="text-gray-300">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-gray-600 max-w-[200px] truncate">
+                              {lead.amount ? (
+                                <span className="font-semibold text-emerald-700">
+                                  ₹{lead.amount.toLocaleString()} ({lead.credits || 0} cr)
+                                </span>
+                              ) : (
+                                lead.remark || <span className="text-gray-300">—</span>
+                              )}
                             </td>
                           </tr>
                         ))}
