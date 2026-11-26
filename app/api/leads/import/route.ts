@@ -267,7 +267,8 @@ export async function POST(request: NextRequest) {
       await client.query("BEGIN");
       try {
         // Fast path for pure cold-calling lists (thousands of rows with no comments/deals)
-        if (!isRichMigration && defaultDuplicateAction === "skip") {
+        const hasAnyPerLeadUpdate = batchLeads.some((l) => l.duplicateAction === "update");
+        if (!isRichMigration && defaultDuplicateAction === "skip" && !hasAnyPerLeadUpdate) {
           const newLeads = batchLeads.filter((l) => !existingMap.has(l.phone));
           skippedCount += batchLeads.length - newLeads.length;
 

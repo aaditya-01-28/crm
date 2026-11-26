@@ -1020,11 +1020,13 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
           )}
         </div>
 
+        {/* Scrollable Content Below Header (Edit Info Form, Status Bar, Tabs & History) */}
+        <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
         {/* Inline Edit Form if isEditingInfo is true */}
         {isEditingInfo && (
           <form
             onSubmit={handleSaveInfo}
-            className="bg-emerald-50/90 border-b border-emerald-200 p-4 space-y-3 animate-in fade-in duration-150"
+            className="bg-emerald-50/90 border-b border-emerald-200 p-4 space-y-3 shrink-0 animate-in fade-in duration-150"
           >
             <div className="flex items-center justify-between">
               <p className="text-xs font-bold text-emerald-950 uppercase tracking-wide">
@@ -1262,7 +1264,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex border-b border-gray-200 px-6 bg-white gap-6">
+        <div className="flex border-b border-gray-200 px-6 bg-white gap-6 sticky top-0 z-10 shrink-0">
           <button
             onClick={() => setActiveTab("timeline")}
             className={cn(
@@ -1302,7 +1304,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
         </div>
 
         {/* Tab Content Area */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="p-6 space-y-6">
           {/* TAB 1: Interaction Timeline */}
           {activeTab === "timeline" && (
             <div className="space-y-4">
@@ -2115,6 +2117,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
               )}
             </div>
           )}
+        </div>
         </div>
       </div>
 

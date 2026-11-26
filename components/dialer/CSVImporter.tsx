@@ -53,6 +53,7 @@ type SheetType = "auto" | "cold" | "followup" | "interested" | "closed_deal";
 interface ExistingLeadMatch {
   id: string;
   phone: string;
+  secondaryPhone?: string | null;
   contactName: string | null;
   companyName: string | null;
   status: string;
@@ -435,7 +436,17 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
         const data = await res.json();
         const map: Record<string, ExistingLeadMatch> = {};
         for (const item of data.existing || []) {
-          map[item.phone] = item;
+          const normPrimary = normalizePhone(item.phone || "");
+          const normSec = normalizePhone(item.secondaryPhone || "");
+          if (normPrimary && normPrimary.length === 10) {
+            map[normPrimary] = { ...item, phone: normPrimary };
+          }
+          if (normSec && normSec.length === 10 && !map[normSec]) {
+            map[normSec] = { ...item, phone: normSec };
+          }
+          if (item.phone && !map[item.phone]) {
+            map[item.phone] = item;
+          }
         }
         setExistingMatches(map);
         setPerLeadAction({});
@@ -454,6 +465,14 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
       next[phone] = action;
     });
     setPerLeadAction(next);
+    const cnt = Object.keys(existingMatches).length;
+    if (cnt > 0) {
+      toast.info(
+        action === "skip"
+          ? `${cnt} existing CRM lead(s) will be skipped`
+          : `${cnt} existing CRM lead(s) will be updated`
+      );
+    }
   }
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -663,6 +682,13 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
   }
 
   const preview = extractedLeads.slice(0, 5);
+  const skippedDuplicatesCount = extractedLeads.filter(
+    (l) => existingMatches[l.phone] && (perLeadAction[l.phone] || defaultDuplicateAction) === "skip"
+  ).length;
+  const updatingDuplicatesCount = extractedLeads.filter(
+    (l) => existingMatches[l.phone] && (perLeadAction[l.phone] || defaultDuplicateAction) === "update"
+  ).length;
+  const effectiveProcessCount = Math.max(0, extractedLeads.length - skippedDuplicatesCount);
   const selectedMember = teamMembers.find((r) => r.id === selectedRepId);
   const assignedRepName = selectedMember
     ? `${selectedMember.fullName}${selectedMember.id === userId ? " (You)" : ""}`
@@ -670,7 +696,7 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[92vh] overflow-y-auto border border-gray-100 flex flex-col">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[92vh] overflow-hidden border border-gray-100 flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-slate-900 text-white rounded-t-2xl shrink-0">
           <div className="flex items-center gap-2.5">
@@ -710,7 +736,7 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 space-y-4 flex-1">
+        <div className="p-6 space-y-4 flex-1 min-h-0 overflow-y-auto">
           {/* ============================================================== */}
           {/* VIEW 1: LIVE PROGRESS SCREEN WHILE IMPORTING                   */}
           {/* ============================================================== */}
@@ -1105,7 +1131,7 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
                       <AlertCircle className="w-4 h-4 text-amber-600" />
                       {checkingDuplicates
                         ? "Checking existing CRM leads..."
-                        : `${Object.keys(existingMatches).length} Existing Lead(s) Found in CRM`}
+                        : `${Object.keys(existingMatches).length} Existing Lead(s) • ${skippedDuplicatesCount} Skipped, ${updatingDuplicatesCount} Updating`}
                     </span>
                     {!checkingDuplicates && (
                       <div className="flex items-center gap-1.5">
@@ -1114,23 +1140,23 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
                           type="button"
                           onClick={() => applyDuplicateActionToAll("skip")}
                           className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition cursor-pointer ${
-                            defaultDuplicateAction === "skip"
+                            skippedDuplicatesCount === Object.keys(existingMatches).length && skippedDuplicatesCount > 0
                               ? "bg-amber-600 text-white border-amber-600"
                               : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
                           }`}
                         >
-                          Skip All
+                          {skippedDuplicatesCount === Object.keys(existingMatches).length && skippedDuplicatesCount > 0 ? "✓ Skip All" : "Skip All"}
                         </button>
                         <button
                           type="button"
                           onClick={() => applyDuplicateActionToAll("update")}
                           className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition cursor-pointer ${
-                            defaultDuplicateAction === "update"
+                            updatingDuplicatesCount === Object.keys(existingMatches).length && updatingDuplicatesCount > 0
                               ? "bg-emerald-600 text-white border-emerald-600"
                               : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
                           }`}
                         >
-                          Update All
+                          {updatingDuplicatesCount === Object.keys(existingMatches).length && updatingDuplicatesCount > 0 ? "✓ Update All" : "Update All"}
                         </button>
                       </div>
                     )}
@@ -1140,16 +1166,19 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
                     <div className="max-h-40 overflow-y-auto bg-white rounded-lg border border-amber-200 divide-y divide-gray-100">
                       {Object.values(existingMatches).map((match) => {
                         const action = perLeadAction[match.phone] || defaultDuplicateAction;
+                        const isSkipping = action === "skip";
                         return (
                           <div
-                            key={match.id}
-                            className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs"
+                            key={`${match.id}-${match.phone}`}
+                            className={`flex items-center justify-between gap-2 px-3 py-1.5 text-xs transition ${
+                              isSkipping ? "bg-amber-50/40" : "bg-emerald-50/30"
+                            }`}
                           >
-                            <div className="min-w-0">
-                              <span className="font-mono font-semibold text-gray-800">
+                            <div className="min-w-0 flex items-center gap-2">
+                              <span className={`font-mono font-semibold ${isSkipping ? "line-through text-gray-400" : "text-gray-800"}`}>
                                 {match.phone}
                               </span>
-                              <span className="text-gray-500 ml-2 truncate">
+                              <span className={`truncate ${isSkipping ? "line-through text-gray-400" : "text-gray-500"}`}>
                                 {match.contactName || match.companyName || "Unnamed Lead"} ({match.status})
                               </span>
                             </div>
@@ -1160,12 +1189,12 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
                                   setPerLeadAction((prev) => ({ ...prev, [match.phone]: "skip" }))
                                 }
                                 className={`px-2 py-0.5 rounded text-[11px] font-semibold border cursor-pointer ${
-                                  action === "skip"
-                                    ? "bg-amber-100 text-amber-800 border-amber-300"
-                                    : "bg-white text-gray-500 border-gray-200"
+                                  isSkipping
+                                    ? "bg-amber-600 text-white border-amber-600"
+                                    : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
                                 }`}
                               >
-                                Skip
+                                {isSkipping ? "✓ Skipped" : "Skip"}
                               </button>
                               <button
                                 type="button"
@@ -1173,12 +1202,12 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
                                   setPerLeadAction((prev) => ({ ...prev, [match.phone]: "update" }))
                                 }
                                 className={`px-2 py-0.5 rounded text-[11px] font-semibold border cursor-pointer ${
-                                  action === "update"
-                                    ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                                    : "bg-white text-gray-500 border-gray-200"
+                                  !isSkipping
+                                    ? "bg-emerald-600 text-white border-emerald-600"
+                                    : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
                                 }`}
                               >
-                                Update
+                                {!isSkipping ? "✓ Updating" : "Update"}
                               </button>
                             </div>
                           </div>
@@ -1429,7 +1458,11 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
                   className="px-5 py-2 text-xs bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition flex items-center gap-2 font-semibold shadow-xs"
                 >
                   <Upload className="w-3.5 h-3.5" />
-                  Import {extractedLeads.length.toLocaleString()} Leads
+                  {effectiveProcessCount === 0 && skippedDuplicatesCount > 0
+                    ? `Process (${skippedDuplicatesCount} Skipped, 0 New)`
+                    : skippedDuplicatesCount > 0
+                    ? `Import ${effectiveProcessCount.toLocaleString()} Leads (${skippedDuplicatesCount} Skipped)`
+                    : `Import ${extractedLeads.length.toLocaleString()} Leads`}
                 </button>
               )}
             </>
