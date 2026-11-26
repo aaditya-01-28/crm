@@ -440,7 +440,7 @@ export async function PATCH(
                    ELSE $2
                  END,
                  updated_at = NOW()
-             WHERE lead_id = $1 AND tenant_id = $3 AND status = 'pending'`,
+             WHERE lead_id = $1 AND tenant_id = $3 AND status = 'pending' AND task_type <> 'product_demo'`,
             [id, resolutionTag, tenantId]
           ).catch(() => {});
         }

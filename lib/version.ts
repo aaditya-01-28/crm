@@ -1,9 +1,11 @@
-export const APP_VERSION = "1.3.6";
-export const APP_BUILD = 20;
-export const APK_VERSION = "1.3.6";
-export const APK_BUILD = 20;
+export const APP_VERSION = "1.3.7";
+export const APP_BUILD = 21;
+export const APK_VERSION = "1.3.7";
+export const APK_BUILD = 21;
 export const APP_RELEASE_DATE = "2026-11-26";
 export const APP_RELEASE_NOTES = [
+  "Fixed scheduled demo RNR/reschedule mistakenly counting as Demo Completed in Reports",
+  "Improved real-time Inbound & Missed-Inbound queue with 60s lead cache and VoWiFi call detection",
   "30-day persistent Mobile APK session & Vivo Android 14 KeyStore fallback fix",
   "Real-time Inbound Call & Missed-Inbound Queue with automatic talk-time protection",
   "Added Secondary / Alternate Call & WhatsApp number support across Web CRM and Mobile Dialer",
