@@ -44,6 +44,7 @@ import {
 } from "@/lib/utils";
 import { MultiServiceSelect } from "@/components/common/MultiServiceSelect";
 import { MultiLanguageSelect } from "@/components/common/MultiLanguageSelect";
+import { DateTime12hInput } from "@/components/common/DateTime12hInput";
 import { AudioRecordingPlayer } from "@/components/calls/AudioRecordingPlayer";
 import { toast } from "sonner";
 import { useCanAssignLeads, useIsAdmin, useSession } from "@/components/layout/SessionProvider";
@@ -1293,11 +1294,9 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                           (Optional if client hasn&apos;t confirmed)
                         </span>
                       </div>
-                      <input
-                        type="datetime-local"
+                      <DateTime12hInput
                         value={callbackDatetime}
-                        onChange={(e) => setCallbackDatetime(e.target.value)}
-                        className="w-full text-xs px-3 py-2 bg-white border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-gray-900"
+                        onChange={setCallbackDatetime}
                       />
                       <p className="text-[11px] text-gray-500">
                         💡 If left blank, this callback will still appear in your Follow-Up agenda and reminders so you won&apos;t miss it.
@@ -1318,11 +1317,9 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                             (Optional if client hasn&apos;t confirmed)
                           </span>
                         </div>
-                        <input
-                          type="datetime-local"
+                        <DateTime12hInput
                           value={demoDatetime}
-                          onChange={(e) => setDemoDatetime(e.target.value)}
-                          className="w-full text-xs px-3 py-2 bg-white border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-purple-500 text-gray-900"
+                          onChange={setDemoDatetime}
                         />
                         <p className="text-[11px] text-gray-500 mt-1">
                           💡 If left blank, this demo reminder will still appear in your Follow-Up agenda so you won&apos;t miss it.
@@ -1370,11 +1367,9 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                           (Optional closing callback)
                         </span>
                       </div>
-                      <input
-                        type="datetime-local"
+                      <DateTime12hInput
                         value={callbackDatetime}
-                        onChange={(e) => setCallbackDatetime(e.target.value)}
-                        className="w-full text-xs px-3 py-2 bg-white border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-teal-500 text-gray-900"
+                        onChange={setCallbackDatetime}
                       />
                       <p className="text-[11px] text-gray-500">
                         💡 A follow-up task will be added to your Agenda so you never miss calling back to close the deal.

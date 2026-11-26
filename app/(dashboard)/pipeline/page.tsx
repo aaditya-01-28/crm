@@ -333,6 +333,21 @@ export default function PipelinePage() {
         const dealDate = new Date(dealDateStr);
         if (isNaN(dealDate.getTime())) return false;
 
+        if (dateFilter === "custom") {
+          if (!customStartDate && !customEndDate) {
+            return true;
+          }
+          if (customStartDate) {
+            const { startOfPeriod } = getISTDateRange("custom", customStartDate, customStartDate);
+            if (dealDate < startOfPeriod) return false;
+          }
+          if (customEndDate) {
+            const { endOfPeriod } = getISTDateRange("custom", customEndDate, customEndDate);
+            if (dealDate > endOfPeriod) return false;
+          }
+          return true;
+        }
+
         const rangePreset = dateFilter === "this_week" ? "week" : dateFilter === "this_month" ? "month" : dateFilter;
         const { startOfPeriod, endOfPeriod } = getISTDateRange(
           rangePreset,

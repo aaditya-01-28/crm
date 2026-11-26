@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { DateTime12hInput } from "@/components/common/DateTime12hInput";
 import {
   X,
   ArrowLeft,
@@ -1225,13 +1226,11 @@ export function DealModal({
                             <label className="text-xs font-semibold text-gray-700 mb-1 block">
                               Demo Date & Time <span className="text-rose-500">*</span>
                             </label>
-                            <input
-                              type="datetime-local"
+                            <DateTime12hInput
                               value={item.demoDate || ""}
-                              onChange={(e) => updateCommercial(idx, "demoDate", e.target.value)}
+                              onChange={(val) => updateCommercial(idx, "demoDate", val)}
                               required
                               disabled={!canEdit}
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-purple-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                           </div>
 
@@ -1315,13 +1314,11 @@ export function DealModal({
                             <label className="text-xs font-semibold text-gray-700 mb-1 block">
                               When to Contact Back for Update? <span className="text-rose-500">*</span>
                             </label>
-                            <input
-                              type="datetime-local"
+                            <DateTime12hInput
                               value={item.contactBackDate || getDefaultNextDayFollowup()}
-                              onChange={(e) => updateCommercial(idx, "contactBackDate", e.target.value)}
+                              onChange={(val) => updateCommercial(idx, "contactBackDate", val)}
                               required
                               disabled={!canEdit}
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-teal-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                             <p className="text-[10px] text-teal-700 mt-1">
                               ⚡ Automatically scheduled for next business day at 11:00 AM.
@@ -1442,13 +1439,11 @@ export function DealModal({
                             <label className="text-xs font-semibold text-gray-700 mb-1 block">
                               Contact Back Date for Update <span className="text-rose-500">*</span>
                             </label>
-                            <input
-                              type="datetime-local"
+                            <DateTime12hInput
                               value={item.contactBackDate || getDefaultNextDayFollowup()}
-                              onChange={(e) => updateCommercial(idx, "contactBackDate", e.target.value)}
+                              onChange={(val) => updateCommercial(idx, "contactBackDate", val)}
                               required
                               disabled={!canEdit}
-                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-amber-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
                             <p className="text-[10px] text-amber-700 mt-1">
                               ⚡ Default: Next business day at 11:00 AM for quotation follow-up.

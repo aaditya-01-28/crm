@@ -101,33 +101,42 @@ export async function POST(
       }
 
       if (deleteTaskIds.length > 0) {
-        // Only delete a scheduled task if no other matching Demo Scheduled / Callback log remains on the lead
-        const tasksToCheck = await client.query(
-          `SELECT id, task_type as "taskType"
-           FROM scheduled_tasks
-           WHERE id = ANY($1::uuid[]) AND lead_id = $2 AND tenant_id = $3`,
-          [deleteTaskIds, leadId, session.tenantId]
-        );
-
-        for (const t of tasksToCheck.rows) {
-          const isDemo = t.taskType === "product_demo";
-          const remainingLogsRes = await client.query(
-            isDemo
-              ? `SELECT (
-                   (SELECT COUNT(*) FROM call_logs WHERE lead_id = $1 AND tenant_id = $2 AND disposition = 'Demo Scheduled') +
-                   (SELECT COUNT(*) FROM lead_stage_history WHERE lead_id = $1 AND tenant_id = $2 AND stage_name = 'Demo Scheduled')
-                 )::int as cnt`
-              : `SELECT (
-                   (SELECT COUNT(*) FROM call_logs WHERE lead_id = $1 AND tenant_id = $2 AND disposition ILIKE '%Callback%') +
-                   (SELECT COUNT(*) FROM lead_stage_history WHERE lead_id = $1 AND tenant_id = $2 AND stage_name ILIKE '%Callback%')
-                 )::int as cnt`,
-            [leadId, session.tenantId]
+        const isStandaloneTaskDelete = callLogIds.length === 0 && stageHistoryIds.length === 0;
+        if (isStandaloneTaskDelete) {
+          await client.query(
+            `DELETE FROM scheduled_tasks
+             WHERE id = ANY($1::uuid[]) AND lead_id = $2 AND tenant_id = $3`,
+            [deleteTaskIds, leadId, session.tenantId]
           );
-          if ((remainingLogsRes.rows[0]?.cnt || 0) === 0) {
-            await client.query(
-              `DELETE FROM scheduled_tasks WHERE id = $1 AND lead_id = $2 AND tenant_id = $3`,
-              [t.id, leadId, session.tenantId]
+        } else {
+          // Only delete a companion scheduled task if no other matching Demo Scheduled / Callback log remains on the lead
+          const tasksToCheck = await client.query(
+            `SELECT id, task_type as "taskType"
+             FROM scheduled_tasks
+             WHERE id = ANY($1::uuid[]) AND lead_id = $2 AND tenant_id = $3`,
+            [deleteTaskIds, leadId, session.tenantId]
+          );
+
+          for (const t of tasksToCheck.rows) {
+            const isDemo = t.taskType === "product_demo";
+            const remainingLogsRes = await client.query(
+              isDemo
+                ? `SELECT (
+                     (SELECT COUNT(*) FROM call_logs WHERE lead_id = $1 AND tenant_id = $2 AND disposition = 'Demo Scheduled') +
+                     (SELECT COUNT(*) FROM lead_stage_history WHERE lead_id = $1 AND tenant_id = $2 AND stage_name = 'Demo Scheduled')
+                   )::int as cnt`
+                : `SELECT (
+                     (SELECT COUNT(*) FROM call_logs WHERE lead_id = $1 AND tenant_id = $2 AND disposition ILIKE '%Callback%') +
+                     (SELECT COUNT(*) FROM lead_stage_history WHERE lead_id = $1 AND tenant_id = $2 AND stage_name ILIKE '%Callback%')
+                   )::int as cnt`,
+              [leadId, session.tenantId]
             );
+            if ((remainingLogsRes.rows[0]?.cnt || 0) === 0) {
+              await client.query(
+                `DELETE FROM scheduled_tasks WHERE id = $1 AND lead_id = $2 AND tenant_id = $3`,
+                [t.id, leadId, session.tenantId]
+              );
+            }
           }
         }
       }

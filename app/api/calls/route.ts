@@ -445,6 +445,17 @@ export async function POST(request: NextRequest) {
             "UPDATE leads SET status = 'demo_scheduled', updated_at = NOW() WHERE id = $1",
             [targetLeadId]
           );
+          const dealCheck = await client.query(
+            "SELECT id FROM deals WHERE lead_id = $1 AND tenant_id = $2 LIMIT 1",
+            [targetLeadId, tenantId]
+          );
+          if (dealCheck.rows.length === 0) {
+            await client.query(
+              `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes, created_at, updated_at)
+               VALUES ($1, $2, $3, 'WhatsApp API', 0, 0, 'demo_scheduled', $4, NOW(), NOW())`,
+              [tenantId, targetLeadId, repId, remark || "Product demo scheduled"]
+            ).catch(() => {});
+          }
         }
 
         createdLogs.push(finalLog);

@@ -15,6 +15,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { toUtcIsoString } from "@/lib/utils";
+import { DateTime12hInput } from "@/components/common/DateTime12hInput";
 
 type DispositionType =
   | "RNR"
@@ -301,11 +302,9 @@ export function DispositionBar({
                 <label className="font-semibold text-gray-700 block mb-1">
                   Callback Date & Time
                 </label>
-                <input
-                  type="datetime-local"
+                <DateTime12hInput
                   value={callbackDatetime}
-                  onChange={(e) => setCallbackDatetime(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  onChange={setCallbackDatetime}
                 />
 
                 {/* Quick Presets */}
@@ -406,11 +405,9 @@ export function DispositionBar({
                 <label className="font-semibold text-gray-700 block mb-1">
                   Demo Date & Time
                 </label>
-                <input
-                  type="datetime-local"
+                <DateTime12hInput
                   value={demoDatetime}
-                  onChange={(e) => setDemoDatetime(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  onChange={setDemoDatetime}
                 />
 
                 {/* Quick Presets */}
@@ -537,11 +534,9 @@ export function DispositionBar({
                 <label className="font-semibold text-gray-700 block mb-1">
                   Post-Demo Follow-Up Callback (Optional)
                 </label>
-                <input
-                  type="datetime-local"
+                <DateTime12hInput
                   value={callbackDatetime}
-                  onChange={(e) => setCallbackDatetime(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-xs font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  onChange={setCallbackDatetime}
                 />
 
                 {/* Quick Presets */}

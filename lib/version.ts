@@ -1,9 +1,11 @@
-export const APP_VERSION = "1.3.4";
-export const APP_BUILD = 18;
-export const APK_VERSION = "1.3.4";
-export const APK_BUILD = 18;
-export const APP_RELEASE_DATE = "2026-11-25";
+export const APP_VERSION = "1.3.5";
+export const APP_BUILD = 19;
+export const APK_VERSION = "1.3.5";
+export const APK_BUILD = 19;
+export const APP_RELEASE_DATE = "2026-11-26";
 export const APP_RELEASE_NOTES = [
+  "Switched all date & time selectors to 12-hour AM/PM format across Web CRM and Mobile Dialer",
+  "Fixed standalone scheduled task deletion in Lead Dossier, Pipeline Custom Range filter, and Demo Scheduled pipeline sync",
   "Added Level 3 Super Admin permission to delete mistaken activity/call logs from Lead Dossier (automatically cleans up reports & pipeline)",
   "Scheduled Callback & Demo calls now show the exact Update Outcome options (Completed, RNR, Reschedule, Not Interested) in Mobile Dialer",
   "Added post-call disposition sheet directly when calling from the Mobile Agenda tab",

@@ -24,6 +24,7 @@ import { formatDateTime, toUtcIsoString, cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
 import { LeadDetailModal } from "@/components/leads/LeadDetailModal";
+import { DateTime12hInput } from "@/components/common/DateTime12hInput";
 
 import { useSession, useCanAssignLeads } from "@/components/layout/SessionProvider";
 
@@ -817,11 +818,9 @@ function TaskOutcomeModal({
                   (Optional retry time)
                 </span>
               </div>
-              <input
-                type="datetime-local"
+              <DateTime12hInput
                 value={scheduledDatetime}
-                onChange={(e) => setScheduledDatetime(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-gray-300 rounded-xl text-xs font-medium focus:ring-2 focus:ring-amber-500 outline-none text-gray-900"
+                onChange={setScheduledDatetime}
               />
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-[10px] text-gray-400 font-medium">Quick Retry:</span>
