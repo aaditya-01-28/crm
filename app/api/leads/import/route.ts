@@ -491,7 +491,7 @@ export async function POST(request: NextRequest) {
                    tenant_id, lead_id, rep_id, service_type, quantity, quoted_price,
                    expected_closing_date, stage, closing_notes, created_at, updated_at
                  )
-                 VALUES ($1, $2, $3, $4, $5, $6, $8, 'payment_pending', $7, $8, $8)
+                 VALUES ($1, $2, $3, $4, $5, $6, $8::date, 'payment_pending', $7, $8::timestamptz, $8::timestamptz)
                  RETURNING id`,
                 [
                   tenantId,
@@ -512,7 +512,7 @@ export async function POST(request: NextRequest) {
                    credits_to_add, original_amount, tax_amount, tds_amount, final_amount,
                    payment_mode, screenshot_url, ops_approval_status, credits_provisioned, created_at
                  )
-                 VALUES ($1, $2, $3, $4, $9, $5, $6, $7, 0, 0, $7, 'Google Sheet Import', 'NA', 'pending_verification', false, $8)`,
+                 VALUES ($1, $2, $3, $4, $9, $5, $6, $7::numeric, 0, 0, $7::numeric, 'Google Sheet Import', 'NA', 'pending_verification', false, $8::timestamptz)`,
                 [
                   tenantId,
                   dealId,
@@ -563,8 +563,11 @@ export async function POST(request: NextRequest) {
         durationMs,
       });
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("[IMPORT]", error);
-    return NextResponse.json({ error: "Import failed" }, { status: 500 });
+    return NextResponse.json(
+      { error: `Import failed: ${error?.message || "Unknown server error"}` },
+      { status: 500 }
+    );
   }
 }
