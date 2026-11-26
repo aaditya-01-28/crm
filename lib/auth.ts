@@ -12,11 +12,11 @@ if (!rawSecret && process.env.NODE_ENV === "production") {
 
 const JWT_SECRET = new TextEncoder().encode(rawSecret);
 
-export const ACCESS_TOKEN_DURATION_SECONDS = 6 * 60 * 60; // 6 hours
-export const WEB_SESSION_DURATION_SECONDS = 6 * 60 * 60; // 6 hours for webapp login
-export const SESSION_DURATION_HOURS = 6;
+export const ACCESS_TOKEN_DURATION_SECONDS = 9 * 60 * 60; // 9 hours
+export const WEB_SESSION_DURATION_SECONDS = 9 * 60 * 60; // 9 hours for webapp login
+export const SESSION_DURATION_HOURS = 9;
 export const SESSION_DURATION_SECONDS = 30 * 24 * 60 * 60; // 30 days (mobile refresh token)
-export const JWT_SESSION_EXPIRY = "6h";
+export const JWT_SESSION_EXPIRY = "9h";
 export const JWT_REFRESH_EXPIRY = "30d";
 
 export interface JWTPayload {

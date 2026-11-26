@@ -70,14 +70,14 @@ export default function TopBar({ user }: { user: JWTPayload }) {
   const lastLoginTimestamp = user.lastLoginAt;
   const lastLoginInfo = formatLastLogin(lastLoginTimestamp);
 
-  // Enforce strict 6-hour automatic webapp logout from loginAt
+  // Enforce strict 9-hour automatic webapp logout from loginAt
   useEffect(() => {
     if (!user.loginAt) return;
     const loginMs = new Date(user.loginAt).getTime();
     if (isNaN(loginMs)) return;
 
-    const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
-    const expireAt = loginMs + SIX_HOURS_MS;
+    const NINE_HOURS_MS = 9 * 60 * 60 * 1000;
+    const expireAt = loginMs + NINE_HOURS_MS;
 
     const forceLogout = async () => {
       try {
@@ -150,7 +150,7 @@ export default function TopBar({ user }: { user: JWTPayload }) {
         {/* Last Login Timestamp Badge (Stacked 2-line layout) */}
         <div
           className="hidden md:flex items-center gap-2 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg shadow-2xs hover:bg-slate-100/70 transition-colors"
-          title={`Last login recorded: ${lastLoginInfo.full} • Session token valid for 6 hours`}
+          title={`Last login recorded: ${lastLoginInfo.full} • Session token valid for 9 hours`}
         >
           <Clock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
           <div className="flex flex-col text-left leading-tight">
