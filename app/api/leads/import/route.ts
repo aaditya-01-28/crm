@@ -473,7 +473,7 @@ export async function POST(request: NextRequest) {
                    credits_to_add, original_amount, tax_amount, tds_amount, final_amount,
                    payment_mode, screenshot_url, ops_approval_status, credits_provisioned, created_at
                  )
-                 VALUES ($1, $2, $3, $4, 'New User', $5, $6, $7, 0, 0, $7, 'Google Sheet Import', 'NA', 'pending', false, $8)`,
+                 VALUES ($1, $2, $3, $4, 'New User', $5, $6, $7, 0, 0, $7, 'Google Sheet Import', 'NA', 'pending_verification', false, $8)`,
                 [
                   tenantId,
                   dealId,

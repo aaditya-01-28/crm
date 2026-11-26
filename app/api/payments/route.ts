@@ -29,8 +29,13 @@ export async function GET(request: NextRequest) {
         params = [tenantId, repId];
       } else {
         // Ops/Manager/Admin see payments filtered by exact status tab — no cross-tab bleed
-        whereClause = "p.tenant_id = $1 AND p.ops_approval_status = $2";
-        params = [tenantId, opsStatus];
+        if (opsStatus === "pending_verification") {
+          whereClause = "p.tenant_id = $1 AND p.ops_approval_status IN ('pending_verification', 'pending')";
+          params = [tenantId];
+        } else {
+          whereClause = "p.tenant_id = $1 AND p.ops_approval_status = $2";
+          params = [tenantId, opsStatus];
+        }
 
         if (filterRepId && filterRepId !== "all") {
           params.push(filterRepId);
