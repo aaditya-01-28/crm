@@ -258,6 +258,8 @@ export async function PATCH(
         ...existingMeta,
         ...(preferredLanguage !== undefined ? { preferredLanguage: preferredLanguage || null } : {}),
         ...(body.address !== undefined ? { address: body.address || null } : {}),
+        ...(body.secondaryPhone !== undefined ? { secondaryPhone: body.secondaryPhone || null } : {}),
+        ...(body.secondaryPhoneType !== undefined ? { secondaryPhoneType: body.secondaryPhoneType || "both" } : {}),
       };
 
       const finalAssignedRepId =

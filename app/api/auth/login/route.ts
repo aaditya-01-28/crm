@@ -10,7 +10,8 @@ import {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { email, password } = body;
+    const { email, password, client } = body;
+    const isMobileClient = client === "mobile";
 
     if (!email || !password) {
       return NextResponse.json(
@@ -73,7 +74,10 @@ export async function POST(request: NextRequest) {
       phoneNumber: user.phoneNumber || null,
     };
 
-    const accessToken = await signAccessToken(jwtPayload);
+    const accessToken = await signAccessToken(
+      jwtPayload,
+      isMobileClient ? "30d" : undefined
+    );
     const refreshToken = await signRefreshToken(jwtPayload);
 
     const response = NextResponse.json({

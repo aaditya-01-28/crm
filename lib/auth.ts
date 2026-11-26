@@ -33,8 +33,11 @@ export interface JWTPayload {
   phoneNumber?: string | null;
 }
 
-export async function signAccessToken(payload: JWTPayload): Promise<string> {
-  const expiry = process.env.JWT_EXPIRY || JWT_SESSION_EXPIRY;
+export async function signAccessToken(
+  payload: JWTPayload,
+  expiresIn?: string
+): Promise<string> {
+  const expiry = expiresIn || process.env.JWT_EXPIRY || JWT_SESSION_EXPIRY;
   return new SignJWT({ ...payload, tokenType: "access" })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(payload.sub)

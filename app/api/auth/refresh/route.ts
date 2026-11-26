@@ -5,12 +5,16 @@ import { queryUserById } from "@/lib/db";
 export async function POST(request: NextRequest) {
   try {
     let tokenToVerify: string | null = null;
+    let isMobileClient = false;
 
     // Check request body
     try {
       const body = await request.json();
       if (body?.refreshToken) {
         tokenToVerify = body.refreshToken;
+      }
+      if (body?.client === "mobile") {
+        isMobileClient = true;
       }
     } catch {}
 
@@ -58,7 +62,10 @@ export async function POST(request: NextRequest) {
       loginAt: now,
     };
 
-    const newAccessToken = await signAccessToken(newPayload);
+    const newAccessToken = await signAccessToken(
+      newPayload,
+      isMobileClient ? "30d" : undefined
+    );
     const newRefreshToken = await signRefreshToken(newPayload);
 
     const response = NextResponse.json({

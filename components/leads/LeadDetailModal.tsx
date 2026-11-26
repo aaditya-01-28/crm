@@ -188,14 +188,17 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
   const [editCompanyName, setEditCompanyName] = useState("");
   const [editVertical, setEditVertical] = useState("");
   const [editAddress, setEditAddress] = useState("");
+  const [editSecondaryPhone, setEditSecondaryPhone] = useState("");
+  const [editSecondaryPhoneType, setEditSecondaryPhoneType] = useState<"both" | "call" | "whatsapp">("both");
   const [editServices, setEditServices] = useState<string[]>([]);
   const [editLanguages, setEditLanguages] = useState<string[]>([]);
   const [editAssignedRepId, setEditAssignedRepId] = useState("");
   const [savingInfo, setSavingInfo] = useState(false);
   const [isDialing, setIsDialing] = useState(false);
 
-  async function handlePushToDial() {
+  async function handlePushToDial(targetPhone?: string) {
     if (!lead) return;
+    const dialNumber = targetPhone || lead.phoneNumber;
     setIsDialing(true);
     try {
       const res = await fetch("/api/telephony/push-to-dial", {
@@ -203,7 +206,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           leadId: lead.id,
-          phoneNumber: lead.phoneNumber,
+          phoneNumber: dialNumber,
           contactName: lead.contactName,
           companyName: lead.companyName,
         }),
@@ -214,7 +217,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
         setIsDialing(false);
         return;
       }
-      toast.success(`📲 Dial command sent to your paired phone for ${lead.phoneNumber}!`);
+      toast.success(`📲 Dial command sent to your paired phone for ${dialNumber}!`);
       setTimeout(() => setIsDialing(false), 5000);
     } catch {
       toast.error("Network error triggering call");
@@ -228,6 +231,8 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
       setEditCompanyName(lead.companyName || "");
       setEditVertical(lead.businessVertical || "");
       setEditAddress((lead.customMetadata as any)?.address || "");
+      setEditSecondaryPhone((lead.customMetadata as any)?.secondaryPhone || "");
+      setEditSecondaryPhoneType((lead.customMetadata as any)?.secondaryPhoneType || "both");
       setEditServices(lead.serviceType ? parseServices(lead.serviceType) : []);
       setEditLanguages(lead.preferredLanguage ? lead.preferredLanguage.split(",").map((s: string) => s.trim()).filter(Boolean) : []);
       setEditAssignedRepId(lead.assignedRep?.id || "");
@@ -277,6 +282,8 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
           companyName: editCompanyName.trim() || null,
           businessVertical: editVertical.trim() || null,
           address: editAddress.trim() || null,
+          secondaryPhone: editSecondaryPhone.replace(/\D/g, "").slice(-10) || null,
+          secondaryPhoneType: editSecondaryPhoneType,
           serviceType: editServices.join(", ") || null,
           preferredLanguage: editLanguages.join(", ") || null,
           ...(canAssign ? { assignedRepId: editAssignedRepId || null } : {}),
@@ -864,7 +871,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
           <div className="flex items-center gap-3 mt-4 pt-4 border-t border-slate-800/80">
             <button
               type="button"
-              onClick={handlePushToDial}
+              onClick={() => handlePushToDial()}
               disabled={isDialing}
               className="flex-1 flex items-center justify-center gap-2 bg-[#00c853] hover:bg-[#00b248] text-white font-semibold py-2.5 px-4 rounded-xl text-sm transition shadow-sm cursor-pointer disabled:opacity-60"
               title="Dispatches call directly to your paired Textora Dialer mobile phone"
@@ -886,6 +893,49 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
               WhatsApp Pitch
             </a>
           </div>
+
+          {/* Secondary / Alternate Call & WhatsApp Number */}
+          {(lead.customMetadata as any)?.secondaryPhone && (
+            <div className="flex flex-wrap items-center justify-between gap-2 mt-2.5 px-3 py-2 rounded-xl bg-slate-900/70 border border-slate-800 text-xs">
+              <div className="flex items-center gap-2 text-slate-300">
+                <Phone className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="font-semibold text-white">
+                  2nd Number: {(lead.customMetadata as any).secondaryPhone}
+                </span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 uppercase">
+                  {(lead.customMetadata as any).secondaryPhoneType === "call"
+                    ? "Call Only"
+                    : (lead.customMetadata as any).secondaryPhoneType === "whatsapp"
+                    ? "WhatsApp Only"
+                    : "Call & WA"}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {(lead.customMetadata as any).secondaryPhoneType !== "whatsapp" && (
+                  <button
+                    type="button"
+                    onClick={() => handlePushToDial((lead.customMetadata as any).secondaryPhone)}
+                    disabled={isDialing}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1 transition cursor-pointer disabled:opacity-60"
+                  >
+                    <Smartphone className="w-3 h-3" />
+                    Call 2nd
+                  </button>
+                )}
+                {(lead.customMetadata as any).secondaryPhoneType !== "call" && (
+                  <a
+                    href={buildWALink((lead.customMetadata as any).secondaryPhone, WA_PITCH)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-semibold flex items-center gap-1 transition"
+                  >
+                    <MessageCircle className="w-3 h-3" />
+                    WA 2nd
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Inline Edit Form if isEditingInfo is true */}
@@ -958,6 +1008,34 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                   placeholder="e.g. Indiranagar, Bangalore"
                   className="w-full text-xs px-3 py-2 bg-white border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900"
                 />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-slate-700 block mb-0.5">
+                  Alternate / 2nd Number (Call or WhatsApp)
+                </label>
+                <input
+                  type="tel"
+                  value={editSecondaryPhone}
+                  onChange={(e) => setEditSecondaryPhone(e.target.value)}
+                  placeholder="10-digit alternate number"
+                  className="w-full text-xs px-3 py-2 bg-white border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-slate-700 block mb-0.5">
+                  2nd Number Usage
+                </label>
+                <select
+                  value={editSecondaryPhoneType}
+                  onChange={(e) => setEditSecondaryPhoneType(e.target.value as "both" | "call" | "whatsapp")}
+                  className="w-full text-xs px-3 py-2 bg-white border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 text-gray-900"
+                >
+                  <option value="both">Call &amp; WhatsApp</option>
+                  <option value="call">Call Only</option>
+                  <option value="whatsapp">WhatsApp Only</option>
+                </select>
               </div>
 
               <div className="sm:col-span-2">

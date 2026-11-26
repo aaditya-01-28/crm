@@ -25,9 +25,14 @@ export async function POST(request: NextRequest) {
     return await withClient(async (client) => {
       const res = await client.query(
         `SELECT id, phone_number as "phone", contact_name as "contactName",
-                company_name as "companyName", status, service_type as "serviceType"
+                company_name as "companyName", status, service_type as "serviceType",
+                custom_metadata->>'secondaryPhone' as "secondaryPhone"
          FROM leads
-         WHERE tenant_id = $1 AND phone_number = ANY($2::varchar[])`,
+         WHERE tenant_id = $1
+           AND (
+             phone_number = ANY($2::varchar[])
+             OR custom_metadata->>'secondaryPhone' = ANY($2::varchar[])
+           )`,
         [session.tenantId, uniquePhones]
       );
       return NextResponse.json({ existing: res.rows });

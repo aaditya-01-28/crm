@@ -43,6 +43,14 @@ function parseSheetDate(raw?: string | null): Date | null {
   const s = String(raw).trim();
   if (!s) return null;
 
+  // Excel serial date number (e.g. 46259 -> 2026-08-25)
+  if (/^\d{5}(\.\d+)?$/.test(s)) {
+    const serial = parseFloat(s);
+    if (serial > 30000 && serial < 80000) {
+      return new Date(Date.UTC(1899, 11, 30) + Math.round(serial) * 86400000 + 5.5 * 3600000);
+    }
+  }
+
   // DD-MM-YY or DD-MM-YYYY or DD/MM/YY or DD/MM/YYYY
   const dmy = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/);
   if (dmy) {
@@ -330,7 +338,11 @@ export async function POST(request: NextRequest) {
 
             if (existing) {
               const action = l.duplicateAction || defaultDuplicateAction;
-              if (action === "skip") {
+              if (action === "skip" && !stageInfo.isClosedDeal) {
+                skippedCount++;
+                continue;
+              }
+              if (l.duplicateAction === "skip" && stageInfo.isClosedDeal) {
                 skippedCount++;
                 continue;
               }
@@ -342,7 +354,12 @@ export async function POST(request: NextRequest) {
                  SET contact_name = COALESCE(NULLIF($1, ''), contact_name),
                      company_name = COALESCE(NULLIF($2, ''), company_name),
                      business_vertical = COALESCE(NULLIF($3, ''), business_vertical),
-                     service_type = COALESCE(NULLIF($4, ''), service_type),
+                     service_type = CASE
+                       WHEN NULLIF($4, '') IS NULL THEN service_type
+                       WHEN service_type IS NULL OR service_type = '' THEN $4
+                       WHEN POSITION(LOWER($4) IN LOWER(service_type)) > 0 THEN service_type
+                       ELSE service_type || ', ' || $4
+                     END,
                      website_url = COALESCE(NULLIF($5, ''), website_url),
                      custom_metadata = $6::jsonb,
                      status = CASE WHEN $7 <> 'new' THEN $7 ELSE status END,
@@ -432,11 +449,33 @@ export async function POST(request: NextRequest) {
               ).catch(() => {});
             }
 
-            // Closed Deal -> Create deal in 'payment_pending' + payment in 'pending' for approval
+            // Closed Deal -> Create deal in 'payment_pending' + payment in 'pending_verification' for approval
             if (stageInfo.isClosedDeal) {
               const creditsVal = Number(l.credits || 0) || 0;
               const amountVal = Number(l.amount || 0) || 0;
               const serviceVal = l.service?.trim() || "WhatsApp API";
+
+              // Guard against re-uploading the exact same deal (same phone + close date + amount + credits)
+              const dupDealCheck = await client.query(
+                `SELECT id FROM deals
+                 WHERE lead_id = $1 AND tenant_id = $2
+                   AND quantity = $3 AND quoted_price = $4
+                   AND DATE(created_at AT TIME ZONE 'Asia/Kolkata') = DATE($5::timestamptz AT TIME ZONE 'Asia/Kolkata')
+                 LIMIT 1`,
+                [leadId, tenantId, creditsVal, amountVal, eventDate]
+              );
+              if (dupDealCheck.rows.length > 0) {
+                skippedCount++;
+                continue;
+              }
+
+              // Check if customer already has an earlier deal -> tag as Existing User (Top-Up / Recharge)
+              const priorDealCheck = await client.query(
+                `SELECT 1 FROM deals WHERE lead_id = $1 AND tenant_id = $2 LIMIT 1`,
+                [leadId, tenantId]
+              );
+              const userType = priorDealCheck.rows.length > 0 ? "Existing User" : "New User";
+
               const closingNotes = JSON.stringify({
                 userId: l.userId?.trim() || null,
                 password: l.password?.trim() || null,
@@ -450,9 +489,9 @@ export async function POST(request: NextRequest) {
               const dealRes = await client.query(
                 `INSERT INTO deals (
                    tenant_id, lead_id, rep_id, service_type, quantity, quoted_price,
-                   stage, closing_notes, created_at, updated_at
+                   expected_closing_date, stage, closing_notes, created_at, updated_at
                  )
-                 VALUES ($1, $2, $3, $4, $5, $6, 'payment_pending', $7, $8, NOW())
+                 VALUES ($1, $2, $3, $4, $5, $6, $8, 'payment_pending', $7, $8, $8)
                  RETURNING id`,
                 [
                   tenantId,
@@ -473,7 +512,7 @@ export async function POST(request: NextRequest) {
                    credits_to_add, original_amount, tax_amount, tds_amount, final_amount,
                    payment_mode, screenshot_url, ops_approval_status, credits_provisioned, created_at
                  )
-                 VALUES ($1, $2, $3, $4, 'New User', $5, $6, $7, 0, 0, $7, 'Google Sheet Import', 'NA', 'pending_verification', false, $8)`,
+                 VALUES ($1, $2, $3, $4, $9, $5, $6, $7, 0, 0, $7, 'Google Sheet Import', 'NA', 'pending_verification', false, $8)`,
                 [
                   tenantId,
                   dealId,
@@ -483,6 +522,7 @@ export async function POST(request: NextRequest) {
                   creditsVal,
                   amountVal,
                   eventDate,
+                  userType,
                 ]
               );
               pendingApprovalsCount++;

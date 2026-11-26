@@ -477,6 +477,9 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
           );
           setExtractedLeads(parsed);
           setSheetType(detectedSheetType);
+          if (detectedSheetType === "closed_deal") {
+            setDefaultDuplicateAction("update");
+          }
           if (parsed.length === 0) {
             toast.error("No valid 10-digit phone numbers found in this CSV.");
           } else {
@@ -494,10 +497,15 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
         const matrix = XLSX.utils.sheet_to_json<(string | number)[]>(sheet, {
           header: 1,
           defval: "",
+          raw: false,
+          dateNF: "dd-mm-yyyy",
         });
         const { leads: parsed, detectedSheetType } = parseRawMatrix(matrix, file.name);
         setExtractedLeads(parsed);
         setSheetType(detectedSheetType);
+        if (detectedSheetType === "closed_deal") {
+          setDefaultDuplicateAction("update");
+        }
         if (parsed.length === 0) {
           toast.error("No valid 10-digit phone numbers found in this Excel file.");
         } else {

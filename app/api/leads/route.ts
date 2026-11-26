@@ -119,7 +119,7 @@ export async function GET(request: NextRequest) {
         const searchPattern = `%${search}%`;
         const pIdx = params.push(searchPattern);
         conditions.push(
-          `(l.company_name ILIKE $${pIdx} OR l.contact_name ILIKE $${pIdx} OR l.phone_number ILIKE $${pIdx} OR l.business_vertical ILIKE $${pIdx} OR l.service_type ILIKE $${pIdx})`
+          `(l.company_name ILIKE $${pIdx} OR l.contact_name ILIKE $${pIdx} OR l.phone_number ILIKE $${pIdx} OR COALESCE(l.custom_metadata->>'secondaryPhone', '') ILIKE $${pIdx} OR l.business_vertical ILIKE $${pIdx} OR l.service_type ILIKE $${pIdx})`
         );
       }
 
