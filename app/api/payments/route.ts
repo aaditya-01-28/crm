@@ -24,9 +24,16 @@ export async function GET(request: NextRequest) {
       let params: any[];
 
       if (isRep) {
-        // Reps see only their own pending_verification payments (ones they submitted)
-        whereClause = "p.tenant_id = $1 AND p.rep_id = $2 AND p.ops_approval_status = 'pending_verification'";
-        params = [tenantId, repId];
+        // Reps see their own / assigned leads' payments across Pending, Approved, and Rejected (read-only)
+        if (opsStatus === "pending_verification") {
+          whereClause =
+            "p.tenant_id = $1 AND (p.rep_id = $2 OR l.assigned_rep_id = $2 OR d.rep_id = $2) AND p.ops_approval_status IN ('pending_verification', 'pending')";
+          params = [tenantId, repId];
+        } else {
+          whereClause =
+            "p.tenant_id = $1 AND (p.rep_id = $2 OR l.assigned_rep_id = $2 OR d.rep_id = $2) AND p.ops_approval_status = $3";
+          params = [tenantId, repId, opsStatus];
+        }
       } else {
         // Ops/Manager/Admin see payments filtered by exact status tab — no cross-tab bleed
         if (opsStatus === "pending_verification") {

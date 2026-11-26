@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CreditCard, CheckCircle2, XCircle, Clock, ExternalLink, User } from "lucide-react";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { useIsManagerOrAdmin } from "@/components/layout/SessionProvider";
+import { useIsManagerOrAdmin, useSession } from "@/components/layout/SessionProvider";
 import { toast } from "sonner";
 
 interface Payment {
@@ -47,6 +47,8 @@ const STATUS_CONFIG = {
 export default function PaymentsPage() {
   const queryClient = useQueryClient();
   const canManagePayments = useIsManagerOrAdmin();
+  const { role } = useSession();
+  const canApproveReject = role !== "sales_rep";
   const [activeTab, setActiveTab] = useState("pending_verification");
   const [repFilter, setRepFilter] = useState("all");
 
@@ -199,6 +201,7 @@ export default function PaymentsPage() {
               onApprove={(id) => approveMutation.mutate({ id, status: "approved" })}
               onReject={(id) => approveMutation.mutate({ id, status: "rejected" })}
               isPending={approveMutation.isPending}
+              canApproveReject={canApproveReject}
             />
           ))}
         </div>
@@ -212,11 +215,13 @@ function PaymentRow({
   onApprove,
   onReject,
   isPending,
+  canApproveReject,
 }: {
   payment: Payment;
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
   isPending: boolean;
+  canApproveReject: boolean;
 }) {
   const [showImg, setShowImg] = useState(false);
   const StatusConfig = STATUS_CONFIG[payment.opsApprovalStatus as keyof typeof STATUS_CONFIG];
@@ -278,33 +283,43 @@ function PaymentRow({
       </div>
 
       {/* Action buttons for pending */}
-      {payment.opsApprovalStatus === "pending_verification" && (
-        <div className="flex gap-2 mt-4 pt-4 border-t border-gray-100 justify-end">
-          <a
-            href={payment.screenshotUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 text-xs text-gray-600 border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition"
-          >
-            <ExternalLink className="w-3.5 h-3.5" />
-            View Receipt
-          </a>
-          <button
-            onClick={() => onReject(payment.id)}
-            disabled={isPending}
-            className="flex items-center gap-1 text-xs text-red-600 border border-red-200 bg-red-50 px-3 py-1.5 rounded-lg hover:bg-red-100 transition disabled:opacity-50"
-          >
-            <XCircle className="w-3.5 h-3.5" />
-            Reject
-          </button>
-          <button
-            onClick={() => onApprove(payment.id)}
-            disabled={isPending}
-            className="flex items-center gap-1 text-xs text-green-700 border border-green-200 bg-green-50 px-3 py-1.5 rounded-lg hover:bg-green-100 transition disabled:opacity-50"
-          >
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            Approve & Add Credits
-          </button>
+      {(payment.opsApprovalStatus === "pending_verification" || payment.opsApprovalStatus === "pending") && (
+        <div className="flex gap-2 mt-4 pt-4 border-t border-gray-100 justify-end items-center">
+          {payment.screenshotUrl && payment.screenshotUrl !== "NA" && (
+            <a
+              href={payment.screenshotUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-xs text-gray-600 border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              View Receipt
+            </a>
+          )}
+          {canApproveReject ? (
+            <>
+              <button
+                onClick={() => onReject(payment.id)}
+                disabled={isPending}
+                className="flex items-center gap-1 text-xs text-red-600 border border-red-200 bg-red-50 px-3 py-1.5 rounded-lg hover:bg-red-100 transition disabled:opacity-50"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                Reject
+              </button>
+              <button
+                onClick={() => onApprove(payment.id)}
+                disabled={isPending}
+                className="flex items-center gap-1 text-xs text-green-700 border border-green-200 bg-green-50 px-3 py-1.5 rounded-lg hover:bg-green-100 transition disabled:opacity-50"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                Approve &amp; Add Credits
+              </button>
+            </>
+          ) : (
+            <span className="text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg">
+              Read-Only • Pending Accounts / Admin Approval
+            </span>
+          )}
         </div>
       )}
 
