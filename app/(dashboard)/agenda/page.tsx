@@ -19,6 +19,7 @@ import {
   Phone,
   MessageCircle,
   Filter,
+  Edit3,
 } from "lucide-react";
 import { formatDateTime, toUtcIsoString, cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -68,6 +69,7 @@ export default function AgendaPage() {
   const canFilterAgenda = useCanAssignLeads();
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [outcomeTask, setOutcomeTask] = useState<Task | null>(null);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [typeFilter, setTypeFilter] = useState<"all" | "product_demo" | "callback">("all");
   const [repFilter, setRepFilter] = useState<string>("all");
 
@@ -270,6 +272,7 @@ export default function AgendaPage() {
           onComplete={(id) => completeMutation.mutate(id)}
           onOpenLead={(leadId) => setSelectedLeadId(leadId)}
           onUpdateOutcome={(task) => setOutcomeTask(task)}
+          onEditSchedule={canFilterAgenda ? (task) => setEditingTask(task) : undefined}
           emptyMessage="No tasks scheduled for today"
         />
 
@@ -283,6 +286,7 @@ export default function AgendaPage() {
           onComplete={(id) => completeMutation.mutate(id)}
           onOpenLead={(leadId) => setSelectedLeadId(leadId)}
           onUpdateOutcome={(task) => setOutcomeTask(task)}
+          onEditSchedule={canFilterAgenda ? (task) => setEditingTask(task) : undefined}
           emptyMessage="No upcoming tasks scheduled"
         />
       </div>
@@ -301,6 +305,7 @@ export default function AgendaPage() {
               onComplete={(id) => completeMutation.mutate(id)}
               onOpenLead={(leadId) => setSelectedLeadId(leadId)}
               onUpdateOutcome={(task) => setOutcomeTask(task)}
+          onEditSchedule={canFilterAgenda ? (task) => setEditingTask(task) : undefined}
             />
           )}
 
@@ -315,6 +320,7 @@ export default function AgendaPage() {
               onComplete={(id) => completeMutation.mutate(id)}
               onOpenLead={(leadId) => setSelectedLeadId(leadId)}
               onUpdateOutcome={(task) => setOutcomeTask(task)}
+          onEditSchedule={canFilterAgenda ? (task) => setEditingTask(task) : undefined}
             />
           )}
         </div>
@@ -376,6 +382,7 @@ function AgendaSection({
   onComplete,
   onOpenLead,
   onUpdateOutcome,
+  onEditSchedule,
   emptyMessage,
 }: {
   title: string;
@@ -387,6 +394,7 @@ function AgendaSection({
   onComplete: (id: string) => void;
   onOpenLead: (leadId: string) => void;
   onUpdateOutcome: (task: Task) => void;
+  onEditSchedule?: (task: Task) => void;
   emptyMessage?: string;
 }) {
   return (
@@ -411,6 +419,7 @@ function AgendaSection({
               onComplete={onComplete}
               onOpenLead={onOpenLead}
               onUpdateOutcome={onUpdateOutcome}
+              onEditSchedule={onEditSchedule}
               isLast={i === tasks.length - 1}
             />
           ))
@@ -426,6 +435,7 @@ function TaskRow({
   onComplete,
   onOpenLead,
   onUpdateOutcome,
+  onEditSchedule,
   isLast,
 }: {
   task: Task;
@@ -433,6 +443,7 @@ function TaskRow({
   onComplete: (id: string) => void;
   onOpenLead: (leadId: string) => void;
   onUpdateOutcome: (task: Task) => void;
+  onEditSchedule?: (task: Task) => void;
   isLast: boolean;
 }) {
   const isDemo = task.taskType === "product_demo";
@@ -544,6 +555,21 @@ function TaskRow({
           <span>Action</span>
           <ArrowRight className="w-3.5 h-3.5" />
         </button>
+
+        {onEditSchedule && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEditSchedule(task);
+            }}
+            className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2.5 py-1.5 rounded-lg transition shrink-0 cursor-pointer"
+            title="Edit scheduled date/time or notes (Level 2 & 3)"
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+            <span className="hidden lg:inline">Edit</span>
+          </button>
+        )}
 
         {isOwner ? (
           <>
@@ -1031,6 +1057,162 @@ function TaskOutcomeModal({
                   <span>Save & Update Agenda</span>
                 </>
               )}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+
+function EditTaskScheduleModal({
+  task,
+  onClose,
+  onSuccess,
+}: {
+  task: Task | null;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [scheduledDatetime, setScheduledDatetime] = useState("");
+  const [taskType, setTaskType] = useState<"callback" | "product_demo">("callback");
+  const [notes, setNotes] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (task) {
+      if (task.scheduledTime) {
+        const d = new Date(task.scheduledTime);
+        if (!isNaN(d.getTime())) {
+          const pad = (n: number) => n.toString().padStart(2, "0");
+          setScheduledDatetime(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+        } else {
+          setScheduledDatetime("");
+        }
+      } else {
+        setScheduledDatetime("");
+      }
+      setTaskType(task.taskType === "product_demo" ? "product_demo" : "callback");
+      setNotes(task.notes || "");
+    }
+  }, [task]);
+
+  if (!task) return null;
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    if (!task) return;
+    setIsSaving(true);
+    try {
+      const utcTime = scheduledDatetime ? toUtcIsoString(scheduledDatetime) : null;
+      const res = await fetch(`/api/tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "edit_schedule",
+          taskType,
+          scheduledTime: utcTime,
+          notes: notes.trim() || null,
+        }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to update scheduled time");
+      }
+      toast.success("Scheduled time & notes updated ✅");
+      onSuccess();
+      onClose();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update task");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl max-w-md w-full border border-gray-200 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-sm">Edit Scheduled Task (Level 2 &amp; 3)</h3>
+            <p className="text-xs text-slate-300 mt-0.5">
+              {task.lead.companyName || task.lead.contactName || task.lead.phoneNumber} • {task.lead.phoneNumber}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="text-white/80 hover:text-white p-1">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSave} className="p-6 space-y-4 text-xs">
+          <div>
+            <label className="font-semibold text-gray-700 block mb-1">Task Type</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setTaskType("callback")}
+                className={cn(
+                  "py-2 px-3 rounded-xl border font-semibold cursor-pointer",
+                  taskType === "callback"
+                    ? "bg-blue-50 border-blue-500 text-blue-800"
+                    : "bg-gray-50 border-gray-200 text-gray-600"
+                )}
+              >
+                Callback
+              </button>
+              <button
+                type="button"
+                onClick={() => setTaskType("product_demo")}
+                className={cn(
+                  "py-2 px-3 rounded-xl border font-semibold cursor-pointer",
+                  taskType === "product_demo"
+                    ? "bg-purple-50 border-purple-500 text-purple-800"
+                    : "bg-gray-50 border-gray-200 text-gray-600"
+                )}
+              >
+                Product Demo
+              </button>
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="font-semibold text-gray-700">Scheduled Date &amp; Time (12h AM/PM)</label>
+              {scheduledDatetime && (
+                <button
+                  type="button"
+                  onClick={() => setScheduledDatetime("")}
+                  className="text-[10px] text-rose-600 hover:underline font-medium"
+                >
+                  Clear time
+                </button>
+              )}
+            </div>
+            <DateTime12hInput value={scheduledDatetime} onChange={setScheduledDatetime} />
+          </div>
+          <div>
+            <label className="font-semibold text-gray-700 block mb-1">Notes / Remark</label>
+            <textarea
+              rows={3}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="w-full p-2.5 bg-gray-50 border border-gray-300 rounded-xl text-xs text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isSaving}
+              className="px-4 py-2 font-semibold text-gray-600 hover:bg-gray-100 rounded-xl cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSaving}
+              className="px-5 py-2 font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl cursor-pointer disabled:opacity-50"
+            >
+              {isSaving ? "Saving..." : "Save Schedule"}
             </button>
           </div>
         </form>

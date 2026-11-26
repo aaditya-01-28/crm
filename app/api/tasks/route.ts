@@ -47,11 +47,19 @@ export async function GET(request: NextRequest) {
          LEFT JOIN leads l ON t.lead_id = l.id
          LEFT JOIN users u ON t.rep_id = u.id
          WHERE t.tenant_id = $1 AND t.status = 'pending' ${sourceFilter} ${repFilter}
-         ORDER BY t.scheduled_time ASC NULLS LAST`,
+         ORDER BY t.scheduled_time ASC NULLS LAST, t.updated_at DESC`,
         queryParams
       );
 
-      const tasks = tasksRes.rows.map((r) => ({
+      // Deduplicate: keep only the newest pending task per lead + type
+      const seenLeadTask = new Set<string>();
+      const uniqueRows = tasksRes.rows.filter((r) => {
+        const key = `${r.leadId}_${r.taskType}`;
+        if (seenLeadTask.has(key)) return false;
+        seenLeadTask.add(key);
+        return true;
+      });
+      const tasks = uniqueRows.map((r) => ({
         id: r.id,
         tenantId: r.tenantId,
         leadId: r.leadId,

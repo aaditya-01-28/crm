@@ -48,6 +48,7 @@ import { DateTime12hInput } from "@/components/common/DateTime12hInput";
 import { AudioRecordingPlayer } from "@/components/calls/AudioRecordingPlayer";
 import { toast } from "sonner";
 import { useCanAssignLeads, useIsAdmin, useSession } from "@/components/layout/SessionProvider";
+import { isManagerOrAdmin } from "@/lib/rbac";
 
 interface LeadDetailModalProps {
   leadId: string;
@@ -92,9 +93,90 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  const canEditLogs = isManagerOrAdmin(role);
+
+  const isoToLocalInput = (iso: string | null | undefined) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
   // Delete timeline log state (Level 3 Super Admin only)
   const [confirmDeleteLogId, setConfirmDeleteLogId] = useState<string | null>(null);
   const [deletingLogId, setDeletingLogId] = useState<string | null>(null);
+
+  // Edit timeline / task log state (Level 2 Manager & Level 3 Super Admin)
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editLogDisposition, setEditLogDisposition] = useState("");
+  const [editLogRemark, setEditLogRemark] = useState("");
+  const [editLogScheduledTime, setEditLogScheduledTime] = useState("");
+  const [editLogCallTime, setEditLogCallTime] = useState("");
+  const [savingEditLog, setSavingEditLog] = useState(false);
+
+  const startEditingItem = (opts: {
+    id: string;
+    disposition?: string;
+    remark?: string | null;
+    scheduledTime?: string | null;
+    callTime?: string | null;
+  }) => {
+    setConfirmDeleteLogId(null);
+    setEditingItemId(opts.id);
+    setEditLogDisposition(opts.disposition || "");
+    setEditLogRemark(opts.remark || "");
+    setEditLogScheduledTime(isoToLocalInput(opts.scheduledTime));
+    setEditLogCallTime(isoToLocalInput(opts.callTime));
+  };
+
+  const handleSaveEditedLog = async (payload: {
+    callLogIds?: string[];
+    stageHistoryIds?: string[];
+    taskIds?: string[];
+    includeDisposition?: boolean;
+    includeCallTime?: boolean;
+  }) => {
+    setSavingEditLog(true);
+    try {
+      const body: Record<string, any> = {
+        callLogIds: payload.callLogIds || [],
+        stageHistoryIds: payload.stageHistoryIds || [],
+        taskIds: payload.taskIds || [],
+        remark: editLogRemark,
+        scheduledTime: editLogScheduledTime ? toUtcIsoString(editLogScheduledTime) : null,
+      };
+      if (payload.includeDisposition && editLogDisposition) {
+        body.disposition = editLogDisposition;
+      }
+      if (payload.includeCallTime && editLogCallTime) {
+        body.callTimestamp = toUtcIsoString(editLogCallTime);
+      }
+
+      const res = await fetch(`/api/leads/${leadId}/timeline/edit`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to update log entry");
+      }
+      toast.success("Log updated & synced across Agenda and Reports ✅");
+      setEditingItemId(null);
+      queryClient.invalidateQueries({ queryKey: ["lead-detail", leadId] });
+      queryClient.invalidateQueries({ queryKey: ["leads-directory"] });
+      queryClient.invalidateQueries({ queryKey: ["agenda"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["call-logs"] });
+      queryClient.invalidateQueries({ queryKey: ["eod-reports"] });
+      onLeadUpdated?.();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update log");
+    } finally {
+      setSavingEditLog(false);
+    }
+  };
 
   const handleDeleteTimelineItem = async (item: {
     id: string;
@@ -468,7 +550,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
           repName: h.rep?.fullName || "Representative",
           notes: h.notes,
           meetingLink: meta?.meetingLink || null,
-          scheduledTime: meta?.demoDatetime || meta?.callbackDatetime || null,
+          scheduledTime: meta?.demoDatetime || meta?.callbackDatetime || meta?.retryTime || meta?.scheduledTime || meta?.demoDate || null,
           isInterested: Boolean(meta?.isInterested),
           sourceRefs: {
             callLogIds: [],
@@ -1306,6 +1388,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                         { value: "Already Using Our Service", label: "Using Our Service", compatible: false },
                         { value: "RNR", label: "RNR", compatible: false },
                         { value: "Not Interested", label: "Not Interested", compatible: false },
+                        { value: "Invalid", label: "Invalid Number", compatible: false },
                       ].map((opt) => {
                         const isSelected =
                           opt.value === "Interested"
@@ -1325,7 +1408,7 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                                 } else {
                                   // Turn on Interested; clear incompatible single-select options
                                   setIsInterested(true);
-                                  const incompatible = ["RNR", "Not Interested", "Already Using Our Service"];
+                                  const incompatible = ["RNR", "Not Interested", "Invalid", "Already Using Our Service"];
                                   if (incompatible.includes(disposition) || disposition === "Connected") {
                                     setDisposition("Interested");
                                   }
@@ -1568,6 +1651,26 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                             <span className="text-xs text-gray-400">
                               {formatDateTime(item.timestamp)}
                             </span>
+                            {canEditLogs && (item.sourceRefs.callLogIds.length > 0 || item.sourceRefs.stageHistoryIds.length > 0 || item.sourceRefs.deleteTaskIds.length > 0) && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  editingItemId === item.id
+                                    ? setEditingItemId(null)
+                                    : startEditingItem({
+                                        id: item.id,
+                                        disposition: item.badge,
+                                        remark: item.notes,
+                                        scheduledTime: item.scheduledTime,
+                                        callTime: item.sourceRefs.callLogIds.length > 0 ? item.timestamp : null,
+                                      })
+                                }
+                                title="Edit log / scheduled time (Level 2 & 3)"
+                                className="p-1 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors cursor-pointer"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                             {isLevel3Admin && (
                               <button
                                 type="button"
@@ -1585,6 +1688,144 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                             )}
                           </div>
                         </div>
+
+                        {canEditLogs && editingItemId === item.id && (
+                          <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3 space-y-2.5 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="font-bold text-emerald-900">
+                                Edit Log Details (Level 2 &amp; 3)
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setEditingItemId(null)}
+                                className="text-gray-400 hover:text-gray-600"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            {(item.sourceRefs.callLogIds.length > 0 || item.sourceRefs.stageHistoryIds.length > 0) && (
+                              <div>
+                                <label className="text-[11px] font-semibold text-gray-700 block mb-1">
+                                  Outcome / Disposition
+                                </label>
+                                <select
+                                  value={editLogDisposition}
+                                  onChange={(e) => setEditLogDisposition(e.target.value)}
+                                  className="w-full px-2.5 py-1.5 bg-white border border-gray-300 rounded-lg text-xs text-gray-800 outline-none focus:ring-2 focus:ring-emerald-500"
+                                >
+                                  {[
+                                    "Interested",
+                                    "Connected",
+                                    "Callback",
+                                    "Demo Scheduled",
+                                    "Demo Done",
+                                    "Future Requirement",
+                                    "RNR",
+                                    "Not Interested",
+                                    "Invalid",
+                                    "Already Using Our Service",
+                                    "Already Purchased or Using Other Company Service",
+                                  ].map((opt) => (
+                                    <option key={opt} value={opt}>
+                                      {opt}
+                                    </option>
+                                  ))}
+                                  {editLogDisposition &&
+                                    ![
+                                      "Interested",
+                                      "Connected",
+                                      "Callback",
+                                      "Demo Scheduled",
+                                      "Demo Done",
+                                      "Future Requirement",
+                                      "RNR",
+                                      "Not Interested",
+                                      "Invalid",
+                                      "Already Using Our Service",
+                                      "Already Purchased or Using Other Company Service",
+                                    ].includes(editLogDisposition) && (
+                                      <option value={editLogDisposition}>{editLogDisposition}</option>
+                                    )}
+                                </select>
+                              </div>
+                            )}
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <label className="text-[11px] font-semibold text-gray-700">
+                                  Scheduled Meeting / Callback Time (12h AM/PM)
+                                </label>
+                                {editLogScheduledTime && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditLogScheduledTime("")}
+                                    className="text-[10px] text-rose-600 hover:underline font-medium"
+                                  >
+                                    Clear time
+                                  </button>
+                                )}
+                              </div>
+                              <DateTime12hInput
+                                value={editLogScheduledTime}
+                                onChange={setEditLogScheduledTime}
+                              />
+                            </div>
+                            {item.sourceRefs.callLogIds.length > 0 && (
+                              <div>
+                                <label className="text-[11px] font-semibold text-gray-700 block mb-1">
+                                  Call Logged Time (12h AM/PM)
+                                </label>
+                                <DateTime12hInput
+                                  value={editLogCallTime}
+                                  onChange={setEditLogCallTime}
+                                />
+                              </div>
+                            )}
+                            <div>
+                              <label className="text-[11px] font-semibold text-gray-700 block mb-1">
+                                Notes / Remark
+                              </label>
+                              <textarea
+                                rows={2}
+                                value={editLogRemark}
+                                onChange={(e) => setEditLogRemark(e.target.value)}
+                                className="w-full p-2 bg-white border border-gray-300 rounded-lg text-xs text-gray-800 outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+                              />
+                            </div>
+                            <div className="flex justify-end gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() => setEditingItemId(null)}
+                                disabled={savingEditLog}
+                                className="px-3 py-1 rounded-lg bg-white border border-gray-200 text-gray-700 font-medium"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleSaveEditedLog({
+                                    callLogIds: item.sourceRefs.callLogIds,
+                                    stageHistoryIds: item.sourceRefs.stageHistoryIds,
+                                    taskIds: Array.from(
+                                      new Set([
+                                        ...item.sourceRefs.deleteTaskIds,
+                                        ...item.sourceRefs.revertTaskIds,
+                                      ])
+                                    ),
+                                    includeDisposition:
+                                      item.sourceRefs.callLogIds.length > 0 ||
+                                      item.sourceRefs.stageHistoryIds.length > 0,
+                                    includeCallTime: item.sourceRefs.callLogIds.length > 0,
+                                  })
+                                }
+                                disabled={savingEditLog}
+                                className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50"
+                              >
+                                {savingEditLog ? "Saving..." : "Save Changes"}
+                              </button>
+                            </div>
+                          </div>
+                        )}
 
                         {isLevel3Admin && confirmDeleteLogId === item.id && (
                           <div className="flex items-center justify-between gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs">
@@ -1715,16 +1956,36 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                             {task.taskType.replace("_", " ")}
                           </span>
                         </div>
-                        <span
-                          className={cn(
-                            "text-xs px-2 py-0.5 rounded-full font-semibold",
-                            task.status === "completed"
-                              ? "bg-green-100 text-green-700"
-                              : "bg-amber-100 text-amber-700"
+                        <div className="flex items-center gap-1.5">
+                          {canEditLogs && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                editingItemId === `tab-task-${task.id}`
+                                  ? setEditingItemId(null)
+                                  : startEditingItem({
+                                      id: `tab-task-${task.id}`,
+                                      remark: task.notes,
+                                      scheduledTime: task.scheduledTime,
+                                    })
+                              }
+                              title="Edit scheduled date/time or notes (Level 2 & 3)"
+                              className="p-1 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors cursor-pointer"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
                           )}
-                        >
-                          {task.status}
-                        </span>
+                          <span
+                            className={cn(
+                              "text-xs px-2 py-0.5 rounded-full font-semibold",
+                              task.status === "completed"
+                                ? "bg-green-100 text-green-700"
+                                : "bg-amber-100 text-amber-700"
+                            )}
+                          >
+                            {task.status}
+                          </span>
+                        </div>
                       </div>
                       {task.scheduledTime ? (
                         <p className="text-xs text-gray-600">
@@ -1734,6 +1995,55 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                         <div className="flex items-center gap-1.5 text-xs text-amber-800 bg-amber-50 px-2.5 py-1.5 rounded-lg border border-amber-200">
                           <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                           <span className="font-medium">Date & time: TBD (Client yet to confirm — follow-up required)</span>
+                        </div>
+                      )}
+                      {canEditLogs && editingItemId === `tab-task-${task.id}` && (
+                        <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3 space-y-2 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-emerald-900">Edit Scheduled Follow-Up (12h AM/PM)</span>
+                            {editLogScheduledTime && (
+                              <button
+                                type="button"
+                                onClick={() => setEditLogScheduledTime("")}
+                                className="text-[10px] text-rose-600 hover:underline font-medium"
+                              >
+                                Clear time
+                              </button>
+                            )}
+                          </div>
+                          <DateTime12hInput
+                            value={editLogScheduledTime}
+                            onChange={setEditLogScheduledTime}
+                          />
+                          <textarea
+                            rows={2}
+                            value={editLogRemark}
+                            onChange={(e) => setEditLogRemark(e.target.value)}
+                            placeholder="Notes / remark..."
+                            className="w-full p-2 bg-white border border-gray-300 rounded-lg text-xs text-gray-800 outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+                          />
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setEditingItemId(null)}
+                              className="px-2.5 py-1 rounded bg-white border border-gray-200 text-gray-700"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleSaveEditedLog({
+                                  taskIds: [task.id],
+                                  includeDisposition: false,
+                                })
+                              }
+                              disabled={savingEditLog}
+                              className="px-3 py-1 rounded bg-emerald-600 text-white font-semibold disabled:opacity-50"
+                            >
+                              {savingEditLog ? "Saving..." : "Save"}
+                            </button>
+                          </div>
                         </div>
                       )}
                       {task.notes && (

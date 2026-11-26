@@ -58,6 +58,13 @@ export async function PATCH(
       let newStatus = lead.status;
       let rnrCount = lead.rnr_count || 0;
 
+      // Check whether this lead currently has a pending scheduled product_demo task
+      const pendingDemoRes = await client.query(
+        `SELECT id FROM scheduled_tasks WHERE lead_id = $1 AND tenant_id = $2 AND task_type = 'product_demo' AND status = 'pending' LIMIT 1`,
+        [id, tenantId]
+      );
+      const hasPendingDemo = pendingDemoRes.rows.length > 0;
+
       let taskToCreate: {
         taskType: string;
         scheduledTime: Date | null;
@@ -67,14 +74,25 @@ export async function PATCH(
 
       switch (disposition) {
         case "RNR":
-          newStatus = "rnr";
           rnrCount += 1;
           if (callbackDatetime) {
+            newStatus = "callback";
             taskToCreate = {
               taskType: "callback",
               scheduledTime: parseScheduledDateTime(callbackDatetime),
               notes: remark ? `RNR Retry: ${remark}` : "RNR Retry Callback",
             };
+          } else {
+            newStatus = "rnr";
+            if (hasPendingDemo) {
+              taskToCreate = {
+                taskType: "callback",
+                scheduledTime: null,
+                notes: remark
+                  ? `Demo RNR Retry: ${remark} [Pending Date Confirmation]`
+                  : "Demo RNR Retry Callback [Pending Date Confirmation]",
+              };
+            }
           }
           break;
         case "Not Interested":
@@ -345,21 +363,26 @@ export async function PATCH(
         let updatedExistingTask = false;
         if (taskToCreate.taskType === "callback") {
           const existingCb = await client.query(
-            `SELECT id FROM scheduled_tasks WHERE lead_id = $1 AND task_type = 'callback' AND status = 'pending' LIMIT 1`,
+            `SELECT id FROM scheduled_tasks WHERE lead_id = $1 AND task_type = 'callback' AND status = 'pending' ORDER BY updated_at DESC LIMIT 1`,
             [id]
           );
           if (existingCb.rows.length > 0) {
             updatedExistingTask = true;
-            if (taskToCreate.scheduledTime) {
-              await client.query(
-                `UPDATE scheduled_tasks
-                 SET scheduled_time = $1,
-                     notes = COALESCE($2, notes),
-                     updated_at = NOW()
-                 WHERE id = $3`,
-                [taskToCreate.scheduledTime, taskToCreate.notes, existingCb.rows[0].id]
-              );
-            }
+            await client.query(
+              `UPDATE scheduled_tasks
+               SET scheduled_time = COALESCE($1, scheduled_time),
+                   notes = COALESCE($2, notes),
+                   rep_id = COALESCE($3, rep_id),
+                   updated_at = NOW()
+               WHERE id = $4`,
+              [taskToCreate.scheduledTime, taskToCreate.notes, repId, existingCb.rows[0].id]
+            );
+            // Close any older duplicate pending callback tasks for this same lead
+            await client.query(
+              `UPDATE scheduled_tasks SET status = 'rescheduled', updated_at = NOW()
+               WHERE lead_id = $1 AND task_type = 'callback' AND status = 'pending' AND id <> $2`,
+              [id, existingCb.rows[0].id]
+            ).catch(() => {});
           }
         } else if (taskToCreate.taskType === "product_demo") {
           // If a pending callback converted to a demo, close out the pending callback
@@ -415,11 +438,43 @@ export async function PATCH(
         );
       }
 
-      // Auto-resolve pending agenda tasks when a follow-up call is disposed from the dialer/APK
-      // so the rep doesn't have to manually log the outcome a second time in the Web App Agenda.
+      // If a pending product_demo was called via Dialer/APK and disposed as RNR or Callback,
+      // mark the demo task as 'rescheduled' (never 'completed') so Agenda & Demo Done reports stay accurate.
+      if (hasPendingDemo && (disposition === "RNR" || disposition === "Callback" || disposition === "Future Requirement")) {
+        const rescheduleTag = remark ? `[${disposition}: ${remark}]` : `[${disposition} — Moved to Callback]`;
+        await client.query(
+          `UPDATE scheduled_tasks
+           SET status = 'rescheduled',
+               notes = CASE WHEN notes IS NOT NULL AND notes <> '' THEN notes || ' ' || $2 ELSE $2 END,
+               updated_at = NOW()
+           WHERE lead_id = $1 AND tenant_id = $3 AND task_type = 'product_demo' AND status = 'pending'`,
+          [id, rescheduleTag, tenantId]
+        ).catch(() => {});
+      }
+
+      // Cancel pending product_demo (never mark completed) on disqualified outcomes
+      if (
+        hasPendingDemo &&
+        (disposition === "Not Interested" ||
+          disposition === "Invalid" ||
+          disposition === "Switched Off" ||
+          newStatus === "already_using" ||
+          newStatus === "already_purchased")
+      ) {
+        const cancelTag = remark ? `[Cancelled — ${disposition}: ${remark}]` : `[Cancelled — ${disposition}]`;
+        await client.query(
+          `UPDATE scheduled_tasks
+           SET status = 'cancelled',
+               notes = CASE WHEN notes IS NOT NULL AND notes <> '' THEN notes || ' ' || $2 ELSE $2 END,
+               updated_at = NOW()
+           WHERE lead_id = $1 AND tenant_id = $3 AND task_type = 'product_demo' AND status = 'pending'`,
+          [id, cancelTag, tenantId]
+        ).catch(() => {});
+      }
+
+      // Auto-resolve pending callback tasks on decisive outcomes (NEVER auto-complete pending callbacks on RNR!)
       if (!isManualNote) {
         const shouldAutoCompletePending =
-          (disposition === "RNR" && !callbackDatetime) ||
           disposition === "Not Interested" ||
           disposition === "Invalid" ||
           disposition === "Switched Off" ||

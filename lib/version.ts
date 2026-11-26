@@ -1,9 +1,13 @@
-export const APP_VERSION = "1.3.7";
-export const APP_BUILD = 21;
-export const APK_VERSION = "1.3.7";
-export const APK_BUILD = 21;
+export const APP_VERSION = "1.3.8";
+export const APP_BUILD = 22;
+export const APK_VERSION = "1.3.8";
+export const APK_BUILD = 22;
 export const APP_RELEASE_DATE = "2026-11-26";
 export const APP_RELEASE_NOTES = [
+  "Centralized Real-Time Call Queue capturing inbound, missed, and phone-dialed CRM calls with full talk time",
+  "Scheduled Demo RNR / Callback actions now cleanly convert to Callback agenda tasks without inflating Demo Done",
+  "Added Invalid Number option & filter tabs across Web CRM and Mobile Dialer; removed obsolete pipeline statuses",
+  "Fixed duplicate SIM dialer rows in Mobile Call Logs & Sync",
   "Fixed scheduled demo RNR/reschedule mistakenly counting as Demo Completed in Reports",
   "Improved real-time Inbound & Missed-Inbound queue with 60s lead cache and VoWiFi call detection",
   "30-day persistent Mobile APK session & Vivo Android 14 KeyStore fallback fix",

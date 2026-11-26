@@ -99,6 +99,7 @@ const STATUS_FILTERS = [
   { key: "already_using", label: "Already Using Our Service" },
   { key: "already_purchased", label: "Already Purchased / Other" },
   { key: "future_requirement", label: "Future Requirement" },
+  { key: "invalid", label: "Invalid" },
 ];
 
 const VERTICALS = [
