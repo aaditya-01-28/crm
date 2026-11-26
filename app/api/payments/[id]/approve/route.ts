@@ -25,7 +25,7 @@ export async function PATCH(
 
     return await withClient(async (client) => {
       const paymentRes = await client.query(
-        "SELECT id, deal_id, lead_id FROM payments WHERE id = $1 AND tenant_id = $2",
+        "SELECT id, deal_id, lead_id, payment_mode FROM payments WHERE id = $1 AND tenant_id = $2",
         [id, tenantId]
       );
 
@@ -47,9 +47,13 @@ export async function PATCH(
         let matchedDealId = payment.deal_id;
 
         if (matchedDealId) {
-          await client.query("UPDATE deals SET stage = 'closed_won', updated_at = NOW() WHERE id = $1", [
-            matchedDealId,
-          ]);
+          const isSheetImport = payment.payment_mode === "Google Sheet Import";
+          await client.query(
+            isSheetImport
+              ? "UPDATE deals SET stage = 'closed_won', updated_at = COALESCE(expected_closing_date::timestamptz, created_at, NOW()) WHERE id = $1"
+              : "UPDATE deals SET stage = 'closed_won', updated_at = NOW() WHERE id = $1",
+            [matchedDealId]
+          );
         }
 
         if (payment.lead_id) {
