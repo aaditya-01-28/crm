@@ -232,6 +232,31 @@ export async function PATCH(
         }
       }
 
+      const parsedTimestamp = callTimestamp ? parseScheduledDateTime(callTimestamp) : null;
+      const finalTimestamp = parsedTimestamp && !isNaN(parsedTimestamp.getTime()) ? parsedTimestamp : new Date();
+      const isAutoLoggedSkip = typeof remark === "string" && /auto-logged/i.test(remark);
+
+      if (isAutoLoggedSkip) {
+        const manualDupCheck = await client.query(
+          `SELECT id FROM call_logs
+           WHERE lead_id = $1 AND rep_id = $2 AND tenant_id = $3
+             AND call_timestamp >= ($4::TIMESTAMPTZ - INTERVAL '5 minutes')
+             AND call_timestamp <= ($4::TIMESTAMPTZ + INTERVAL '5 minutes')
+             AND ABS(duration_seconds - $5) <= 3
+             AND (remark IS DISTINCT FROM 'Captured from SIM dialer')
+           LIMIT 1`,
+          [id, repId, tenantId, finalTimestamp, durationSeconds]
+        ).catch(() => ({ rows: [] }));
+
+        if (manualDupCheck.rows.length > 0) {
+          return NextResponse.json({
+            success: true,
+            deduplicated: true,
+            lead: { id, status: lead.status, rnrCount },
+          });
+        }
+      }
+
       if (targetCallId) {
         await client.query(
           `UPDATE call_logs
@@ -245,9 +270,6 @@ export async function PATCH(
           [disposition, durationSeconds, remark || null, recordingUrl || null, logSource, isExplicitInterested, targetCallId]
         );
       } else {
-        const parsedTimestamp = callTimestamp ? parseScheduledDateTime(callTimestamp) : null;
-        const finalTimestamp = parsedTimestamp && !isNaN(parsedTimestamp.getTime()) ? parsedTimestamp : new Date();
-
         await client.query(
           `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, is_interested, call_timestamp)
            VALUES ($1::uuid, $2::uuid, $3::uuid, $4::varchar, $5::int, $6::text, $7::text, $8::text, $9::boolean, $10::timestamptz)`,

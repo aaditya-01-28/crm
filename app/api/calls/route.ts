@@ -373,6 +373,28 @@ export async function POST(request: NextRequest) {
         // 1. Within 5 minutes of callTimestamp
         // 2. Or matching duration (+/- 3 seconds) within the last 15 minutes
         // 3. Or an un-disposed SIM dialer capture waiting for match within 15 minutes
+        const isAutoLoggedRemark = typeof remark === "string" && /auto-logged/i.test(remark);
+        if (isAutoLoggedRemark) {
+          const existingManualRes = await client.query(
+            `SELECT id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
+                    disposition, duration_seconds as "durationSeconds", remark,
+                    recording_url as "recordingUrl", log_source as "logSource", COALESCE(is_interested, false) as "isInterested", call_timestamp as "callTimestamp"
+             FROM call_logs
+             WHERE tenant_id = $1 AND lead_id = $2 AND rep_id = $3
+               AND call_timestamp >= ($4::TIMESTAMPTZ - INTERVAL '5 minutes')
+               AND call_timestamp <= ($4::TIMESTAMPTZ + INTERVAL '5 minutes')
+               AND ABS(duration_seconds - $5::int) <= 3
+               AND (remark IS DISTINCT FROM 'Captured from SIM dialer')
+             ORDER BY call_timestamp DESC
+             LIMIT 1`,
+            [tenantId, targetLeadId, repId, callTimestamp, durationSeconds]
+          );
+          if (existingManualRes.rows.length > 0) {
+            createdLogs.push(existingManualRes.rows[0]);
+            continue;
+          }
+        }
+
         const isInboundSource = String(logSource).startsWith("inbound_");
         const recentLogRes = await client.query(
           `SELECT id, disposition, duration_seconds as "durationSeconds", log_source as "logSource", remark, recording_url as "recordingUrl", call_timestamp as "callTimestamp"

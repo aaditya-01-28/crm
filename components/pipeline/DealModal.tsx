@@ -1254,7 +1254,7 @@ export function DealModal({
                             </label>
                             <input
                               type="text"
-                              value={item.decisionMakerName || contactName || ""}
+                              value={item.decisionMakerName ?? contactName ?? ""}
                               onChange={(e) => updateCommercial(idx, "decisionMakerName", e.target.value)}
                               placeholder="e.g. Dr. Rajesh Sharma (Director)"
                               disabled={!canEdit}
@@ -1619,7 +1619,7 @@ export function DealModal({
                             </label>
                             <input
                               type="text"
-                              value={item.executiveName || (isEdit ? (deal?.rep?.fullName || "") : (currentUser?.fullName || ""))}
+                              value={item.executiveName ?? (isEdit ? (deal?.rep?.fullName || "") : (currentUser?.fullName || ""))}
                               onChange={(e) => updateCommercial(idx, "executiveName", e.target.value)}
                               disabled={!canEdit}
                               className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
@@ -1633,7 +1633,7 @@ export function DealModal({
                             </label>
                             <input
                               type="email"
-                              value={item.executiveEmail || (isEdit ? (deal?.rep?.email || "") : (currentUser?.email || ""))}
+                              value={item.executiveEmail ?? (isEdit ? (deal?.rep?.email || "") : (currentUser?.email || ""))}
                               onChange={(e) => updateCommercial(idx, "executiveEmail", e.target.value)}
                               required
                               disabled={!canEdit}
@@ -1700,7 +1700,7 @@ export function DealModal({
                             </label>
                             <input
                               type="text"
-                              value={item.productName || item.serviceType || "WhatsApp API"}
+                              value={item.productName ?? (item.serviceType || "WhatsApp API")}
                               onChange={(e) => updateCommercial(idx, "productName", e.target.value)}
                               placeholder="e.g. WhatsApp API / Bulk SMS"
                               required
@@ -1735,7 +1735,7 @@ export function DealModal({
                             </label>
                             <input
                               type="text"
-                              value={item.userId || (leadId ? `TXT_${leadId.slice(0, 6).toUpperCase()}` : "")}
+                              value={item.userId ?? (leadId ? `TXT_${leadId.slice(0, 6).toUpperCase()}` : "")}
                               onChange={(e) => updateCommercial(idx, "userId", e.target.value)}
                               placeholder="e.g. TXT_99021 or client portal username"
                               required
@@ -1874,7 +1874,7 @@ export function DealModal({
                             </label>
                             <input
                               type="number"
-                              value={item.tds || "0"}
+                              value={item.tds ?? "0"}
                               onChange={(e) => {
                                 const tdsVal = e.target.value;
                                 const orig = parseFloat(item.originalAmount || item.quotedPrice || "0") || 0;

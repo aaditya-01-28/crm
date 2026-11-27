@@ -1,9 +1,13 @@
-export const APP_VERSION = "1.3.8";
-export const APP_BUILD = 22;
-export const APK_VERSION = "1.3.8";
-export const APK_BUILD = 22;
-export const APP_RELEASE_DATE = "2026-11-26";
+export const APP_VERSION = "1.3.9";
+export const APP_BUILD = 23;
+export const APK_VERSION = "1.3.9";
+export const APK_BUILD = 23;
+export const APP_RELEASE_DATE = "2026-11-27";
 export const APP_RELEASE_NOTES = [
+  "Added RNR 1, RNR 2, RNR 3, and RNR 4+ filter tabs across Web Leads Directory, Call Logs, and Mobile App",
+  "Added Newest/Oldest Sort By controls across all Leads tabs on both Web CRM and Mobile App",
+  "Fixed Pipeline display prices and column totals to show Final Amount consistently",
+  "Fixed inbound customer callbacks after outgoing RNR not appearing in disposition queue, and prevented Skip auto-log from duplicating manual logs",
   "Centralized Real-Time Call Queue capturing inbound, missed, and phone-dialed CRM calls with full talk time",
   "Scheduled Demo RNR / Callback actions now cleanly convert to Callback agenda tasks without inflating Demo Done",
   "Added Invalid Number option & filter tabs across Web CRM and Mobile Dialer; removed obsolete pipeline statuses",
