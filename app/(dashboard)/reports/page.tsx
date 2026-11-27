@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { BarChart3, Download, RefreshCw, TrendingUp, Calendar, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { BarChart3, Download, RefreshCw, TrendingUp, Calendar, ArrowUp, ArrowDown, ArrowUpDown, Camera, Check } from "lucide-react";
 import { formatCurrency, formatDuration, getISTDateRange, getISTDateString } from "@/lib/utils";
 
 type ReportPeriod = "today" | "yesterday" | "week" | "month" | "custom";
@@ -86,12 +86,409 @@ const METRICS_CONFIG: {
   { key: "revenueCollected", label: "Revenue", icon: "🏦", isCurrency: true, color: "text-red-700 bg-red-50" },
 ];
 
+function drawRoundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  const radius = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + w, y, x + w, y + h, radius);
+  ctx.arcTo(x + w, y + h, x, y + h, radius);
+  ctx.arcTo(x, y + h, x, y, radius);
+  ctx.arcTo(x, y, x + w, y, radius);
+  ctx.closePath();
+}
+
+function renderEodSnapshotCanvas(params: {
+  data: EODData;
+  sortedReps: RepMetrics[];
+  dateFrom: string;
+  dateTo: string;
+  sortField: string;
+  sortDirection: "asc" | "desc";
+}): HTMLCanvasElement {
+  const { data, sortedReps, dateFrom, dateTo, sortField, sortDirection } = params;
+  const totals = data.totals;
+  const scale = 2;
+  const width = 1280;
+  const pad = 28;
+  const contentW = width - pad * 2;
+
+  const headerH = 92;
+  const sectionLabelH = 30;
+  const kpiCols = 6;
+  const kpiGap = 14;
+  const kpiCardW = (contentW - kpiGap * (kpiCols - 1)) / kpiCols;
+  const kpiCardH = 96;
+  const kpiRows = 2;
+  const kpiGridH = kpiRows * kpiCardH + (kpiRows - 1) * kpiGap;
+
+  const tableTopGap = 24;
+  const tableHeaderBarH = 62;
+  const colHeaderH = 40;
+  const rowH = 50;
+  const rowsCount = Math.max(sortedReps.length, 1);
+  const footerRowH = 48;
+  const tableCardH = tableHeaderBarH + colHeaderH + rowsCount * rowH + footerRowH + 10;
+  const bottomFooterH = 34;
+
+  const height =
+    pad +
+    headerH +
+    20 +
+    sectionLabelH +
+    kpiGridH +
+    tableTopGap +
+    tableCardH +
+    14 +
+    bottomFooterH +
+    pad;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width * scale;
+  canvas.height = height * scale;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Unable to initialize canvas 2D context");
+
+  ctx.scale(scale, scale);
+  const fontSans = 'Inter, "Segoe UI", system-ui, -apple-system, sans-serif';
+
+  // Background
+  ctx.fillStyle = "#F8FAFC";
+  ctx.fillRect(0, 0, width, height);
+
+  // Dark Header Banner
+  const headerY = pad;
+  drawRoundedRect(ctx, pad, headerY, contentW, headerH, 14);
+  ctx.fillStyle = "#0F172A";
+  ctx.fill();
+
+  // Brand badge
+  drawRoundedRect(ctx, pad + 24, headerY + 18, 162, 22, 6);
+  ctx.fillStyle = "rgba(16, 185, 129, 0.16)";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(16, 185, 129, 0.35)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.fillStyle = "#34D399";
+  ctx.font = `700 10.5px ${fontSans}`;
+  ctx.textBaseline = "middle";
+  ctx.fillText("TEXTORA ENGAGE PRO", pad + 34, headerY + 29);
+
+  // Title & subtitle
+  ctx.fillStyle = "#FFFFFF";
+  ctx.font = `700 22px ${fontSans}`;
+  ctx.fillText("EOD Sales Report", pad + 24, headerY + 58);
+
+  ctx.fillStyle = "#94A3B8";
+  ctx.font = `500 12px ${fontSans}`;
+  ctx.fillText("Complete Team Totals & Full Rep Performance Leaderboard", pad + 224, headerY + 59);
+
+  // Date & capture metadata on header right
+  const dateLabel = dateFrom === dateTo ? dateFrom : `${dateFrom} to ${dateTo}`;
+  const capturedAt = new Date().toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+  ctx.textAlign = "right";
+  ctx.fillStyle = "#E2E8F0";
+  ctx.font = `700 14px ${fontSans}`;
+  ctx.fillText(`Period: ${dateLabel}`, width - pad - 24, headerY + 35);
+  ctx.fillStyle = "#94A3B8";
+  ctx.font = `500 11.5px ${fontSans}`;
+  ctx.fillText(`Snapshot: ${capturedAt} IST`, width - pad - 24, headerY + 60);
+  ctx.textAlign = "left";
+
+  // Section label
+  const secLabelY = headerY + headerH + 20;
+  ctx.fillStyle = "#059669";
+  ctx.font = `700 12px ${fontSans}`;
+  ctx.fillText(`TEAM TOTALS — ${dateLabel}`, pad + 2, secLabelY + 12);
+
+  // KPI Cards
+  const kpiStartY = secLabelY + sectionLabelH;
+  const tintMap: Record<string, { bg: string; value: string; dot: string }> = {
+    totalCalls: { bg: "#EFF6FF", value: "#1D4ED8", dot: "#3B82F6" },
+    uniqueDialed: { bg: "#EEF2FF", value: "#4338CA", dot: "#6366F1" },
+    connectedCalls: { bg: "#ECFDF5", value: "#047857", dot: "#10B981" },
+    interestedCalls: { bg: "#FFFBEB", value: "#B45309", dot: "#F59E0B" },
+    talkTimeFormatted: { bg: "#F0FDFA", value: "#0F766E", dot: "#14B8A6" },
+    demosBooked: { bg: "#FAF5FF", value: "#7E22CE", dot: "#A855F7" },
+    demosCompleted: { bg: "#F5F3FF", value: "#6D28D9", dot: "#8B5CF6" },
+    quotesSent: { bg: "#FEFCE8", value: "#A16207", dot: "#EAB308" },
+    totalQuotedValue: { bg: "#FFFBEB", value: "#B45309", dot: "#F59E0B" },
+    paymentsCollected: { bg: "#FFF7ED", value: "#C2410C", dot: "#F97316" },
+    revenueCollected: { bg: "#FEF2F2", value: "#B91C1C", dot: "#EF4444" },
+  };
+
+  const convPct =
+    totals.connectedCalls > 0
+      ? Math.round((totals.interestedCalls / totals.connectedCalls) * 100)
+      : 0;
+
+  METRICS_CONFIG.forEach((metric, idx) => {
+    const row = Math.floor(idx / kpiCols);
+    const col = idx % kpiCols;
+    const x = pad + col * (kpiCardW + kpiGap);
+    const y = kpiStartY + row * (kpiCardH + kpiGap);
+    const style = tintMap[String(metric.key)] || { bg: "#F8FAFC", value: "#0F172A", dot: "#64748B" };
+
+    drawRoundedRect(ctx, x, y, kpiCardW, kpiCardH, 12);
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fill();
+    ctx.strokeStyle = "#E2E8F0";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Top dot / accent bar
+    drawRoundedRect(ctx, x + 14, y + 14, 24, 24, 7);
+    ctx.fillStyle = style.bg;
+    ctx.fill();
+    ctx.fillStyle = style.dot;
+    ctx.beginPath();
+    ctx.arc(x + 26, y + 26, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    const rawVal = (totals as Record<string, unknown>)[metric.key as string];
+    let displayVal = String(rawVal ?? 0);
+    if (metric.key === ("talkTimeFormatted" as unknown)) {
+      displayVal =
+        totals.talkTimeFormatted ||
+        formatDuration(totals.talkTimeSecs ?? (totals.talkTimeMins || 0) * 60);
+    } else if (metric.isCurrency) {
+      displayVal = formatCurrency(Number(rawVal || 0));
+    }
+
+    // Highlight strip behind metric value
+    drawRoundedRect(ctx, x + 12, y + 44, kpiCardW - 24, 26, 6);
+    ctx.fillStyle = style.bg;
+    ctx.fill();
+
+    ctx.fillStyle = "#0F172A";
+    ctx.font = `700 16px ${fontSans}`;
+    ctx.fillText(displayVal, x + 18, y + 57);
+
+    ctx.fillStyle = "#64748B";
+    ctx.font = `500 11px ${fontSans}`;
+    ctx.fillText(metric.label, x + 14, y + 81);
+
+    if (metric.key === "interestedCalls") {
+      const badgeW = 54;
+      drawRoundedRect(ctx, x + kpiCardW - badgeW - 12, y + 72, badgeW, 17, 4);
+      ctx.fillStyle = "#FEF3C7";
+      ctx.fill();
+      ctx.fillStyle = "#92400E";
+      ctx.font = `700 9.5px ${fontSans}`;
+      ctx.textAlign = "center";
+      ctx.fillText(`${convPct}% conv.`, x + kpiCardW - badgeW / 2 - 12, y + 80.5);
+      ctx.textAlign = "left";
+    }
+  });
+
+  // Leaderboard Card
+  const tableY = kpiStartY + kpiGridH + tableTopGap;
+  drawRoundedRect(ctx, pad, tableY, contentW, tableCardH, 14);
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fill();
+  ctx.strokeStyle = "#E2E8F0";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Table card title bar
+  ctx.fillStyle = "#0F172A";
+  ctx.font = `700 16px ${fontSans}`;
+  ctx.fillText("Rep Performance Leaderboard", pad + 20, tableY + 25);
+
+  ctx.fillStyle = "#64748B";
+  ctx.font = `500 11.5px ${fontSans}`;
+  const sortPretty = sortField.replace(/([A-Z])/g, " $1").trim();
+  ctx.fillText(
+    `Sorted by ${sortPretty} (${sortDirection === "desc" ? "highest first" : "lowest first"}) • ${sortedReps.length} active rep(s)`,
+    pad + 20,
+    tableY + 45
+  );
+
+  // Live pill badge
+  drawRoundedRect(ctx, width - pad - 150, tableY + 18, 130, 26, 13);
+  ctx.fillStyle = "#ECFDF5";
+  ctx.fill();
+  ctx.strokeStyle = "#A7F3D0";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = "#047857";
+  ctx.font = `600 11px ${fontSans}`;
+  ctx.textAlign = "center";
+  ctx.fillText("Full Team Snapshot", width - pad - 85, tableY + 31);
+  ctx.textAlign = "left";
+
+  // Table Columns
+  const colHdrY = tableY + tableHeaderBarH;
+  ctx.fillStyle = "#F8FAFC";
+  ctx.fillRect(pad + 1, colHdrY, contentW - 2, colHeaderH);
+  ctx.strokeStyle = "#E2E8F0";
+  ctx.beginPath();
+  ctx.moveTo(pad, colHdrY);
+  ctx.lineTo(width - pad, colHdrY);
+  ctx.moveTo(pad, colHdrY + colHeaderH);
+  ctx.lineTo(width - pad, colHdrY + colHeaderH);
+  ctx.stroke();
+
+  const columns = [
+    { label: "Rep", x: pad + 20, align: "left" as const },
+    { label: "Calls", x: pad + 285, align: "right" as const },
+    { label: "Unique", x: pad + 375, align: "right" as const },
+    { label: "Connected", x: pad + 475, align: "right" as const },
+    { label: "Interested", x: pad + 585, align: "right" as const },
+    { label: "Talk Time", x: pad + 705, align: "right" as const },
+    { label: "Demos", x: pad + 795, align: "right" as const },
+    { label: "Done", x: pad + 875, align: "right" as const },
+    { label: "Quotes", x: pad + 955, align: "right" as const },
+    { label: "Quoted ₹", x: pad + 1080, align: "right" as const },
+    { label: "Revenue ₹", x: width - pad - 20, align: "right" as const },
+  ];
+
+  ctx.fillStyle = "#475569";
+  ctx.font = `600 11.5px ${fontSans}`;
+  for (const col of columns) {
+    ctx.textAlign = col.align;
+    ctx.fillText(col.label, col.x, colHdrY + colHeaderH / 2);
+  }
+  ctx.textAlign = "left";
+
+  // Table Rows
+  const rowsStartY = colHdrY + colHeaderH;
+  if (sortedReps.length === 0) {
+    ctx.fillStyle = "#94A3B8";
+    ctx.font = `500 13px ${fontSans}`;
+    ctx.textAlign = "center";
+    ctx.fillText("No rep performance data available for the selected range.", width / 2, rowsStartY + rowH / 2);
+    ctx.textAlign = "left";
+  } else {
+    sortedReps.forEach((rep, idx) => {
+      const y = rowsStartY + idx * rowH;
+      if (idx % 2 === 1) {
+        ctx.fillStyle = "#FAFBFD";
+        ctx.fillRect(pad + 1, y, contentW - 2, rowH);
+      }
+      ctx.strokeStyle = "#F1F5F9";
+      ctx.beginPath();
+      ctx.moveTo(pad + 1, y + rowH);
+      ctx.lineTo(width - pad - 1, y + rowH);
+      ctx.stroke();
+
+      const rankBadge = idx === 0 ? "🥇 " : idx === 1 ? "🥈 " : idx === 2 ? "🥉 " : `${idx + 1}. `;
+      const repName = rep.repName || "Unknown";
+      const truncatedName = repName.length > 24 ? `${repName.slice(0, 22)}…` : repName;
+
+      ctx.textAlign = "left";
+      ctx.fillStyle = "#0F172A";
+      ctx.font = `600 13px ${fontSans}`;
+      ctx.fillText(`${rankBadge}${truncatedName}`, columns[0].x, y + rowH / 2);
+
+      const drawCell = (text: string, colIdx: number, color = "#334155", bold = false, yOffset = 0) => {
+        ctx.textAlign = columns[colIdx].align;
+        ctx.fillStyle = color;
+        ctx.font = `${bold ? "700" : "600"} 13px ${fontSans}`;
+        ctx.fillText(text, columns[colIdx].x, y + rowH / 2 + yOffset);
+      };
+
+      drawCell(String(rep.totalCalls), 1, "#0F172A", true);
+      drawCell(String(rep.uniqueDialed), 2, "#475569");
+      drawCell(String(rep.connectedCalls), 3, "#059669", true);
+
+      const repConv =
+        rep.interestedRate ??
+        (rep.connectedCalls > 0 ? Math.round((rep.interestedCalls / rep.connectedCalls) * 100) : 0);
+      drawCell(String(rep.interestedCalls), 4, "#B45309", true, -7);
+      ctx.textAlign = columns[4].align;
+      ctx.fillStyle = "#94A3B8";
+      ctx.font = `500 10px ${fontSans}`;
+      ctx.fillText(`${repConv}%`, columns[4].x, y + rowH / 2 + 10);
+
+      const repTalk =
+        rep.talkTimeFormatted ||
+        formatDuration(rep.talkTimeSecs ?? (rep.talkTimeMins || 0) * 60);
+      drawCell(repTalk, 5, "#334155");
+      drawCell(String(rep.demosBooked), 6, "#7E22CE", true);
+      drawCell(String(rep.demosCompleted), 7, "#6D28D9", true);
+      drawCell(String(rep.quotesSent), 8, "#475569");
+      drawCell(formatCurrency(rep.totalQuotedValue || 0), 9, "#334155");
+      drawCell(formatCurrency(rep.revenueCollected || 0), 10, "#059669", true);
+      ctx.textAlign = "left";
+    });
+  }
+
+  // Team Totals Summary Row at bottom of table
+  const summaryY = rowsStartY + rowsCount * rowH;
+  ctx.fillStyle = "#ECFDF5";
+  ctx.fillRect(pad + 1, summaryY, contentW - 2, footerRowH);
+  ctx.strokeStyle = "#A7F3D0";
+  ctx.beginPath();
+  ctx.moveTo(pad + 1, summaryY);
+  ctx.lineTo(width - pad - 1, summaryY);
+  ctx.stroke();
+
+  const totalTalk =
+    totals.talkTimeFormatted ||
+    formatDuration(totals.talkTimeSecs ?? (totals.talkTimeMins || 0) * 60);
+
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#065F46";
+  ctx.font = `700 13px ${fontSans}`;
+  ctx.fillText("TEAM TOTAL", columns[0].x, summaryY + footerRowH / 2);
+
+  const summaryValues: [number, string][] = [
+    [1, String(totals.totalCalls)],
+    [2, String(totals.uniqueDialed)],
+    [3, String(totals.connectedCalls)],
+    [4, `${totals.interestedCalls} (${convPct}%)`],
+    [5, totalTalk],
+    [6, String(totals.demosBooked)],
+    [7, String(totals.demosCompleted)],
+    [8, String(totals.quotesSent)],
+    [9, formatCurrency(totals.totalQuotedValue || 0)],
+    [10, formatCurrency(totals.revenueCollected || 0)],
+  ];
+  for (const [colIdx, val] of summaryValues) {
+    ctx.textAlign = columns[colIdx].align;
+    ctx.fillStyle = "#065F46";
+    ctx.font = `700 13px ${fontSans}`;
+    ctx.fillText(val, columns[colIdx].x, summaryY + footerRowH / 2);
+  }
+  ctx.textAlign = "left";
+
+  // Bottom Watermark
+  const bottomY = tableY + tableCardH + 22;
+  ctx.fillStyle = "#94A3B8";
+  ctx.font = `500 11px ${fontSans}`;
+  ctx.fillText("Textora Engage CRM • crm.textorasms.com", pad + 4, bottomY);
+  ctx.textAlign = "right";
+  ctx.fillText("All metrics computed in IST (Asia/Kolkata)", width - pad - 4, bottomY);
+  ctx.textAlign = "left";
+
+  return canvas;
+}
+
 export default function ReportsPage() {
   const [period, setPeriod] = useState<ReportPeriod>("today");
   const [customDateFrom, setCustomDateFrom] = useState(() => getPresetDates("today").from);
   const [customDateTo, setCustomDateTo] = useState(() => getPresetDates("today").to);
   const [sortField, setSortField] = useState<SortField>("totalCalls");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [isCopyingSnapshot, setIsCopyingSnapshot] = useState(false);
+  const [snapshotCopied, setSnapshotCopied] = useState(false);
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["eod", period, customDateFrom, customDateTo],
@@ -186,6 +583,63 @@ export default function ReportsPage() {
     return sortDirection === "asc" ? numA - numB : numB - numA;
   });
 
+  const handleCopySnapshot = async () => {
+    if (!data || !totals) {
+      toast.error("Report data is still loading");
+      return;
+    }
+
+    setIsCopyingSnapshot(true);
+    try {
+      const canvas = renderEodSnapshotCanvas({
+        data,
+        sortedReps,
+        dateFrom: data.dateFrom || customDateFrom,
+        dateTo: data.dateTo || customDateTo,
+        sortField,
+        sortDirection,
+      });
+
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob((result) => resolve(result), "image/png")
+      );
+      if (!blob) {
+        throw new Error("Failed to generate snapshot image");
+      }
+
+      if (
+        typeof navigator !== "undefined" &&
+        navigator.clipboard &&
+        typeof ClipboardItem !== "undefined"
+      ) {
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+          setSnapshotCopied(true);
+          toast.success("Full EOD Report snapshot copied to clipboard!");
+          setTimeout(() => setSnapshotCopied(false), 2500);
+          return;
+        } catch {
+          // Fall through to PNG download fallback when clipboard write is restricted
+        }
+      }
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `textora-eod-snapshot-${data.dateFrom || customDateFrom}-to-${data.dateTo || customDateTo}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.info("Clipboard blocked by browser — downloaded EOD snapshot PNG instead");
+    } catch (error) {
+      console.error("EOD snapshot failed:", error);
+      toast.error("Could not generate EOD snapshot");
+    } finally {
+      setIsCopyingSnapshot(false);
+    }
+  };
+
   return (
     <div className="max-w-6xl mx-auto">
       {/* Header */}
@@ -266,6 +720,28 @@ export default function ReportsPage() {
           >
             <RefreshCw className={`w-4 h-4 ${isFetching ? "animate-spin text-emerald-600" : ""}`} />
             Refresh
+          </button>
+          <button
+            onClick={handleCopySnapshot}
+            disabled={!data || isFetching || isCopyingSnapshot}
+            className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border transition font-medium cursor-pointer disabled:opacity-60 ${
+              snapshotCopied
+                ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+            }`}
+            title="Capture full EOD report & leaderboard as image and copy to clipboard"
+          >
+            {snapshotCopied ? (
+              <>
+                <Check className="w-4 h-4 text-emerald-600" />
+                Copied!
+              </>
+            ) : (
+              <>
+                <Camera className={`w-4 h-4 text-slate-600 ${isCopyingSnapshot ? "animate-pulse" : ""}`} />
+                {isCopyingSnapshot ? "Capturing..." : "Copy Snapshot"}
+              </>
+            )}
           </button>
           <button
             onClick={handleExport}
