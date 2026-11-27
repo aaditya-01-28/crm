@@ -10,6 +10,28 @@ export async function GET(request: NextRequest) {
   }
   const tenantId = session.tenantId;
   const role = session.role;
+  const { searchParams } = new URL(request.url);
+  const mode = searchParams.get("mode");
+
+  // Lightweight rep selector list (`?mode=select`) is available to all signed-in team members
+  // so Sales Reps can pick a split deal partner without accessing manager-only metrics.
+  if (mode === "select") {
+    try {
+      return await withClient(async (client) => {
+        const listRes = await client.query(
+          `SELECT id, full_name as "fullName", role, is_active as "isActive"
+           FROM users
+           WHERE tenant_id = $1 AND is_active = true AND role IN ('sales_rep', 'sales_manager', 'super_admin')
+           ORDER BY full_name ASC`,
+          [tenantId]
+        );
+        return NextResponse.json({ users: listRes.rows });
+      });
+    } catch (error) {
+      console.error("[TEAM SELECT GET]", error);
+      return NextResponse.json({ error: "Failed to fetch team list" }, { status: 500 });
+    }
+  }
 
   if (!["super_admin", "sales_manager"].includes(role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });

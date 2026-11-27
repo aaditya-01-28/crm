@@ -26,6 +26,13 @@ interface Payment {
   lead: { contactName: string | null; companyName: string | null; phoneNumber: string };
   rep: { fullName: string; email: string };
   approver: { fullName: string } | null;
+  splits?: Array<{
+    repId: string;
+    repName?: string;
+    percentage: number;
+    isPrimary: boolean;
+    status: string;
+  }>;
 }
 
 async function fetchPayments(status: string, repId?: string): Promise<{ payments: Payment[] }> {
@@ -108,6 +115,7 @@ export default function PaymentsPage() {
       // Invalidate all payment tabs to prevent stale approved/rejected cross-tab bleed
       queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["deals"] });
     },
     onError: () => toast.error("Failed to update payment status"),
   });
@@ -279,6 +287,23 @@ function PaymentRow({
             <Detail label="User Type" value={payment.userType.replace("_", " ")} />
             {payment.gstin && <Detail label="GSTIN" value={payment.gstin} mono />}
           </div>
+
+          {payment.splits && payment.splits.length >= 2 && (
+            <div className="mt-2.5 bg-indigo-50/80 border border-indigo-200 rounded-lg px-3 py-2 flex flex-wrap items-center gap-2 text-[11px] text-indigo-900">
+              <span className="font-bold">Split Deal Attribution:</span>
+              {payment.splits.map((sp, i) => (
+                <span
+                  key={`${sp.repId}-${i}`}
+                  className="bg-white border border-indigo-200 px-2 py-0.5 rounded-md font-semibold"
+                >
+                  {sp.repName || "Rep"} ({sp.percentage}%):{" "}
+                  <span className="font-mono text-emerald-700">
+                    {formatCurrency((Number(payment.finalAmount || 0) * sp.percentage) / 100)}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

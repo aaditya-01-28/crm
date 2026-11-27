@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { ensureDealSplitsTable } from "@/lib/deal-splits";
 
 export async function PATCH(
   request: NextRequest,
@@ -24,6 +25,9 @@ export async function PATCH(
     const { status } = body; // 'approved' | 'rejected'
 
     return await withClient(async (client) => {
+      await client.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;").catch(() => {});
+      await ensureDealSplitsTable(client);
+
       const paymentRes = await client.query(
         "SELECT id, deal_id, lead_id, payment_mode FROM payments WHERE id = $1 AND tenant_id = $2",
         [id, tenantId]
@@ -50,9 +54,13 @@ export async function PATCH(
           const isSheetImport = payment.payment_mode === "Google Sheet Import";
           await client.query(
             isSheetImport
-              ? "UPDATE deals SET stage = 'closed_won', updated_at = COALESCE(expected_closing_date::timestamptz, created_at, NOW()) WHERE id = $1"
-              : "UPDATE deals SET stage = 'closed_won', updated_at = NOW() WHERE id = $1",
+              ? "UPDATE deals SET stage = 'closed_won', closed_at = COALESCE(closed_at, expected_closing_date::timestamptz, created_at, NOW()), updated_at = COALESCE(expected_closing_date::timestamptz, created_at, NOW()) WHERE id = $1"
+              : "UPDATE deals SET stage = 'closed_won', closed_at = COALESCE(closed_at, expected_closing_date::timestamptz, created_at, NOW()), updated_at = NOW() WHERE id = $1",
             [matchedDealId]
+          );
+          await client.query(
+            `UPDATE deal_splits SET status = 'approved' WHERE deal_id = $1 AND tenant_id = $2`,
+            [matchedDealId, tenantId]
           );
         }
 
@@ -88,6 +96,11 @@ export async function PATCH(
             }
           }
         }
+      } else if (status === "rejected" && payment.deal_id) {
+        await client.query(
+          `UPDATE deal_splits SET status = 'rejected' WHERE deal_id = $1 AND tenant_id = $2`,
+          [payment.deal_id, tenantId]
+        );
       }
 
       return NextResponse.json({ payment: updateRes.rows[0] });

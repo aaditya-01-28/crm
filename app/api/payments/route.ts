@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
+import { ensureDealSplitsTable } from "@/lib/deal-splits";
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
@@ -17,21 +18,25 @@ export async function GET(request: NextRequest) {
 
   try {
     return await withClient(async (client) => {
+      await ensureDealSplitsTable(client);
       // Fix: Rep view shows only their PENDING payments (for submission tracking).
       // Ops/Manager view filters by ops_approval_status tab (pending/approved/rejected) — strictly exclusive.
       const isRep = role === "sales_rep";
       let whereClause: string;
       let params: any[];
 
+      const splitRepMatch = (idx: number) =>
+        `EXISTS (SELECT 1 FROM deal_splits ds WHERE ds.deal_id = p.deal_id AND ds.rep_id = $${idx})`;
+
       if (isRep) {
-        // Reps see their own / assigned leads' payments across Pending, Approved, and Rejected (read-only)
+        // Reps see their own / assigned leads' / split-partner payments across Pending, Approved, and Rejected (read-only)
         if (opsStatus === "pending_verification") {
           whereClause =
-            "p.tenant_id = $1 AND (p.rep_id = $2 OR l.assigned_rep_id = $2 OR d.rep_id = $2) AND p.ops_approval_status IN ('pending_verification', 'pending')";
+            `p.tenant_id = $1 AND (p.rep_id = $2 OR l.assigned_rep_id = $2 OR d.rep_id = $2 OR ${splitRepMatch(2)}) AND p.ops_approval_status IN ('pending_verification', 'pending')`;
           params = [tenantId, repId];
         } else {
           whereClause =
-            "p.tenant_id = $1 AND (p.rep_id = $2 OR l.assigned_rep_id = $2 OR d.rep_id = $2) AND p.ops_approval_status = $3";
+            `p.tenant_id = $1 AND (p.rep_id = $2 OR l.assigned_rep_id = $2 OR d.rep_id = $2 OR ${splitRepMatch(2)}) AND p.ops_approval_status = $3`;
           params = [tenantId, repId, opsStatus];
         }
       } else {
@@ -45,8 +50,8 @@ export async function GET(request: NextRequest) {
         }
 
         if (filterRepId && filterRepId !== "all") {
-          params.push(filterRepId);
-          whereClause += ` AND p.rep_id = $${params.length}`;
+          const idx = params.push(filterRepId);
+          whereClause += ` AND (p.rep_id = $${idx} OR ${splitRepMatch(idx)})`;
         }
       }
 
@@ -61,12 +66,31 @@ export async function GET(request: NextRequest) {
                 d.service_type as "deal_serviceType", d.quoted_price as "deal_quotedPrice",
                 l.contact_name as "lead_contactName", l.company_name as "lead_companyName", l.phone_number as "lead_phoneNumber",
                 ru.full_name as "rep_fullName", ru.email as "rep_email",
-                au.full_name as "approver_fullName"
+                au.full_name as "approver_fullName",
+                sp.splits_json as "splitsJson"
          FROM payments p
          LEFT JOIN deals d ON p.deal_id = d.id
          LEFT JOIN leads l ON p.lead_id = l.id
          LEFT JOIN users ru ON p.rep_id = ru.id
          LEFT JOIN users au ON p.approved_by = au.id
+         LEFT JOIN LATERAL (
+           SELECT COALESCE(
+             json_agg(
+               json_build_object(
+                 'repId', ds.rep_id,
+                 'repName', su.full_name,
+                 'percentage', ds.percentage::float8,
+                 'isPrimary', ds.is_primary,
+                 'status', ds.status
+               )
+               ORDER BY ds.is_primary DESC, ds.percentage DESC
+             ),
+             '[]'::json
+           ) as splits_json
+           FROM deal_splits ds
+           LEFT JOIN users su ON ds.rep_id = su.id
+           WHERE ds.deal_id = p.deal_id
+         ) sp ON true
          WHERE ${whereClause}
          ORDER BY p.created_at DESC`,
         params
@@ -106,6 +130,7 @@ export async function GET(request: NextRequest) {
           email: r.rep_email,
         },
         approver: r.approver_fullName ? { fullName: r.approver_fullName } : null,
+        splits: Array.isArray(r.splitsJson) ? r.splitsJson : [],
       }));
 
       return NextResponse.json({ payments });

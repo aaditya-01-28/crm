@@ -121,6 +121,13 @@ interface Deal {
   createdAt?: string;
   updatedAt?: string;
   closedAt?: string | null;
+  splits?: Array<{
+    repId: string;
+    repName?: string;
+    percentage: number;
+    isPrimary: boolean;
+    status: string;
+  }>;
 }
 
 async function fetchDeals(repId?: string): Promise<{ deals: Deal[] }> {
@@ -382,11 +389,24 @@ export default function PipelinePage() {
     );
   }, [filteredDeals]);
 
+  const scopedRepId = canManageDeals ? repFilter : currentUserId || "all";
+
+  function getRepScopedDealAmount(deal: Deal): number {
+    const full = getDealDisplayAmount(deal);
+    if (!scopedRepId || scopedRepId === "all") return full;
+    const splits = deal.splits || [];
+    if (splits.length >= 2 && splits.some((s) => s.status === "approved")) {
+      const match = splits.find((s) => s.repId === scopedRepId && s.status === "approved");
+      if (match) return (full * match.percentage) / 100;
+    }
+    return full;
+  }
+
   // Column statistics aggregations
   function colStats(colId: Stage) {
     const colDeals = dealsByStage[colId] || [];
     const total = colDeals.reduce(
-      (sum, d) => sum + getDealDisplayAmount(d),
+      (sum, d) => sum + getRepScopedDealAmount(d),
       0
     );
     const credits = colDeals.reduce(
@@ -399,7 +419,7 @@ export default function PipelinePage() {
   // Board total statistics
   const totalPipelineDeals = filteredDeals.length;
   const totalPipelineValue = filteredDeals.reduce(
-    (sum, d) => sum + getDealDisplayAmount(d),
+    (sum, d) => sum + getRepScopedDealAmount(d),
     0
   );
 
@@ -695,6 +715,7 @@ export default function PipelinePage() {
                               >
                                 <DealCard
                                   deal={deal}
+                                  activeRepFilter={scopedRepId}
                                   isDragging={snapshot.isDragging}
                                   canEdit={canManageDeals || deal.repId === currentUserId}
                                   canDelete={canManageDeals}

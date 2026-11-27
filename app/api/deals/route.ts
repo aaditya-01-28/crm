@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { parseScheduledDateTime, getISTDateString, parseDealDateToTimestamp } from "@/lib/utils";
+import { ensureDealSplitsTable, syncDealSplits } from "@/lib/deal-splits";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -25,16 +26,17 @@ export async function GET(request: NextRequest) {
   try {
     return await withClient(async (client) => {
       await client.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;").catch(() => {});
+      await ensureDealSplitsTable(client);
 
       let whereClause = "d.tenant_id = $1";
       const params: any[] = [tenantId];
 
       if (isRep && isValidUuid(repId)) {
         params.push(repId);
-        whereClause += ` AND (d.rep_id = $${params.length} OR l.assigned_rep_id = $${params.length})`;
+        whereClause += ` AND (d.rep_id = $${params.length} OR l.assigned_rep_id = $${params.length} OR EXISTS (SELECT 1 FROM deal_splits ds WHERE ds.deal_id = d.id AND ds.rep_id = $${params.length} AND ds.status = 'approved'))`;
       } else if (!isRep && filterRepId && filterRepId !== "all" && isValidUuid(filterRepId)) {
         params.push(filterRepId);
-        whereClause += ` AND (d.rep_id = $${params.length} OR l.assigned_rep_id = $${params.length})`;
+        whereClause += ` AND (d.rep_id = $${params.length} OR l.assigned_rep_id = $${params.length} OR EXISTS (SELECT 1 FROM deal_splits ds WHERE ds.deal_id = d.id AND ds.rep_id = $${params.length} AND ds.status = 'approved'))`;
       }
 
       const dealsRes = await client.query(
@@ -62,11 +64,30 @@ export async function GET(request: NextRequest) {
                 pay.created_at as "payment_createdAt",
                 demo_task.scheduled_time as "demoTask_scheduledTime",
                 demo_task.meeting_link as "demoTask_meetingLink",
-                demo_task.notes as "demoTask_notes"
+                demo_task.notes as "demoTask_notes",
+                sp.splits_json as "splitsJson"
          FROM deals d
          LEFT JOIN leads l ON d.lead_id = l.id
          LEFT JOIN users u ON d.rep_id = u.id
          LEFT JOIN users rep_lead ON l.assigned_rep_id = rep_lead.id
+         LEFT JOIN LATERAL (
+           SELECT COALESCE(
+             json_agg(
+               json_build_object(
+                 'repId', ds.rep_id,
+                 'repName', su.full_name,
+                 'percentage', ds.percentage::float8,
+                 'isPrimary', ds.is_primary,
+                 'status', ds.status
+               )
+               ORDER BY ds.is_primary DESC, ds.percentage DESC
+             ),
+             '[]'::json
+           ) as splits_json
+           FROM deal_splits ds
+           LEFT JOIN users su ON ds.rep_id = su.id
+           WHERE ds.deal_id = d.id
+         ) sp ON true
          LEFT JOIN LATERAL (
            SELECT st.scheduled_time, st.meeting_link, st.notes
            FROM scheduled_tasks st
@@ -164,6 +185,7 @@ export async function GET(request: NextRequest) {
                 notes: r.demoTask_notes,
               }
             : null,
+          splits: Array.isArray(r.splitsJson) ? r.splitsJson : [],
         };
       });
 
@@ -189,6 +211,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     return await withClient(async (client) => {
       await client.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;").catch(() => {});
+      await ensureDealSplitsTable(client);
       let leadId = body.leadId;
 
       // If leadId is not provided, find or create the lead by phone number
@@ -207,7 +230,11 @@ export async function POST(request: NextRequest) {
           [tenantId, phone]
         );
 
-        const customerEmail = body.customerEmail || body.email || null;
+        const customerEmail =
+          body.customerEmail ||
+          body.email ||
+          body.commercials?.[0]?.customerEmail ||
+          null;
         if (existingLeadRes.rows.length > 0) {
           leadId = existingLeadRes.rows[0].id;
           const oldMeta = (existingLeadRes.rows[0].custom_metadata as Record<string, any>) || {};
@@ -266,7 +293,11 @@ export async function POST(request: NextRequest) {
           `SELECT id, custom_metadata FROM leads WHERE id = $1 AND tenant_id = $2`,
           [leadId, tenantId]
         );
-        const customerEmail = body.customerEmail || body.email || null;
+        const customerEmail =
+          body.customerEmail ||
+          body.email ||
+          body.commercials?.[0]?.customerEmail ||
+          null;
         if (existingLeadRes.rows.length > 0) {
           const oldMeta = (existingLeadRes.rows[0].custom_metadata as Record<string, any>) || {};
           const updatedMeta = {
@@ -485,6 +516,17 @@ export async function POST(request: NextRequest) {
             paymentCreatedAt,
           ]
         );
+
+        if (body.splitConfig?.enabled && primaryDeal?.id) {
+          await syncDealSplits({
+            client,
+            tenantId,
+            dealId: primaryDeal.id,
+            fallbackPrimaryRepId: repId,
+            splitConfig: body.splitConfig,
+            status: "pending_verification",
+          });
+        }
       }
 
       await client.query("ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_source TEXT DEFAULT 'dialer';").catch(() => {});

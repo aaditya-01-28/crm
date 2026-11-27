@@ -7,6 +7,7 @@ interface DealCardProps {
   deal: {
     id: string;
     stage?: string;
+    repId?: string | null;
     serviceType: string;
     quantity: number;
     quotedPrice: string;
@@ -17,6 +18,13 @@ interface DealCardProps {
       finalAmount?: string | null;
       createdAt?: string | null;
     } | null;
+    splits?: {
+      repId: string;
+      repName?: string;
+      percentage: number;
+      isPrimary: boolean;
+      status: string;
+    }[];
     lead?: {
       phoneNumber?: string;
       companyName: string | null;
@@ -25,6 +33,7 @@ interface DealCardProps {
     } | null;
     rep?: { fullName: string } | null;
   };
+  activeRepFilter?: string;
   isDragging?: boolean;
   canEdit?: boolean;
   canDelete?: boolean;
@@ -34,6 +43,7 @@ interface DealCardProps {
 
 export function DealCard({
   deal,
+  activeRepFilter,
   isDragging,
   canEdit,
   canDelete,
@@ -118,42 +128,85 @@ export function DealCard({
       </div>
 
       {/* Financials & Closing Date */}
-      <div className="pt-1 flex items-baseline justify-between border-t border-slate-100">
-        <div>
-          <p className="text-sm font-bold text-slate-900">
-            {formatCurrency(getDealDisplayAmount(deal))}
-          </p>
-          <p className="text-[11px] text-slate-400 font-medium">
-            {(deal.quantity || 0).toLocaleString("en-IN")} units
-          </p>
-        </div>
+      {(() => {
+        const fullAmount = getDealDisplayAmount(deal);
+        const splits = deal.splits || [];
+        const hasSplit = splits.length >= 2;
+        const isApprovedSplit = hasSplit && splits.some((s) => s.status === "approved");
+        const scopedSplit =
+          isApprovedSplit && activeRepFilter && activeRepFilter !== "all"
+            ? splits.find((s) => s.repId === activeRepFilter)
+            : null;
+        const displayAmount = scopedSplit
+          ? (fullAmount * scopedSplit.percentage) / 100
+          : fullAmount;
 
-        {(() => {
-          const isClosedWon = deal.stage === "closed_won" || deal.stage === "won";
-          const wonDate = extractWonDateFromNotes(deal.closingNotes);
-          const displayDate = isClosedWon
-            ? (parseDealDateToTimestamp(wonDate) ||
-                parseDealDateToTimestamp(deal.closedAt) ||
-                parseDealDateToTimestamp(deal.expectedClosingDate))
-            : parseDealDateToTimestamp(deal.expectedClosingDate);
-          if (!displayDate) return null;
-          return (
-            <div className="text-right">
-              <p className="text-[10px] text-slate-400 font-medium flex items-center gap-1 justify-end">
-                <Calendar className="w-3 h-3 text-slate-400" />
-                {isClosedWon ? "Closed" : "Target"}
-              </p>
-              <p className="text-xs font-semibold text-slate-700">
-                {displayDate.toLocaleDateString("en-IN", {
-                  timeZone: "Asia/Kolkata",
-                  day: "2-digit",
-                  month: "short",
-                })}
-              </p>
+        return (
+          <>
+            {hasSplit && (
+              <div className="flex flex-wrap items-center gap-1">
+                <span
+                  className={cn(
+                    "text-[10px] px-2 py-0.5 rounded-full font-bold border",
+                    isApprovedSplit
+                      ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+                      : "bg-amber-50 text-amber-800 border-amber-200"
+                  )}
+                >
+                  {scopedSplit
+                    ? `Split ${scopedSplit.percentage}%`
+                    : `Split ${splits.map((s) => `${s.percentage}%`).join(" / ")}`}
+                  {!isApprovedSplit ? " (Pending)" : ""}
+                </span>
+                <span className="text-[10px] text-slate-500 truncate">
+                  {splits.map((s) => s.repName?.split(" ")[0] || "Rep").join(" + ")}
+                </span>
+              </div>
+            )}
+            <div className="pt-1 flex items-baseline justify-between border-t border-slate-100">
+              <div>
+                <p className="text-sm font-bold text-slate-900">
+                  {formatCurrency(displayAmount)}
+                </p>
+                {scopedSplit && (
+                  <p className="text-[10px] text-indigo-600 font-medium">
+                    of {formatCurrency(fullAmount)} total
+                  </p>
+                )}
+                <p className="text-[11px] text-slate-400 font-medium">
+                  {(deal.quantity || 0).toLocaleString("en-IN")} units
+                </p>
+              </div>
+
+              {(() => {
+                const isClosedWon = deal.stage === "closed_won" || deal.stage === "won";
+                const wonDate = extractWonDateFromNotes(deal.closingNotes);
+                const displayDate = isClosedWon
+                  ? (parseDealDateToTimestamp(wonDate) ||
+                      parseDealDateToTimestamp(deal.closedAt) ||
+                      parseDealDateToTimestamp(deal.expectedClosingDate))
+                  : parseDealDateToTimestamp(deal.expectedClosingDate);
+                if (!displayDate) return null;
+                return (
+                  <div className="text-right">
+                    <p className="text-[10px] text-slate-400 font-medium flex items-center gap-1 justify-end">
+                      <Calendar className="w-3 h-3 text-slate-400" />
+                      {isClosedWon ? "Closed" : "Target"}
+                    </p>
+                    <p className="text-xs font-semibold text-slate-700">
+                      {displayDate.toLocaleDateString("en-IN", {
+                        timeZone: "Asia/Kolkata",
+                        day: "2-digit",
+                        month: "short",
+                      })}
+                    </p>
+                  </div>
+                );
+              })()}
             </div>
-          );
-        })()}
-      </div>
+          </>
+        );
+      })()}
 
       {/* Rep info footer */}
       <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100/80">

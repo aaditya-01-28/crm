@@ -40,6 +40,7 @@ interface Deal {
   expectedClosingDate: string | null;
   closingNotes: string | null;
   leadId: string;
+  repId?: string | null;
   stage: string;
   createdAt?: string;
   updatedAt?: string;
@@ -47,6 +48,13 @@ interface Deal {
     fullName: string;
     email?: string;
   } | null;
+  splits?: Array<{
+    repId: string;
+    repName?: string;
+    percentage: number;
+    isPrimary: boolean;
+    status: string;
+  }>;
   lead: {
     companyName: string | null;
     contactName: string | null;
@@ -195,8 +203,56 @@ export function DealModal({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // Current session user details
-  const [currentUser, setCurrentUser] = useState<{ fullName?: string; email?: string } | null>(null);
+  // Current session user & selectable team members for 2-rep split deals
+  const [currentUser, setCurrentUser] = useState<{ id?: string; fullName?: string; email?: string } | null>(null);
+  const [teamMembers, setTeamMembers] = useState<Array<{ id: string; fullName: string; role: string }>>([]);
+
+  // 2-Rep Percentage Split state (e.g., 60% Primary Rep / 40% Partner Rep)
+  const [isSplitDeal, setIsSplitDeal] = useState<boolean>(() =>
+    Boolean(deal?.splits && deal.splits.length >= 2)
+  );
+  const [primaryRepId, setPrimaryRepId] = useState<string>(() => {
+    const primary = deal?.splits?.find((s) => s.isPrimary);
+    return primary?.repId || deal?.repId || "";
+  });
+  const [primarySplitPct, setPrimarySplitPct] = useState<string>(() => {
+    const primary = deal?.splits?.find((s) => s.isPrimary);
+    return primary ? String(primary.percentage) : "50";
+  });
+  const [partnerRepId, setPartnerRepId] = useState<string>(() => {
+    const partner = deal?.splits?.find((s) => !s.isPrimary);
+    return partner?.repId || "";
+  });
+  const [partnerSplitPct, setPartnerSplitPct] = useState<string>(() => {
+    const partner = deal?.splits?.find((s) => !s.isPrimary);
+    return partner ? String(partner.percentage) : "50";
+  });
+
+  // Existing Recharge Customer auto-detection state (for + New Deal)
+  const [customerHistory, setCustomerHistory] = useState<{
+    isExistingCustomer: boolean;
+    latestCustomerEmail: string | null;
+    latestGstin: string | null;
+    latestPaymentMode: string | null;
+    accountsByService: Array<{
+      serviceType: string;
+      productName: string;
+      panelUserId: string;
+      userType: string;
+      customerEmail: string | null;
+      gstin: string | null;
+    }>;
+  } | null>(null);
+  const [touchedFields, setTouchedFields] = useState<Set<string>>(() => new Set());
+
+  const markFieldTouched = (field: string) => {
+    setTouchedFields((prev) => {
+      if (prev.has(field)) return prev;
+      const next = new Set(prev);
+      next.add(field);
+      return next;
+    });
+  };
 
   useEffect(() => {
     fetch("/api/auth/me")
@@ -204,8 +260,8 @@ export function DealModal({
       .then((data) => {
         if (data?.user) {
           setCurrentUser(data.user);
-          // For a new deal only (!deal), set default executive info if not already customized
           if (!deal) {
+            setPrimaryRepId((prev) => prev || data.user.id || "");
             setCommercials((prev) =>
               prev.map((c, idx) =>
                 idx === 0
@@ -218,6 +274,15 @@ export function DealModal({
               )
             );
           }
+        }
+      })
+      .catch(() => {});
+
+    fetch("/api/team?mode=select")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (Array.isArray(data?.users)) {
+          setTeamMembers(data.users);
         }
       })
       .catch(() => {});
@@ -407,6 +472,42 @@ export function DealModal({
   const [isSearching, setIsSearching] = useState(false);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Auto-detect existing customer recharge history when lead or phone changes in + New Deal mode
+  useEffect(() => {
+    if (isEdit) return;
+    const cleanDigits = phoneNumber.replace(/\D/g, "");
+    if (!leadId && cleanDigits.length < 10) {
+      setCustomerHistory(null);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams();
+        if (leadId) params.set("leadId", leadId);
+        if (cleanDigits.length >= 7) params.set("phone", cleanDigits);
+        const res = await fetch(`/api/deals/customer-history?${params.toString()}`, {
+          cache: "no-store",
+        });
+        if (!res.ok || cancelled) return;
+        const hist = await res.json();
+        if (cancelled) return;
+        setCustomerHistory(hist);
+        if (hist?.isExistingCustomer) {
+          setCommercials((prev) =>
+            prev.map((item) => applyCustomerHistoryToItem(item, hist, touchedFields, leadId))
+          );
+        }
+      } catch {}
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isEdit, leadId, phoneNumber]);
+
   function handleSearchChange(val: string) {
     setLeadSearch(val);
     if (searchTimeoutRef.current) {
@@ -468,6 +569,55 @@ export function DealModal({
     toast.success("Lead details auto-filled ✅");
   }
 
+  function applyCustomerHistoryToItem(
+    item: CommercialItem,
+    history: typeof customerHistory,
+    touched: Set<string>,
+    activeLeadId: string
+  ): CommercialItem {
+    if (!history?.isExistingCustomer || item.stage !== "closed_won") {
+      return item;
+    }
+
+    const next = { ...item };
+    const norm = (s?: string | null) => (s || "").trim().toLowerCase();
+    const targetSvc = norm(item.serviceType);
+
+    if (!touched.has("userType")) {
+      next.userType = "existing_user";
+    }
+
+    const matchingAccount = history.accountsByService.find(
+      (acc) =>
+        norm(acc.serviceType) === targetSvc ||
+        norm(acc.productName) === targetSvc
+    );
+
+    if (!touched.has("userId")) {
+      if (matchingAccount?.panelUserId) {
+        next.userId = matchingAccount.panelUserId;
+      } else {
+        next.userId = activeLeadId ? `TXT_${activeLeadId.slice(0, 6).toUpperCase()}` : "";
+      }
+    }
+
+    if (!touched.has("customerEmail")) {
+      const matchedEmail = matchingAccount?.customerEmail || history.latestCustomerEmail;
+      if (matchedEmail) {
+        next.customerEmail = matchedEmail;
+      }
+    }
+
+    if (!touched.has("gstinNumber")) {
+      const matchedGstin = matchingAccount?.gstin || history.latestGstin;
+      if (matchedGstin) {
+        next.gstinNumber = matchedGstin;
+      }
+    }
+
+    return next;
+  }
+
   function handleClearLead() {
     setLeadId("");
     setLeadSearch("");
@@ -475,6 +625,8 @@ export function DealModal({
     setContactName("");
     setCompanyName("");
     setAddress("");
+    setCustomerHistory(null);
+    setTouchedFields(new Set());
     setSelectedServices(["WhatsApp API"]);
     setCommercials([
       {
@@ -565,6 +717,14 @@ export function DealModal({
           updated.quotedPrice = value;
         }
 
+        // Keep productName in sync with Service Interest and apply matching customer portal ID if existing customer
+        if (field === "serviceType") {
+          updated.productName = value;
+          if (!isEdit && customerHistory?.isExistingCustomer && updated.stage === "closed_won") {
+            return applyCustomerHistoryToItem(updated, customerHistory, touchedFields, leadId);
+          }
+        }
+
         // If stage changes, initialize default dates and values dynamically
         if (field === "stage") {
           if (value === "demo_scheduled" && !updated.demoDate) {
@@ -593,6 +753,10 @@ export function DealModal({
             const base = parseFloat(updated.originalAmount || updated.quotedPrice || "0") || 0;
             updated.taxAmount = (base * 0.18).toFixed(2);
             updated.finalAmount = (base * 1.18).toFixed(2);
+
+            if (!isEdit && customerHistory?.isExistingCustomer) {
+              return applyCustomerHistoryToItem(updated, customerHistory, touchedFields, leadId);
+            }
           } else {
             if (!(parseFloat(updated.quantity || "0") > 0) && parseFloat(updated.creditsToAdd || "0") > 0) {
               updated.quantity = updated.creditsToAdd || "0";
@@ -689,15 +853,50 @@ export function DealModal({
       }
     }
 
+    if (commercials[0]?.stage === "closed_won" && isSplitDeal) {
+      if (!partnerRepId) {
+        toast.error("Please select the 2nd Rep to split this deal with.");
+        return;
+      }
+      if (partnerRepId === (primaryRepId || currentUser?.id)) {
+        toast.error("Split partner must be a different team member.");
+        return;
+      }
+      const pPct = parseFloat(primarySplitPct);
+      const sPct = parseFloat(partnerSplitPct);
+      if (
+        isNaN(pPct) ||
+        isNaN(sPct) ||
+        pPct <= 0 ||
+        sPct <= 0 ||
+        Math.abs(pPct + sPct - 100) > 0.05
+      ) {
+        toast.error("Split percentages must both be above 0% and total exactly 100%.");
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       const method = isEdit ? "PATCH" : "POST";
       const url = isEdit ? `/api/deals/${deal!.id}` : "/api/deals";
 
+      const splitPayload =
+        commercials[0]?.stage === "closed_won" && isSplitDeal
+          ? {
+              enabled: true,
+              primaryRepId: primaryRepId || currentUser?.id || null,
+              primaryPercentage: parseFloat(primarySplitPct),
+              partnerRepId,
+              partnerPercentage: parseFloat(partnerSplitPct),
+            }
+          : { enabled: false };
+
       const firstC = commercials[0];
       const payload = isEdit
         ? {
             stage: firstC.stage,
+            splitConfig: splitPayload,
             closingNotes: firstC.notes || firstC.demoNotes || firstC.demoFeedback || firstC.lostRemarks || null,
             quotedPrice: parseFloat(firstC.quotedPrice) || 0,
             expectedClosingDate:
@@ -763,6 +962,7 @@ export function DealModal({
             companyName: companyName.trim() || null,
             address: address.trim() || null,
             serviceType: selectedServices.join(", "),
+            splitConfig: splitPayload,
             commercials: commercials.map((c) => ({
               serviceType: c.serviceType,
               quantity: parseInt(c.quantity) || 0,
@@ -1667,6 +1867,15 @@ export function DealModal({
                           </span>
                         </div>
 
+                        {!isEdit && customerHistory?.isExistingCustomer && idx === 0 && (
+                          <div className="bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 text-[11px] text-sky-900 flex items-start gap-2">
+                            <span className="shrink-0">🔄</span>
+                            <div>
+                              <strong>Existing Recharge Customer Detected</strong> — User Type, Portal User ID (for matching service), Customer Email, and GSTIN were auto-filled from prior billing records. You can edit any field below if needed.
+                            </div>
+                          </div>
+                        )}
+
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                           {/* 1. Executive Name */}
                           <div>
@@ -1719,7 +1928,10 @@ export function DealModal({
                             </label>
                             <select
                               value={item.userType || "new_user"}
-                              onChange={(e) => updateCommercial(idx, "userType", e.target.value)}
+                              onChange={(e) => {
+                                markFieldTouched("userType");
+                                updateCommercial(idx, "userType", e.target.value);
+                              }}
                               disabled={!canEdit}
                               className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             >
@@ -1792,7 +2004,10 @@ export function DealModal({
                             <input
                               type="text"
                               value={item.userId ?? (leadId ? `TXT_${leadId.slice(0, 6).toUpperCase()}` : "")}
-                              onChange={(e) => updateCommercial(idx, "userId", e.target.value)}
+                              onChange={(e) => {
+                                markFieldTouched("userId");
+                                updateCommercial(idx, "userId", e.target.value);
+                              }}
                               placeholder="e.g. TXT_99021 or client portal username"
                               required
                               disabled={!canEdit}
@@ -1854,7 +2069,10 @@ export function DealModal({
                             <input
                               type="email"
                               value={item.customerEmail || ""}
-                              onChange={(e) => updateCommercial(idx, "customerEmail", e.target.value)}
+                              onChange={(e) => {
+                                markFieldTouched("customerEmail");
+                                updateCommercial(idx, "customerEmail", e.target.value);
+                              }}
                               required
                               placeholder="billing@customercompany.com"
                               disabled={!canEdit}
@@ -1968,7 +2186,10 @@ export function DealModal({
                             <input
                               type="text"
                               value={item.gstinNumber || ""}
-                              onChange={(e) => updateCommercial(idx, "gstinNumber", e.target.value.toUpperCase())}
+                              onChange={(e) => {
+                                markFieldTouched("gstinNumber");
+                                updateCommercial(idx, "gstinNumber", e.target.value.toUpperCase());
+                              }}
                               placeholder="29AAAAA0000A1Z5"
                               maxLength={15}
                               disabled={!canEdit}
@@ -1992,6 +2213,151 @@ export function DealModal({
                             />
                           </div>
                         </div>
+
+                        {/* 2-Rep Percentage Split Allocation (on Primary Package) */}
+                        {idx === 0 && (
+                          <div className="bg-white border border-emerald-200 rounded-xl p-3.5 space-y-3 text-xs">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <div>
+                                <p className="font-bold text-gray-800">
+                                  Split Deal Revenue Between 2 Reps?
+                                </p>
+                                <p className="text-[11px] text-gray-500">
+                                  Upon Ops Approval, deal & percentage revenue reflect on both reps&apos; dashboards and EOD reports.
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-1.5 bg-gray-100 p-1 rounded-lg w-fit shrink-0">
+                                <button
+                                  type="button"
+                                  disabled={!canEdit}
+                                  onClick={() => setIsSplitDeal(false)}
+                                  className={`px-2.5 py-1 rounded-md font-semibold transition cursor-pointer ${
+                                    !isSplitDeal
+                                      ? "bg-white text-emerald-700 shadow-2xs"
+                                      : "text-gray-500 hover:text-gray-700"
+                                  }`}
+                                >
+                                  No (100%)
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!canEdit}
+                                  onClick={() => {
+                                    setIsSplitDeal(true);
+                                    if (!primaryRepId && currentUser?.id) {
+                                      setPrimaryRepId(currentUser.id);
+                                    }
+                                  }}
+                                  className={`px-2.5 py-1 rounded-md font-semibold transition cursor-pointer ${
+                                    isSplitDeal
+                                      ? "bg-emerald-600 text-white shadow-2xs"
+                                      : "text-gray-500 hover:text-gray-700"
+                                  }`}
+                                >
+                                  Yes (Split %)
+                                </button>
+                              </div>
+                            </div>
+
+                            {isSplitDeal && (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-emerald-100">
+                                <div className="space-y-1.5">
+                                  <label className="font-semibold text-gray-700 block">
+                                    1st Rep (Primary Owner)
+                                  </label>
+                                  <select
+                                    value={primaryRepId}
+                                    onChange={(e) => setPrimaryRepId(e.target.value)}
+                                    disabled={!canEdit}
+                                    className="w-full px-2.5 py-1.5 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                                  >
+                                    <option value="">Select Primary Rep...</option>
+                                    {teamMembers.map((m) => (
+                                      <option key={m.id} value={m.id}>
+                                        {m.fullName}
+                                      </option>
+                                    ))}
+                                  </select>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[11px] text-gray-500">Share %:</span>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      max="99"
+                                      step="1"
+                                      value={primarySplitPct}
+                                      disabled={!canEdit}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        setPrimarySplitPct(val);
+                                        const num = parseFloat(val);
+                                        if (!isNaN(num) && num >= 0 && num <= 100) {
+                                          setPartnerSplitPct(String(Math.round((100 - num) * 100) / 100));
+                                        }
+                                      }}
+                                      className="w-20 px-2 py-1 border border-gray-300 rounded-md font-mono font-bold text-emerald-700"
+                                    />
+                                    <span className="text-[11px] font-semibold text-emerald-700">
+                                      ₹{(
+                                        ((parseFloat(item.finalAmount || item.originalAmount || item.quotedPrice || "0") || 0) *
+                                          (parseFloat(primarySplitPct) || 0)) /
+                                        100
+                                      ).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="space-y-1.5">
+                                  <label className="font-semibold text-gray-700 block">
+                                    2nd Rep (Split Partner) <span className="text-rose-500">*</span>
+                                  </label>
+                                  <select
+                                    value={partnerRepId}
+                                    onChange={(e) => setPartnerRepId(e.target.value)}
+                                    disabled={!canEdit}
+                                    className="w-full px-2.5 py-1.5 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                                  >
+                                    <option value="">Select Split Partner...</option>
+                                    {teamMembers
+                                      .filter((m) => m.id !== primaryRepId)
+                                      .map((m) => (
+                                        <option key={m.id} value={m.id}>
+                                          {m.fullName}
+                                        </option>
+                                      ))}
+                                  </select>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[11px] text-gray-500">Share %:</span>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      max="99"
+                                      step="1"
+                                      value={partnerSplitPct}
+                                      disabled={!canEdit}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        setPartnerSplitPct(val);
+                                        const num = parseFloat(val);
+                                        if (!isNaN(num) && num >= 0 && num <= 100) {
+                                          setPrimarySplitPct(String(Math.round((100 - num) * 100) / 100));
+                                        }
+                                      }}
+                                      className="w-20 px-2 py-1 border border-gray-300 rounded-md font-mono font-bold text-indigo-700"
+                                    />
+                                    <span className="text-[11px] font-semibold text-indigo-700">
+                                      ₹{(
+                                        ((parseFloat(item.finalAmount || item.originalAmount || item.quotedPrice || "0") || 0) *
+                                          (parseFloat(partnerSplitPct) || 0)) /
+                                        100
+                                      ).toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
 

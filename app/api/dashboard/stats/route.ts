@@ -3,6 +3,7 @@ import { withClient } from "@/lib/db";
 import { normalizeRole, isManagerOrAdmin, isSalesRep } from "@/lib/rbac";
 import { getSession } from "@/lib/auth";
 import { formatDuration, getISTDateRange, interestedCallSql, dealCloseDateSql } from "@/lib/utils";
+import { ensureDealSplitsTable, effectiveDealSharesCte } from "@/lib/deal-splits";
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
@@ -217,34 +218,61 @@ export async function GET(request: NextRequest) {
       const activePipelineValue = activeDeals.reduce((sum, d) => sum + Number(d.quotedPrice || 0), 0);
 
       await client.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;").catch(() => {});
+      await ensureDealSplitsTable(client);
 
       const closeDateSql = dealCloseDateSql("d");
-      const dealPeriodRes = await client.query(
-        `SELECT
-           COUNT(CASE WHEN d.stage = 'closed_won' THEN 1 END)::int as "wonDealsCount",
-           COALESCE(SUM(CASE WHEN d.stage = 'closed_won' THEN d.quoted_price ELSE 0 END), 0)::numeric as "wonRevenueInPeriod",
-           COUNT(CASE WHEN d.stage = 'closed_lost' THEN 1 END)::int as "lostDealsCount"
-         FROM deals d
-         WHERE ${dealWhereClause}
-           AND (CASE WHEN d.stage = 'closed_won' THEN ${closeDateSql} ELSE d.updated_at END) >= $${dealParams.length + 1}
-           AND (CASE WHEN d.stage = 'closed_won' THEN ${closeDateSql} ELSE d.updated_at END) <= $${dealParams.length + 2}`,
-        [...dealParams, startOfPeriod, endOfPeriod]
-      );
+      const dealPeriodRes = targetUserId
+        ? await client.query(
+            `WITH ${effectiveDealSharesCte()}
+             SELECT
+               COUNT(DISTINCT CASE WHEN d.stage = 'closed_won' THEN d.id END)::int as "wonDealsCount",
+               COALESCE(SUM(CASE WHEN d.stage = 'closed_won' THEN d.quoted_price * eds.share_ratio ELSE 0 END), 0)::numeric as "wonRevenueInPeriod",
+               COUNT(DISTINCT CASE WHEN d.stage = 'closed_lost' THEN d.id END)::int as "lostDealsCount"
+             FROM deals d
+             JOIN effective_deal_shares eds ON eds.deal_id = d.id AND eds.rep_id = $2
+             WHERE d.tenant_id = $1
+               AND (CASE WHEN d.stage = 'closed_won' THEN ${closeDateSql} ELSE d.updated_at END) >= $3
+               AND (CASE WHEN d.stage = 'closed_won' THEN ${closeDateSql} ELSE d.updated_at END) <= $4`,
+            [tenantId, targetUserId, startOfPeriod, endOfPeriod]
+          )
+        : await client.query(
+            `SELECT
+               COUNT(CASE WHEN d.stage = 'closed_won' THEN 1 END)::int as "wonDealsCount",
+               COALESCE(SUM(CASE WHEN d.stage = 'closed_won' THEN d.quoted_price ELSE 0 END), 0)::numeric as "wonRevenueInPeriod",
+               COUNT(CASE WHEN d.stage = 'closed_lost' THEN 1 END)::int as "lostDealsCount"
+             FROM deals d
+             WHERE d.tenant_id = $1
+               AND (CASE WHEN d.stage = 'closed_won' THEN ${closeDateSql} ELSE d.updated_at END) >= $2
+               AND (CASE WHEN d.stage = 'closed_won' THEN ${closeDateSql} ELSE d.updated_at END) <= $3`,
+            [tenantId, startOfPeriod, endOfPeriod]
+          );
 
       const wonDealsCount = dealPeriodRes.rows[0]?.wonDealsCount || 0;
       const wonRevenueInPeriod = Number(dealPeriodRes.rows[0]?.wonRevenueInPeriod || 0);
       const lostDealsInPeriod = dealPeriodRes.rows[0]?.lostDealsCount || 0;
 
-      // Lifetime/All-Time Deal Metrics (cumulative regardless of current period)
-      const allTimeDealsRes = await client.query(
-        `SELECT
-           COUNT(CASE WHEN d.stage = 'closed_won' THEN 1 END)::int as "allTimeWonDealsCount",
-           COALESCE(SUM(CASE WHEN d.stage = 'closed_won' THEN d.quoted_price ELSE 0 END), 0)::numeric as "allTimeWonRevenue",
-           COUNT(CASE WHEN d.stage = 'closed_lost' THEN 1 END)::int as "allTimeLostDealsCount"
-         FROM deals d
-         WHERE ${dealWhereClause}`,
-        dealParams
-      );
+      // Lifetime/All-Time Deal Metrics (cumulative regardless of current period; weighted for approved splits per rep)
+      const allTimeDealsRes = targetUserId
+        ? await client.query(
+            `WITH ${effectiveDealSharesCte()}
+             SELECT
+               COUNT(DISTINCT CASE WHEN d.stage = 'closed_won' THEN d.id END)::int as "allTimeWonDealsCount",
+               COALESCE(SUM(CASE WHEN d.stage = 'closed_won' THEN d.quoted_price * eds.share_ratio ELSE 0 END), 0)::numeric as "allTimeWonRevenue",
+               COUNT(DISTINCT CASE WHEN d.stage = 'closed_lost' THEN d.id END)::int as "allTimeLostDealsCount"
+             FROM deals d
+             JOIN effective_deal_shares eds ON eds.deal_id = d.id AND eds.rep_id = $2
+             WHERE d.tenant_id = $1`,
+            [tenantId, targetUserId]
+          )
+        : await client.query(
+            `SELECT
+               COUNT(CASE WHEN d.stage = 'closed_won' THEN 1 END)::int as "allTimeWonDealsCount",
+               COALESCE(SUM(CASE WHEN d.stage = 'closed_won' THEN d.quoted_price ELSE 0 END), 0)::numeric as "allTimeWonRevenue",
+               COUNT(CASE WHEN d.stage = 'closed_lost' THEN 1 END)::int as "allTimeLostDealsCount"
+             FROM deals d
+             WHERE d.tenant_id = $1`,
+            [tenantId]
+          );
 
       const allTimeWonDealsCount = allTimeDealsRes.rows[0]?.allTimeWonDealsCount || 0;
       const allTimeWonRevenue = Number(allTimeDealsRes.rows[0]?.allTimeWonRevenue || 0);
@@ -257,29 +285,57 @@ export async function GET(request: NextRequest) {
           ? Math.round((allTimeWonDealsCount / (allTimeWonDealsCount + allTimeLostDealsCount)) * 100)
           : 0);
 
-      // Recent Closed Won Deals (with linked payment verification status)
-      const wonDealsRes = await client.query(
-        `SELECT d.id, d.quoted_price as "quotedPrice", d.stage, d.service_type as "serviceType",
-                ${closeDateSql} as "closedAt", d.created_at as "createdAt",
-                l.id as "leadId", l.company_name as "companyName", l.contact_name as "contactName",
-                l.phone_number as "phoneNumber",
-                u.full_name as "repFullName", u.id as "repId",
-                p.id as "paymentId", p.ops_approval_status as "opsApprovalStatus", p.final_amount as "paymentAmount"
-         FROM deals d
-         JOIN leads l ON d.lead_id = l.id
-         JOIN users u ON d.rep_id = u.id
-         LEFT JOIN LATERAL (
-           SELECT id, ops_approval_status, final_amount
-           FROM payments
-           WHERE deal_id = d.id
-           ORDER BY created_at DESC
-           LIMIT 1
-         ) p ON true
-         WHERE ${dealWhereClause} AND d.stage = 'closed_won'
-         ORDER BY ${closeDateSql} DESC
-         LIMIT 10`,
-        dealParams
-      );
+      // Recent Closed Won Deals (including approved split attribution)
+      const wonDealsRes = targetUserId
+        ? await client.query(
+            `WITH ${effectiveDealSharesCte()}
+             SELECT d.id, (d.quoted_price * eds.share_ratio) as "quotedPrice", d.stage, d.service_type as "serviceType",
+                    ${closeDateSql} as "closedAt", d.created_at as "createdAt",
+                    eds.percentage as "splitPercentage", eds.is_split as "isSplit",
+                    l.id as "leadId", l.company_name as "companyName", l.contact_name as "contactName",
+                    l.phone_number as "phoneNumber",
+                    u.full_name as "repFullName", u.id as "repId",
+                    p.id as "paymentId", p.ops_approval_status as "opsApprovalStatus",
+                    (p.final_amount * eds.share_ratio) as "paymentAmount"
+             FROM deals d
+             JOIN effective_deal_shares eds ON eds.deal_id = d.id AND eds.rep_id = $2
+             JOIN leads l ON d.lead_id = l.id
+             JOIN users u ON d.rep_id = u.id
+             LEFT JOIN LATERAL (
+               SELECT id, ops_approval_status, final_amount
+               FROM payments
+               WHERE deal_id = d.id
+               ORDER BY created_at DESC
+               LIMIT 1
+             ) p ON true
+             WHERE d.tenant_id = $1 AND d.stage = 'closed_won'
+             ORDER BY ${closeDateSql} DESC
+             LIMIT 10`,
+            [tenantId, targetUserId]
+          )
+        : await client.query(
+            `SELECT d.id, d.quoted_price as "quotedPrice", d.stage, d.service_type as "serviceType",
+                    ${closeDateSql} as "closedAt", d.created_at as "createdAt",
+                    100.0 as "splitPercentage", false as "isSplit",
+                    l.id as "leadId", l.company_name as "companyName", l.contact_name as "contactName",
+                    l.phone_number as "phoneNumber",
+                    u.full_name as "repFullName", u.id as "repId",
+                    p.id as "paymentId", p.ops_approval_status as "opsApprovalStatus", p.final_amount as "paymentAmount"
+             FROM deals d
+             JOIN leads l ON d.lead_id = l.id
+             JOIN users u ON d.rep_id = u.id
+             LEFT JOIN LATERAL (
+               SELECT id, ops_approval_status, final_amount
+               FROM payments
+               WHERE deal_id = d.id
+               ORDER BY created_at DESC
+               LIMIT 1
+             ) p ON true
+             WHERE d.tenant_id = $1 AND d.stage = 'closed_won'
+             ORDER BY ${closeDateSql} DESC
+             LIMIT 10`,
+            [tenantId]
+          );
 
       const recentWonDeals = wonDealsRes.rows.map((r) => ({
         id: r.id,
@@ -295,6 +351,7 @@ export async function GET(request: NextRequest) {
         paymentId: r.paymentId,
         opsApprovalStatus: r.opsApprovalStatus,
         paymentAmount: r.paymentAmount ? Number(r.paymentAmount) : null,
+        splitPercentage: r.isSplit ? Number(r.splitPercentage || 100) : null,
       }));
 
       const dealsByStageRes = await client.query(
@@ -305,33 +362,54 @@ export async function GET(request: NextRequest) {
         dealParams
       );
 
-      // 5. Verified & Pending Payments Revenue
+      // 5. Verified & Pending Payments Revenue (respecting approved rep percentage splits)
       const effectivePaymentDate = `COALESCE(CASE WHEN pd.stage = 'closed_won' THEN ${dealCloseDateSql("pd")} ELSE NULL END, p.created_at)`;
-      const paymentWhereClause = targetUserId
-        ? `p.tenant_id = $1 AND p.rep_id = $2 AND p.ops_approval_status = 'approved' AND ${effectivePaymentDate} >= $3 AND ${effectivePaymentDate} <= $4`
-        : `p.tenant_id = $1 AND p.ops_approval_status = 'approved' AND ${effectivePaymentDate} >= $2 AND ${effectivePaymentDate} <= $3`;
-      const paymentParams = targetUserId
-        ? [tenantId, targetUserId, startOfPeriod, endOfPeriod]
-        : [tenantId, startOfPeriod, endOfPeriod];
-
-      const paymentsAggRes = await client.query(
-        `SELECT COALESCE(SUM(p.final_amount), 0)::numeric as "verifiedRevenue"
-         FROM payments p
-         LEFT JOIN deals pd ON p.deal_id = pd.id
-         WHERE ${paymentWhereClause}`,
-        paymentParams
-      );
+      const paymentsAggRes = targetUserId
+        ? await client.query(
+            `WITH ${effectiveDealSharesCte()}
+             SELECT COALESCE(SUM(p.final_amount * COALESCE(eds.share_ratio, CASE WHEN p.rep_id = $2 THEN 1.0 ELSE 0.0 END)), 0)::numeric as "verifiedRevenue"
+             FROM payments p
+             LEFT JOIN deals pd ON p.deal_id = pd.id
+             LEFT JOIN effective_deal_shares eds ON eds.deal_id = p.deal_id AND eds.rep_id = $2
+             WHERE p.tenant_id = $1
+               AND (eds.rep_id = $2 OR (p.rep_id = $2 AND p.deal_id IS NULL))
+               AND p.ops_approval_status = 'approved'
+               AND ${effectivePaymentDate} >= $3
+               AND ${effectivePaymentDate} <= $4`,
+            [tenantId, targetUserId, startOfPeriod, endOfPeriod]
+          )
+        : await client.query(
+            `SELECT COALESCE(SUM(p.final_amount), 0)::numeric as "verifiedRevenue"
+             FROM payments p
+             LEFT JOIN deals pd ON p.deal_id = pd.id
+             WHERE p.tenant_id = $1
+               AND p.ops_approval_status = 'approved'
+               AND ${effectivePaymentDate} >= $2
+               AND ${effectivePaymentDate} <= $3`,
+            [tenantId, startOfPeriod, endOfPeriod]
+          );
       const verifiedRevenue = Number(paymentsAggRes.rows[0]?.verifiedRevenue || 0);
 
       // Cumulative Payments Revenue (Approved vs Pending Verification)
-      const allTimePaymentsRes = await client.query(
-        `SELECT
-           COALESCE(SUM(CASE WHEN ops_approval_status = 'approved' THEN final_amount ELSE 0 END), 0)::numeric as "allTimeVerifiedRevenue",
-           COALESCE(SUM(CASE WHEN ops_approval_status = 'pending_verification' THEN final_amount ELSE 0 END), 0)::numeric as "allTimePendingRevenue"
-         FROM payments
-         WHERE ${targetUserId ? "tenant_id = $1 AND rep_id = $2" : "tenant_id = $1"}`,
-        targetUserId ? [tenantId, targetUserId] : [tenantId]
-      );
+      const allTimePaymentsRes = targetUserId
+        ? await client.query(
+            `WITH ${effectiveDealSharesCte()}
+             SELECT
+               COALESCE(SUM(CASE WHEN p.ops_approval_status = 'approved' THEN p.final_amount * COALESCE(eds.share_ratio, CASE WHEN p.rep_id = $2 THEN 1.0 ELSE 0.0 END) ELSE 0 END), 0)::numeric as "allTimeVerifiedRevenue",
+               COALESCE(SUM(CASE WHEN p.ops_approval_status = 'pending_verification' THEN p.final_amount * COALESCE(eds.share_ratio, CASE WHEN p.rep_id = $2 THEN 1.0 ELSE 0.0 END) ELSE 0 END), 0)::numeric as "allTimePendingRevenue"
+             FROM payments p
+             LEFT JOIN effective_deal_shares eds ON eds.deal_id = p.deal_id AND eds.rep_id = $2
+             WHERE p.tenant_id = $1 AND (eds.rep_id = $2 OR (p.rep_id = $2 AND p.deal_id IS NULL))`,
+            [tenantId, targetUserId]
+          )
+        : await client.query(
+            `SELECT
+               COALESCE(SUM(CASE WHEN ops_approval_status = 'approved' THEN final_amount ELSE 0 END), 0)::numeric as "allTimeVerifiedRevenue",
+               COALESCE(SUM(CASE WHEN ops_approval_status = 'pending_verification' THEN final_amount ELSE 0 END), 0)::numeric as "allTimePendingRevenue"
+             FROM payments
+             WHERE tenant_id = $1`,
+            [tenantId]
+          );
       const allTimeVerifiedRevenue = Number(allTimePaymentsRes.rows[0]?.allTimeVerifiedRevenue || 0);
       const allTimePendingRevenue = Number(allTimePaymentsRes.rows[0]?.allTimePendingRevenue || 0);
 
@@ -453,7 +531,8 @@ export async function GET(request: NextRequest) {
 
       if (isManagerOrAdmin(role) && !targetUserId) {
         const boardRes = await client.query(
-          `SELECT u.id as "repId", u.full_name as "repName", u.role as "repRole",
+          `WITH ${effectiveDealSharesCte()}
+           SELECT u.id as "repId", u.full_name as "repName", u.role as "repRole",
                   COALESCE(cl.total_calls, 0)::int as "totalCalls",
                   COALESCE(cl.connected_calls, 0)::int as "connectedCalls",
                   COALESCE(cl.interested_calls, 0)::int as "interestedCalls",
@@ -506,17 +585,19 @@ export async function GET(request: NextRequest) {
              GROUP BY rep_id
            ) dd_agg ON u.id = dd_agg.rep_id
            LEFT JOIN (
-             SELECT rep_id, COUNT(id) as won_deals, SUM(quoted_price) as won_revenue
-             FROM deals
-             WHERE tenant_id = $1 AND stage = 'closed_won'
-               AND ${dealCloseDateSql("")} >= $2 AND ${dealCloseDateSql("")} <= $3
-             GROUP BY rep_id
+             SELECT eds.rep_id, COUNT(DISTINCT eds.deal_id) as won_deals, SUM(d.quoted_price * eds.share_ratio) as won_revenue
+             FROM deals d
+             JOIN effective_deal_shares eds ON eds.deal_id = d.id
+             WHERE d.tenant_id = $1 AND d.stage = 'closed_won'
+               AND ${dealCloseDateSql("d")} >= $2 AND ${dealCloseDateSql("d")} <= $3
+             GROUP BY eds.rep_id
            ) dl ON u.id = dl.rep_id
            LEFT JOIN (
-             SELECT rep_id, COUNT(id) as all_won_deals, SUM(quoted_price) as all_won_revenue
-             FROM deals
-             WHERE tenant_id = $1 AND stage = 'closed_won'
-             GROUP BY rep_id
+             SELECT eds.rep_id, COUNT(DISTINCT eds.deal_id) as all_won_deals, SUM(d.quoted_price * eds.share_ratio) as all_won_revenue
+             FROM deals d
+             JOIN effective_deal_shares eds ON eds.deal_id = d.id
+             WHERE d.tenant_id = $1 AND d.stage = 'closed_won'
+             GROUP BY eds.rep_id
            ) dl_all ON u.id = dl_all.rep_id
            WHERE u.tenant_id = $1 AND u.is_active = true AND u.role IN ('sales_rep', 'sales_manager')
            ORDER BY "wonRevenue" DESC, "allTimeWonRevenue" DESC, "totalCalls" DESC`,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { formatDuration, getISTDateRange, interestedCallSql, dealCloseDateSql } from "@/lib/utils";
+import { ensureDealSplitsTable, effectiveDealSharesCte } from "@/lib/deal-splits";
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
@@ -28,6 +29,7 @@ export async function GET(request: NextRequest) {
   try {
     return await withClient(async (client) => {
       await client.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;").catch(() => {});
+      await ensureDealSplitsTable(client);
       const repsRes = await client.query(
         `SELECT id, full_name as "fullName"
          FROM users
@@ -65,8 +67,16 @@ export async function GET(request: NextRequest) {
 
       const repIds = reps.map((r) => r.id);
 
-      const [callStatsRes, uniqueDialedRes, demosBookedRes, demosCompletedRes, dealStatsRes, paymentStatsRes] =
-        await Promise.all([
+      const [
+        callStatsRes,
+        uniqueDialedRes,
+        demosBookedRes,
+        demosCompletedRes,
+        dealStatsRes,
+        paymentStatsRes,
+        distinctDealTotalsRes,
+        distinctPaymentTotalsRes,
+      ] = await Promise.all([
           client.query(
             `SELECT rep_id,
                     COUNT(id)::int as total_calls,
@@ -136,24 +146,55 @@ export async function GET(request: NextRequest) {
             [tenantId, repIds, startOfDay, endOfDay]
           ),
           client.query(
-            `SELECT rep_id, COUNT(id)::int as count, COALESCE(SUM(quoted_price), 0)::numeric as "quotedPrice"
-             FROM deals
-             WHERE tenant_id = $1 AND rep_id = ANY($2::uuid[])
-               AND stage IN ('quote_sent', 'payment_pending', 'closed_won')
-               AND (CASE WHEN stage = 'closed_won' THEN ${dealCloseDateSql("")} ELSE created_at END) >= $3
-               AND (CASE WHEN stage = 'closed_won' THEN ${dealCloseDateSql("")} ELSE created_at END) <= $4
-             GROUP BY rep_id`,
+            `WITH ${effectiveDealSharesCte()}
+             SELECT eds.rep_id, COUNT(DISTINCT eds.deal_id)::int as count, COALESCE(SUM(d.quoted_price * eds.share_ratio), 0)::numeric as "quotedPrice"
+             FROM deals d
+             JOIN effective_deal_shares eds ON eds.deal_id = d.id
+             WHERE d.tenant_id = $1 AND eds.rep_id = ANY($2::uuid[])
+               AND d.stage IN ('quote_sent', 'payment_pending', 'closed_won')
+               AND (CASE WHEN d.stage = 'closed_won' THEN ${dealCloseDateSql("d")} ELSE d.created_at END) >= $3
+               AND (CASE WHEN d.stage = 'closed_won' THEN ${dealCloseDateSql("d")} ELSE d.created_at END) <= $4
+             GROUP BY eds.rep_id`,
             [tenantId, repIds, startOfDay, endOfDay]
           ),
           client.query(
-            `SELECT p.rep_id, COUNT(p.id)::int as count, COALESCE(SUM(p.final_amount), 0)::numeric as "finalAmount"
+            `WITH ${effectiveDealSharesCte()}
+             SELECT COALESCE(eds.rep_id, p.rep_id) as rep_id,
+                    COUNT(DISTINCT p.id)::int as count,
+                    COALESCE(SUM(p.final_amount * COALESCE(eds.share_ratio, 1.0)), 0)::numeric as "finalAmount"
              FROM payments p
              LEFT JOIN deals pd ON p.deal_id = pd.id
-             WHERE p.tenant_id = $1 AND p.rep_id = ANY($2::uuid[])
+             LEFT JOIN effective_deal_shares eds ON eds.deal_id = p.deal_id
+             WHERE p.tenant_id = $1
+               AND COALESCE(eds.rep_id, p.rep_id) = ANY($2::uuid[])
                AND p.ops_approval_status = 'approved'
                AND COALESCE(CASE WHEN pd.stage = 'closed_won' THEN ${dealCloseDateSql("pd")} ELSE NULL END, p.created_at) >= $3
                AND COALESCE(CASE WHEN pd.stage = 'closed_won' THEN ${dealCloseDateSql("pd")} ELSE NULL END, p.created_at) <= $4
-             GROUP BY p.rep_id`,
+             GROUP BY COALESCE(eds.rep_id, p.rep_id)`,
+            [tenantId, repIds, startOfDay, endOfDay]
+          ),
+          client.query(
+            `WITH ${effectiveDealSharesCte()}
+             SELECT COUNT(DISTINCT d.id)::int as count
+             FROM deals d
+             JOIN effective_deal_shares eds ON eds.deal_id = d.id
+             WHERE d.tenant_id = $1 AND eds.rep_id = ANY($2::uuid[])
+               AND d.stage IN ('quote_sent', 'payment_pending', 'closed_won')
+               AND (CASE WHEN d.stage = 'closed_won' THEN ${dealCloseDateSql("d")} ELSE d.created_at END) >= $3
+               AND (CASE WHEN d.stage = 'closed_won' THEN ${dealCloseDateSql("d")} ELSE d.created_at END) <= $4`,
+            [tenantId, repIds, startOfDay, endOfDay]
+          ),
+          client.query(
+            `WITH ${effectiveDealSharesCte()}
+             SELECT COUNT(DISTINCT p.id)::int as count
+             FROM payments p
+             LEFT JOIN deals pd ON p.deal_id = pd.id
+             LEFT JOIN effective_deal_shares eds ON eds.deal_id = p.deal_id
+             WHERE p.tenant_id = $1
+               AND COALESCE(eds.rep_id, p.rep_id) = ANY($2::uuid[])
+               AND p.ops_approval_status = 'approved'
+               AND COALESCE(CASE WHEN pd.stage = 'closed_won' THEN ${dealCloseDateSql("pd")} ELSE NULL END, p.created_at) >= $3
+               AND COALESCE(CASE WHEN pd.stage = 'closed_won' THEN ${dealCloseDateSql("pd")} ELSE NULL END, p.created_at) <= $4`,
             [tenantId, repIds, startOfDay, endOfDay]
           ),
         ]);
@@ -214,9 +255,9 @@ export async function GET(request: NextRequest) {
         talkTimeFormatted: formatDuration(totalTalkTimeSecs),
         demosBooked: metrics.reduce((sum, m) => sum + m.demosBooked, 0),
         demosCompleted: metrics.reduce((sum, m) => sum + m.demosCompleted, 0),
-        quotesSent: metrics.reduce((sum, m) => sum + m.quotesSent, 0),
+        quotesSent: Number(distinctDealTotalsRes.rows[0]?.count || 0),
         totalQuotedValue: metrics.reduce((sum, m) => sum + m.totalQuotedValue, 0),
-        paymentsCollected: metrics.reduce((sum, m) => sum + m.paymentsCollected, 0),
+        paymentsCollected: Number(distinctPaymentTotalsRes.rows[0]?.count || 0),
         revenueCollected: metrics.reduce((sum, m) => sum + m.revenueCollected, 0),
       };
 

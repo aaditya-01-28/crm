@@ -3,6 +3,7 @@ import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { isManagerOrAdmin } from "@/lib/rbac";
 import { parseScheduledDateTime, getISTDateString, parseDealDateToTimestamp } from "@/lib/utils";
+import { ensureDealSplitsTable, syncDealSplits } from "@/lib/deal-splits";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -26,6 +27,7 @@ export async function PATCH(
 
     return await withClient(async (client) => {
       await client.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;").catch(() => {});
+      await ensureDealSplitsTable(client);
 
       const dealRes = await client.query(
         "SELECT id, lead_id, rep_id, stage, closing_notes, quoted_price, expected_closing_date, closed_at, service_type, quantity FROM deals WHERE id = $1 AND tenant_id = $2",
@@ -277,7 +279,7 @@ export async function PATCH(
         }
 
         const existingPay = await client.query(
-          "SELECT id FROM payments WHERE deal_id = $1 AND tenant_id = $2 LIMIT 1",
+          "SELECT id, ops_approval_status FROM payments WHERE deal_id = $1 AND tenant_id = $2 LIMIT 1",
           [id, tenantId]
         );
 
@@ -331,6 +333,28 @@ export async function PATCH(
             ]
           );
         }
+
+        if (body.splitConfig !== undefined) {
+          const currentOpsStatus =
+            existingPay.rows[0]?.ops_approval_status || "pending_verification";
+          await syncDealSplits({
+            client,
+            tenantId,
+            dealId: id,
+            fallbackPrimaryRepId: deal.rep_id || repId,
+            splitConfig: body.splitConfig,
+            status: currentOpsStatus === "approved" ? "approved" : "pending_verification",
+          });
+        }
+      } else if (body.splitConfig && !body.splitConfig.enabled) {
+        await syncDealSplits({
+          client,
+          tenantId,
+          dealId: id,
+          fallbackPrimaryRepId: deal.rep_id || repId,
+          splitConfig: { enabled: false },
+          status: "pending_verification",
+        });
       }
 
       await client.query("ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_source TEXT DEFAULT 'dialer';").catch(() => {});
