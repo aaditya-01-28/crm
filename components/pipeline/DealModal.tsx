@@ -83,8 +83,14 @@ interface Deal {
     createdAt?: string;
   } | null;
   demoTask?: {
-    scheduledTime: string;
+    scheduledTime?: string | null;
     meetingLink?: string | null;
+    notes?: string | null;
+    status?: string | null;
+    completedAt?: string | null;
+  } | null;
+  followupTask?: {
+    scheduledTime?: string | null;
     notes?: string | null;
   } | null;
 }

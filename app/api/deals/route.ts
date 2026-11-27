@@ -65,6 +65,10 @@ export async function GET(request: NextRequest) {
                 demo_task.scheduled_time as "demoTask_scheduledTime",
                 demo_task.meeting_link as "demoTask_meetingLink",
                 demo_task.notes as "demoTask_notes",
+                demo_task.status as "demoTask_status",
+                demo_task.completed_at as "demoTask_completedAt",
+                followup_task.scheduled_time as "followupTask_scheduledTime",
+                followup_task.notes as "followupTask_notes",
                 sp.splits_json as "splitsJson"
          FROM deals d
          LEFT JOIN leads l ON d.lead_id = l.id
@@ -89,12 +93,23 @@ export async function GET(request: NextRequest) {
            WHERE ds.deal_id = d.id
          ) sp ON true
          LEFT JOIN LATERAL (
-           SELECT st.scheduled_time, st.meeting_link, st.notes
+           SELECT st.scheduled_time, st.meeting_link, st.notes, st.status, st.updated_at as completed_at
            FROM scheduled_tasks st
-           WHERE st.lead_id = d.lead_id AND st.task_type = 'product_demo' AND st.status = 'pending'
-           ORDER BY st.scheduled_time DESC
+           WHERE st.lead_id = d.lead_id
+             AND st.task_type = 'product_demo'
+             AND st.status IN ('pending', 'completed')
+           ORDER BY COALESCE(st.scheduled_time, st.updated_at) DESC
            LIMIT 1
          ) demo_task ON true
+         LEFT JOIN LATERAL (
+           SELECT st.scheduled_time, st.notes
+           FROM scheduled_tasks st
+           WHERE st.lead_id = d.lead_id
+             AND st.task_type = 'callback'
+             AND st.status = 'pending'
+           ORDER BY st.scheduled_time ASC NULLS LAST, st.updated_at DESC
+           LIMIT 1
+         ) followup_task ON true
          LEFT JOIN LATERAL (
            SELECT p.id,
                   p.user_type,
@@ -178,13 +193,23 @@ export async function GET(request: NextRequest) {
                 createdAt: r.payment_createdAt,
               }
             : null,
-          demoTask: r.demoTask_scheduledTime
-            ? {
-                scheduledTime: r.demoTask_scheduledTime,
-                meetingLink: r.demoTask_meetingLink,
-                notes: r.demoTask_notes,
-              }
-            : null,
+          demoTask:
+            r.demoTask_scheduledTime || r.demoTask_completedAt || r.demoTask_meetingLink || r.demoTask_notes
+              ? {
+                  scheduledTime: r.demoTask_scheduledTime,
+                  meetingLink: r.demoTask_meetingLink,
+                  notes: r.demoTask_notes,
+                  status: r.demoTask_status,
+                  completedAt: r.demoTask_completedAt,
+                }
+              : null,
+          followupTask:
+            r.followupTask_scheduledTime || r.followupTask_notes
+              ? {
+                  scheduledTime: r.followupTask_scheduledTime,
+                  notes: r.followupTask_notes,
+                }
+              : null,
           splits: Array.isArray(r.splitsJson) ? r.splitsJson : [],
         };
       });
