@@ -315,9 +315,18 @@ export default function PipelinePage() {
         }
       }
 
-      // 2. Representative filter (manager & admin)
+      // 2. Representative filter (manager & admin) - include approved split partners
       if (repFilter !== "all") {
-        if (deal.repId !== repFilter && deal.rep?.fullName !== repFilter) {
+        const splits = deal.splits || [];
+        const hasApprovedSplits =
+          splits.length >= 2 && splits.some((s) => s.status === "approved");
+        const matchesApprovedSplit = splits.some(
+          (s) => s.status === "approved" && (s.repId === repFilter || s.repName === repFilter)
+        );
+        const matchesOwner =
+          !hasApprovedSplits &&
+          (deal.repId === repFilter || deal.rep?.fullName === repFilter);
+        if (!matchesApprovedSplit && !matchesOwner) {
           return false;
         }
       }
