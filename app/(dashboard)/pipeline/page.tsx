@@ -728,6 +728,7 @@ export default function PipelinePage() {
       {/* Deal Modal */}
       {showDealModal && (
         <DealModal
+          key={editingDeal?.id || "new-deal"}
           deal={editingDeal}
           canEdit={editingDeal ? (canManageDeals || editingDeal.repId === currentUserId) : true}
           canDelete={canManageDeals}

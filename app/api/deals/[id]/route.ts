@@ -84,15 +84,17 @@ export async function PATCH(
       const newQuantity = quantity !== undefined ? quantity : deal.quantity;
       let newNotes = closingNotes !== undefined ? closingNotes : deal.closing_notes;
 
-      if (newStage === "closed_won" || wonDetails?.userId || wonDetails?.panelUserId) {
-        // Parse existing closing notes if it was JSON
-        let existingDossier: Record<string, any> = {};
-        try {
-          if (deal.closing_notes) {
-            existingDossier = JSON.parse(deal.closing_notes);
+      let existingDossier: Record<string, any> = {};
+      try {
+        if (deal.closing_notes) {
+          const parsed = JSON.parse(deal.closing_notes);
+          if (typeof parsed === "object" && parsed !== null) {
+            existingDossier = parsed;
           }
-        } catch {}
+        }
+      } catch {}
 
+      if (newStage === "closed_won" || wonDetails?.userId || wonDetails?.panelUserId) {
         const dossier = {
           ...existingDossier,
           executiveName: wonDetails.executiveName || existingDossier.executiveName || null,
@@ -117,25 +119,36 @@ export async function PATCH(
           notes: closingNotes || existingDossier.notes || null,
         };
         newNotes = JSON.stringify(dossier);
-      } else if (newStage === "demo_scheduled" && (body.demoDate || body.meetingLink)) {
+      } else if (newStage === "demo_scheduled" && (body.demoDate || body.meetingLink || body.decisionMakerName || closingNotes !== undefined)) {
         newNotes = JSON.stringify({
-          demoDate: body.demoDate,
-          meetingLink: body.meetingLink,
-          decisionMakerName: body.decisionMakerName,
-          notes: closingNotes || body.demoNotes || null,
+          ...existingDossier,
+          demoDate: body.demoDate ?? existingDossier.demoDate ?? null,
+          meetingLink: body.meetingLink ?? existingDossier.meetingLink ?? null,
+          decisionMakerName: body.decisionMakerName ?? existingDossier.decisionMakerName ?? null,
+          notes: closingNotes ?? body.demoNotes ?? existingDossier.notes ?? null,
         });
-      } else if ((newStage === "demo_done" || newStage === "quote_sent") && (body.contactBackDate || body.followupChannel)) {
+      } else if ((newStage === "demo_done" || newStage === "quote_sent") && (body.contactBackDate || body.followupChannel || closingNotes !== undefined)) {
         newNotes = JSON.stringify({
-          contactBackDate: body.contactBackDate,
-          followupChannel: body.followupChannel,
-          notes: closingNotes || body.demoFeedback || null,
+          ...existingDossier,
+          contactBackDate: body.contactBackDate ?? existingDossier.contactBackDate ?? null,
+          followupChannel: body.followupChannel ?? existingDossier.followupChannel ?? null,
+          notes: closingNotes ?? body.demoFeedback ?? existingDossier.notes ?? null,
         });
-      } else if (newStage === "closed_lost" && (body.lostReason || body.competitorName || body.lostRemarks)) {
+      } else if (newStage === "payment_pending" && (body.paymentMode || body.paymentDueDate || closingNotes !== undefined)) {
         newNotes = JSON.stringify({
-          lostReason: body.lostReason,
-          competitorName: body.competitorName,
-          lostRemarks: body.lostRemarks,
-          notes: closingNotes || body.lostRemarks || null,
+          ...existingDossier,
+          paymentMode: body.paymentMode ?? existingDossier.paymentMode ?? null,
+          paymentDueDate: body.paymentDueDate ?? existingDossier.paymentDueDate ?? null,
+          notes: closingNotes ?? existingDossier.notes ?? null,
+        });
+      } else if (newStage === "closed_lost" && (body.lostReason || body.competitorName || body.lostRemarks || body.recontactDate || closingNotes !== undefined)) {
+        newNotes = JSON.stringify({
+          ...existingDossier,
+          lostReason: body.lostReason ?? existingDossier.lostReason ?? null,
+          competitorName: body.competitorName ?? existingDossier.competitorName ?? null,
+          recontactDate: body.recontactDate ?? existingDossier.recontactDate ?? null,
+          lostRemarks: body.lostRemarks ?? existingDossier.lostRemarks ?? null,
+          notes: closingNotes ?? body.lostRemarks ?? existingDossier.notes ?? null,
         });
       }
 

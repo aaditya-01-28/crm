@@ -260,6 +260,15 @@ export function DealModal({
       } catch {}
     }
 
+    const pickPositiveStr = (...vals: Array<string | number | null | undefined>): string | null => {
+      for (const v of vals) {
+        if (v === null || v === undefined || v === "") continue;
+        const num = typeof v === "number" ? v : parseFloat(String(v));
+        if (!isNaN(num) && num > 0) return String(v);
+      }
+      return null;
+    };
+
     const pay = deal?.payment;
     const repName =
       parsedDossier?.executiveName ||
@@ -273,25 +282,38 @@ export function DealModal({
     const userType = pay?.userType || parsedDossier?.userType || "new_user";
     const paymentMode = pay?.paymentMode || parsedDossier?.paymentMode || "UPI / QR";
     const creditsToAdd =
-      pay?.creditsToAdd?.toString() ||
-      parsedDossier?.creditsToAdd ||
-      deal?.quantity?.toString() ||
-      "0";
-    const originalAmount = pay?.originalAmount
-      ? parseFloat(pay.originalAmount).toFixed(2)
-      : parsedDossier?.originalAmount ||
-        (deal?.quotedPrice ? parseFloat(deal.quotedPrice).toFixed(2) : "0");
-    const taxAmount = pay?.taxAmount
+      pickPositiveStr(
+        deal?.quantity,
+        pay?.creditsToAdd,
+        parsedDossier?.creditsToAdd,
+        parsedDossier?.quantity
+      ) || "0";
+    const rawOriginal =
+      pickPositiveStr(
+        pay?.originalAmount,
+        parsedDossier?.originalAmount,
+        deal?.quotedPrice,
+        pay?.finalAmount,
+        parsedDossier?.finalAmount
+      ) || "0";
+    const originalNum = parseFloat(rawOriginal);
+    const originalAmount =
+      !isNaN(originalNum) && originalNum > 0
+        ? (Number.isInteger(originalNum) ? String(originalNum) : originalNum.toFixed(2))
+        : "0";
+    const taxAmount = pay?.taxAmount && parseFloat(pay.taxAmount) > 0
       ? parseFloat(pay.taxAmount).toFixed(2)
-      : parsedDossier?.taxAmount ||
-        (parseFloat(originalAmount || "0") * 0.18).toFixed(2);
-    const tds = pay?.tdsAmount
+      : (parsedDossier?.taxAmount && parseFloat(parsedDossier.taxAmount) > 0
+          ? parseFloat(parsedDossier.taxAmount).toFixed(2)
+          : (parseFloat(originalAmount || "0") * 0.18).toFixed(2));
+    const tds = pay?.tdsAmount && parseFloat(pay.tdsAmount) > 0
       ? parseFloat(pay.tdsAmount).toFixed(2)
       : parsedDossier?.tds || "0";
-    const finalAmount = pay?.finalAmount
+    const finalAmount = pay?.finalAmount && parseFloat(pay.finalAmount) > 0
       ? parseFloat(pay.finalAmount).toFixed(2)
-      : parsedDossier?.finalAmount ||
-        (parseFloat(originalAmount || "0") * 1.18).toFixed(2);
+      : (parsedDossier?.finalAmount && parseFloat(parsedDossier.finalAmount) > 0
+          ? parseFloat(parsedDossier.finalAmount).toFixed(2)
+          : (parseFloat(originalAmount || "0") * 1.18).toFixed(2));
 
     const wonDate =
       parsedDossier?.wonDate ||
@@ -334,6 +356,7 @@ export function DealModal({
         paymentDueDate: parsedDossier?.paymentDueDate || "",
         lostReason: parsedDossier?.lostReason || "",
         competitorName: parsedDossier?.competitorName || "",
+        recontactDate: parsedDossier?.recontactDate || "",
         lostRemarks: parsedDossier?.lostRemarks || "",
 
         // Closed Won / Onboarding Dossier fields
@@ -531,6 +554,17 @@ export function DealModal({
 
         const updated = { ...item, [field]: value };
 
+        // Keep quantity/creditsToAdd and quotedPrice/originalAmount synchronized across all stages
+        if (field === "quantity") {
+          updated.creditsToAdd = value;
+        } else if (field === "creditsToAdd") {
+          updated.quantity = value;
+        } else if (field === "quotedPrice") {
+          updated.originalAmount = value;
+        } else if (field === "originalAmount") {
+          updated.quotedPrice = value;
+        }
+
         // If stage changes, initialize default dates and values dynamically
         if (field === "stage") {
           if (value === "demo_scheduled" && !updated.demoDate) {
@@ -550,11 +584,22 @@ export function DealModal({
             if (!updated.customerCompanyName) updated.customerCompanyName = companyName;
             if (!updated.customerName) updated.customerName = contactName;
             if (!updated.customerContactNumber) updated.customerContactNumber = phoneNumber;
-            if (!updated.originalAmount) updated.originalAmount = updated.quotedPrice || "0";
-            const base = parseFloat(updated.originalAmount || "0");
-            const tax = (base * 0.18).toFixed(2);
-            updated.taxAmount = tax;
+            if (!(parseFloat(updated.creditsToAdd || "0") > 0) && parseFloat(updated.quantity || "0") > 0) {
+              updated.creditsToAdd = updated.quantity;
+            }
+            if (!(parseFloat(updated.originalAmount || "0") > 0) && parseFloat(updated.quotedPrice || "0") > 0) {
+              updated.originalAmount = updated.quotedPrice;
+            }
+            const base = parseFloat(updated.originalAmount || updated.quotedPrice || "0") || 0;
+            updated.taxAmount = (base * 0.18).toFixed(2);
             updated.finalAmount = (base * 1.18).toFixed(2);
+          } else {
+            if (!(parseFloat(updated.quantity || "0") > 0) && parseFloat(updated.creditsToAdd || "0") > 0) {
+              updated.quantity = updated.creditsToAdd || "0";
+            }
+            if (!(parseFloat(updated.quotedPrice || "0") > 0) && parseFloat(updated.originalAmount || "0") > 0) {
+              updated.quotedPrice = updated.originalAmount || "0";
+            }
           }
         }
 
@@ -672,6 +717,8 @@ export function DealModal({
             demoNotes: firstC.demoNotes,
             followupChannel: firstC.followupChannel,
             demoFeedback: firstC.demoFeedback,
+            paymentMode: firstC.paymentMode,
+            paymentDueDate: firstC.paymentDueDate || firstC.closingDate,
             lostReason: firstC.lostReason,
             competitorName: firstC.competitorName,
             recontactDate: firstC.recontactDate,
