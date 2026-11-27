@@ -23,7 +23,7 @@ import {
   Filter,
   AlertCircle,
 } from "lucide-react";
-import { formatCurrency, SERVICE_INTERESTS, getISTDateRange } from "@/lib/utils";
+import { formatCurrency, SERVICE_INTERESTS, getISTDateRange, getDealDisplayAmount } from "@/lib/utils";
 import { DealCard } from "@/components/pipeline/DealCard";
 import { DealModal } from "@/components/pipeline/DealModal";
 import { PaymentModal } from "@/components/payments/PaymentModal";
@@ -387,7 +387,7 @@ export default function PipelinePage() {
   function colStats(colId: Stage) {
     const colDeals = dealsByStage[colId] || [];
     const total = colDeals.reduce(
-      (sum, d) => sum + (parseFloat(d.quotedPrice) || 0),
+      (sum, d) => sum + getDealDisplayAmount(d),
       0
     );
     const credits = colDeals.reduce(
@@ -400,7 +400,7 @@ export default function PipelinePage() {
   // Board total statistics
   const totalPipelineDeals = filteredDeals.length;
   const totalPipelineValue = filteredDeals.reduce(
-    (sum, d) => sum + (parseFloat(d.quotedPrice) || 0),
+    (sum, d) => sum + getDealDisplayAmount(d),
     0
   );
 
@@ -761,7 +761,7 @@ export default function PipelinePage() {
                       dealToDelete.lead?.contactName ||
                       "this customer"}
                   </strong>{" "}
-                  ({formatCurrency(Number(dealToDelete.quotedPrice || 0))})?
+                  ({formatCurrency(getDealDisplayAmount(dealToDelete))})?
                   This action is permanent and will remove it from the pipeline metrics.
                 </p>
               </div>

@@ -364,4 +364,26 @@ export function interestedCallSql(alias = ""): string {
   return `(${p}is_interested = true OR (${p}is_interested IS NULL AND (${p}disposition IN ('Interested', 'Demo Scheduled', 'Callback', 'Callback Requested', 'Future Requirement', 'Demo Done', 'Demo Completed', 'Quote Sent', 'Won', 'Deal Created') OR ${p}disposition ILIKE '%Demo%' OR ${p}disposition ILIKE '%Callback%' OR ${p}disposition ILIKE '%Future%')))`;
 }
 
+/**
+ * Resolves the display/booking value for a pipeline deal, preferring Final Amount
+ * (from linked payment or closed-won dossier) over base quotedPrice.
+ */
+export function getDealDisplayAmount(deal: {
+  quotedPrice?: string | number | null;
+  closingNotes?: string | null;
+  payment?: { finalAmount?: string | number | null } | null;
+}): number {
+  const paymentFinal = Number(deal.payment?.finalAmount || 0);
+  if (paymentFinal > 0) return paymentFinal;
+
+  if (deal.closingNotes) {
+    try {
+      const parsed = JSON.parse(deal.closingNotes);
+      const dossierFinal = Number(parsed?.finalAmount || 0);
+      if (dossierFinal > 0) return dossierFinal;
+    } catch {}
+  }
+
+  return Number(deal.quotedPrice || 0);
+}
 

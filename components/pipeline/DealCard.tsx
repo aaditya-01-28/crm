@@ -1,6 +1,6 @@
 "use client";
 
-import { formatCurrency, cn } from "@/lib/utils";
+import { formatCurrency, cn, getDealDisplayAmount } from "@/lib/utils";
 import { Calendar, Tag, User, Trash2, Edit3 } from "lucide-react";
 
 interface DealCardProps {
@@ -9,7 +9,11 @@ interface DealCardProps {
     serviceType: string;
     quantity: number;
     quotedPrice: string;
+    closingNotes?: string | null;
     expectedClosingDate: string | null;
+    payment?: {
+      finalAmount?: string | null;
+    } | null;
     lead?: {
       phoneNumber?: string;
       companyName: string | null;
@@ -114,7 +118,7 @@ export function DealCard({
       <div className="pt-1 flex items-baseline justify-between border-t border-slate-100">
         <div>
           <p className="text-sm font-bold text-slate-900">
-            {formatCurrency(Number(deal.quotedPrice || 0))}
+            {formatCurrency(getDealDisplayAmount(deal))}
           </p>
           <p className="text-[11px] text-slate-400 font-medium">
             {(deal.quantity || 0).toLocaleString("en-IN")} units

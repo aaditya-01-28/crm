@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
   const vertical = searchParams.get("vertical");
   const search = searchParams.get("search")?.trim();
   const filterRepId = searchParams.get("repId");
+  const sortBy = searchParams.get("sortBy") || "updated_desc";
   const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
   const limit = Math.min(10000, Math.max(1, parseInt(searchParams.get("limit") || "25")));
   const queue = searchParams.get("queue") === "true";
@@ -135,9 +136,18 @@ export async function GET(request: NextRequest) {
 
       const whereClause = conditions.join(" AND ");
 
+      const orderByClause =
+        sortBy === "newest"
+          ? `COALESCE(l.assigned_at, l.first_assigned_at, l.created_at) DESC, l.created_at DESC, l.id DESC`
+          : sortBy === "oldest"
+          ? `COALESCE(l.assigned_at, l.first_assigned_at, l.created_at) ASC, l.created_at ASC, l.id ASC`
+          : sortBy === "updated_asc"
+          ? `l.updated_at ASC, l.created_at ASC, l.id ASC`
+          : `l.updated_at DESC, l.created_at ASC, l.id ASC`;
+
       if (allIds) {
         const allIdsRes = await client.query(
-          `SELECT l.id FROM leads l WHERE ${whereClause} ORDER BY l.updated_at DESC`,
+          `SELECT l.id FROM leads l WHERE ${whereClause} ORDER BY ${orderByClause}`,
           params
         );
         return NextResponse.json(
@@ -187,7 +197,7 @@ export async function GET(request: NextRequest) {
          LEFT JOIN users ar ON l.assigned_rep_id = ar.id
          LEFT JOIN users far ON l.first_assigned_rep_id = far.id
          WHERE ${whereClause}
-         ORDER BY l.updated_at DESC, l.created_at ASC, l.id ASC
+         ORDER BY ${orderByClause}
          LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
         params
       );

@@ -217,7 +217,7 @@ export async function PATCH(
              AND (
                -- Only match un-disposed SIM captures waiting for disposition
                remark = 'Captured from SIM dialer'
-               OR log_source IN ('dialer_connected', 'apk_connected')
+               OR log_source IN ('dialer_connected', 'apk_connected', 'dialer_rnr')
                OR remark IS NULL
                OR remark = 'na'
                OR remark = ''

@@ -21,6 +21,7 @@ import {
   User,
   Languages,
   Trash2,
+  ArrowUpDown,
 } from "lucide-react";
 import {
   buildTelLink,
@@ -140,6 +141,7 @@ export default function LeadsDirectoryPage() {
   const [activeStatus, setActiveStatus] = useState("all");
   const [search, setSearch] = useState("");
   const [vertical, setVertical] = useState("All Verticals");
+  const [sortBy, setSortBy] = useState<"updated_desc" | "newest" | "oldest" | "updated_asc">("updated_desc");
   const [page, setPage] = useState(1);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [showImporter, setShowImporter] = useState(false);
@@ -293,12 +295,13 @@ export default function LeadsDirectoryPage() {
   const assignableReps = teamReps;
 
   const { data, isLoading, isFetching, refetch } = useQuery<LeadsResponse>({
-    queryKey: ["leads-directory", activeStatus, vertical, search, selectedRepFilter, page],
+    queryKey: ["leads-directory", activeStatus, vertical, search, selectedRepFilter, sortBy, page],
     queryFn: async () => {
       const params = new URLSearchParams({
         page: page.toString(),
         limit: "25",
         status: activeStatus,
+        sortBy,
         ...(vertical !== "All Verticals" ? { vertical } : {}),
         ...(search ? { search } : {}),
         ...(selectedRepFilter !== "all" ? { repId: selectedRepFilter } : {}),
@@ -359,6 +362,7 @@ export default function LeadsDirectoryPage() {
       const params = new URLSearchParams({
         allIds: "true",
         status: activeStatus,
+        sortBy,
         ...(vertical !== "All Verticals" ? { vertical } : {}),
         ...(search ? { search } : {}),
         ...(selectedRepFilter !== "all" ? { repId: selectedRepFilter } : {}),
@@ -760,6 +764,25 @@ export default function LeadsDirectoryPage() {
                 {v}
               </option>
             ))}
+          </select>
+        </div>
+
+        {/* Sort By dropdown */}
+        <div className="flex items-center gap-2">
+          <ArrowUpDown className="w-4 h-4 text-gray-400" />
+          <select
+            value={sortBy}
+            onChange={(e) => {
+              setSortBy(e.target.value as "updated_desc" | "newest" | "oldest" | "updated_asc");
+              setPage(1);
+            }}
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            title="Sort leads"
+          >
+            <option value="updated_desc">Recently Updated</option>
+            <option value="newest">Newest First</option>
+            <option value="oldest">Oldest First</option>
+            <option value="updated_asc">Oldest Updated</option>
           </select>
         </div>
       </div>

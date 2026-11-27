@@ -49,10 +49,13 @@ export async function GET(request: NextRequest) {
           AND c2.lead_id = c1.lead_id
           AND c2.rep_id = c1.rep_id
           AND c2.id != c1.id
+          AND (c2.remark IS DISTINCT FROM 'Captured from SIM dialer')
           AND ABS(c2.duration_seconds - c1.duration_seconds) <= 3
           AND c2.call_timestamp >= (c1.call_timestamp - INTERVAL '20 minutes')
-          AND c2.call_timestamp <= (c1.call_timestamp + INTERVAL '20 minutes');
+          AND c2.call_timestamp <= (c1.call_timestamp + INTERVAL '20 minutes')
+      `).catch(() => {});
 
+      await client.query(`
         DELETE FROM call_logs c1
         WHERE c1.remark = 'Captured from SIM dialer'
           AND EXISTS (
@@ -60,10 +63,11 @@ export async function GET(request: NextRequest) {
             WHERE c2.lead_id = c1.lead_id
               AND c2.rep_id = c1.rep_id
               AND c2.id != c1.id
+              AND (c2.remark IS DISTINCT FROM 'Captured from SIM dialer')
               AND ABS(c2.duration_seconds - c1.duration_seconds) <= 3
               AND c2.call_timestamp >= (c1.call_timestamp - INTERVAL '20 minutes')
               AND c2.call_timestamp <= (c1.call_timestamp + INTERVAL '20 minutes')
-          );
+          )
       `).catch(() => {});
 
       // Remove any historical non-call sheet_import rows from call_logs (already preserved in lead_stage_history)
@@ -369,18 +373,37 @@ export async function POST(request: NextRequest) {
         // 1. Within 5 minutes of callTimestamp
         // 2. Or matching duration (+/- 3 seconds) within the last 15 minutes
         // 3. Or an un-disposed SIM dialer capture waiting for match within 15 minutes
+        const isInboundSource = String(logSource).startsWith("inbound_");
         const recentLogRes = await client.query(
           `SELECT id, disposition, duration_seconds as "durationSeconds", log_source as "logSource", remark, recording_url as "recordingUrl", call_timestamp as "callTimestamp"
            FROM call_logs
            WHERE tenant_id = $1 AND lead_id = $2 AND rep_id = $3
              AND (
-               (call_timestamp >= ($4::TIMESTAMPTZ - INTERVAL '5 minutes') AND call_timestamp <= ($4::TIMESTAMPTZ + INTERVAL '5 minutes'))
-               OR (call_timestamp >= ($4::TIMESTAMPTZ - INTERVAL '15 minutes') AND ABS(duration_seconds - $5) <= 3)
-               OR (call_timestamp >= NOW() - INTERVAL '15 minutes' AND (remark = 'Captured from SIM dialer' OR log_source IN ('dialer_connected', 'apk_connected')))
+               (
+                 call_timestamp >= ($4::TIMESTAMPTZ - INTERVAL '5 minutes')
+                 AND call_timestamp <= ($4::TIMESTAMPTZ + INTERVAL '5 minutes')
+                 AND (COALESCE(log_source, 'dialer_web') LIKE 'inbound_%') = $6::boolean
+                 AND (
+                   (duration_seconds > 0) = ($5::int > 0)
+                   OR remark = 'Captured from SIM dialer'
+                   OR log_source IN ('dialer_connected', 'apk_connected', 'dialer_rnr')
+                 )
+               )
+               OR (
+                 call_timestamp >= ($4::TIMESTAMPTZ - INTERVAL '15 minutes')
+                 AND $5::int > 0
+                 AND ABS(duration_seconds - $5::int) <= 3
+                 AND (COALESCE(log_source, 'dialer_web') LIKE 'inbound_%') = $6::boolean
+               )
+               OR (
+                 $6::boolean = false
+                 AND call_timestamp >= NOW() - INTERVAL '15 minutes'
+                 AND (remark = 'Captured from SIM dialer' OR log_source IN ('dialer_connected', 'apk_connected', 'dialer_rnr'))
+               )
              )
            ORDER BY call_timestamp DESC
            LIMIT 1`,
-          [tenantId, targetLeadId, repId, callTimestamp, durationSeconds]
+          [tenantId, targetLeadId, repId, callTimestamp, durationSeconds, isInboundSource]
         );
 
         let finalLog;
