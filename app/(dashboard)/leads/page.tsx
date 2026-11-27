@@ -61,6 +61,7 @@ interface LeadRecord {
   source: string;
   status: string;
   rnrCount: number;
+  isDemoDone?: boolean;
   batchDate: string;
   createdAt: string;
   updatedAt: string;
@@ -986,6 +987,13 @@ export default function LeadsDirectoryPage() {
                         >
                           {statusBadge.label}
                         </span>
+                        {lead.isDemoDone && lead.status !== "demo_done" && (
+                          <div className="mt-1">
+                            <span className="inline-flex items-center text-[10px] px-2 py-0.5 rounded-full font-semibold bg-teal-50 text-teal-700 border border-teal-200">
+                              Demo Done ✓
+                            </span>
+                          </div>
+                        )}
                         {lead.rnrCount > 0 && lead.status !== "won" && (
                           <div className="text-[11px] text-amber-700 mt-1 font-medium">
                             {lead.rnrCount} RNR attempts

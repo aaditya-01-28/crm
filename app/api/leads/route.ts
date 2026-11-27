@@ -105,10 +105,18 @@ export async function GET(request: NextRequest) {
       const params: any[] = [...baseParams];
 
       const RNR_COUNT_EXPR = `COALESCE((SELECT COUNT(*)::int FROM call_logs WHERE lead_id = l.id AND disposition IN ('RNR', 'Ringing No Response', 'Ring No Response')), l.rnr_count, 0)`;
+      const DEMO_DONE_LEAD_SQL = `(
+        l.status = 'demo_done'
+        OR EXISTS (SELECT 1 FROM scheduled_tasks st WHERE st.lead_id = l.id AND st.task_type = 'product_demo' AND st.status = 'completed')
+        OR EXISTS (SELECT 1 FROM call_logs cl WHERE cl.lead_id = l.id AND cl.disposition IN ('Demo Done', 'Demo Completed'))
+        OR EXISTS (SELECT 1 FROM deals d WHERE d.lead_id = l.id AND d.stage = 'demo_done')
+      )`;
 
       if (status && status !== "all") {
         if (status === "interested") {
           conditions.push(`(l.status = 'interested' OR l.is_interested = true)`);
+        } else if (status === "demo_done") {
+          conditions.push(DEMO_DONE_LEAD_SQL);
         } else if (status === "rnr_1") {
           conditions.push(`(l.status = 'rnr' AND ${RNR_COUNT_EXPR} = 1)`);
         } else if (status === "rnr_2") {
@@ -174,6 +182,7 @@ export async function GET(request: NextRequest) {
                 l.business_vertical as "businessVertical", l.service_type as "serviceType",
                 l.source, l.status,
                 ${RNR_COUNT_EXPR} as "rnrCount",
+                ${DEMO_DONE_LEAD_SQL} as "isDemoDone",
                 l.custom_metadata as "customMetadata",
                 l.created_at as "createdAt", l.updated_at as "updatedAt",
                 ar.id as "arId", ar.full_name as "arFullName",
@@ -237,6 +246,10 @@ export async function GET(request: NextRequest) {
         `SELECT COUNT(id)::int as count FROM leads l WHERE ${statusWhereClause} AND (l.status = 'interested' OR l.is_interested = true)`,
         statusBaseParams
       );
+      const demoDoneLeadsRes = await client.query(
+        `SELECT COUNT(id)::int as count FROM leads l WHERE ${statusWhereClause} AND ${DEMO_DONE_LEAD_SQL}`,
+        statusBaseParams
+      );
       const rnrBucketCountsRes = await client.query(
         `SELECT
            COUNT(*) FILTER (WHERE ${RNR_COUNT_EXPR} = 1)::int as rnr_1,
@@ -289,6 +302,7 @@ export async function GET(request: NextRequest) {
         stats[s.status] = s.count;
         stats.all += s.count;
       });
+      stats.demo_done = demoDoneLeadsRes.rows[0]?.count || 0;
 
       const mappedLeads = leadsRes.rows.map((l) => ({
         id: l.id,
@@ -306,6 +320,7 @@ export async function GET(request: NextRequest) {
         source: l.source,
         status: l.status,
         rnrCount: l.rnrCount,
+        isDemoDone: Boolean(l.isDemoDone),
         customMetadata: l.customMetadata,
         createdAt: l.createdAt,
         updatedAt: l.updatedAt,
