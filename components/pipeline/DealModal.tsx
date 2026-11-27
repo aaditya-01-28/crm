@@ -655,7 +655,10 @@ export function DealModal({
             stage: firstC.stage,
             closingNotes: firstC.notes || firstC.demoNotes || firstC.demoFeedback || firstC.lostRemarks || null,
             quotedPrice: parseFloat(firstC.quotedPrice) || 0,
-            expectedClosingDate: firstC.closingDate || null,
+            expectedClosingDate:
+              firstC.stage === "closed_won" && firstC.wonDate
+                ? firstC.wonDate
+                : firstC.closingDate || null,
             serviceType: firstC.serviceType,
             quantity: parseInt(firstC.quantity) || 0,
             contactName: contactName.trim() || null,
@@ -699,7 +702,10 @@ export function DealModal({
               quantity: parseInt(c.quantity) || 0,
               quotedPrice: parseFloat(c.quotedPrice) || 0,
               stage: c.stage,
-              expectedClosingDate: c.closingDate || null,
+              expectedClosingDate:
+                c.stage === "closed_won" && c.wonDate
+                  ? c.wonDate
+                  : c.closingDate || null,
               closingNotes: c.notes || c.demoNotes || c.demoFeedback || c.lostRemarks || null,
             })),
           }
@@ -715,7 +721,10 @@ export function DealModal({
               quantity: parseInt(c.quantity) || 0,
               quotedPrice: parseFloat(c.quotedPrice) || 0,
               stage: c.stage,
-              expectedClosingDate: c.closingDate || null,
+              expectedClosingDate:
+                c.stage === "closed_won" && c.wonDate
+                  ? c.wonDate
+                  : c.closingDate || null,
               closingNotes: c.notes || c.demoNotes || c.demoFeedback || c.lostRemarks || null,
               demoDate: c.demoDate,
               meetingLink: c.meetingLink,

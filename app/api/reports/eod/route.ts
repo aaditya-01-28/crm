@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
-import { formatDuration, getISTDateRange, interestedCallSql } from "@/lib/utils";
+import { formatDuration, getISTDateRange, interestedCallSql, dealCloseDateSql } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
@@ -27,6 +27,7 @@ export async function GET(request: NextRequest) {
 
   try {
     return await withClient(async (client) => {
+      await client.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;").catch(() => {});
       const repsRes = await client.query(
         `SELECT id, full_name as "fullName"
          FROM users
@@ -139,16 +140,20 @@ export async function GET(request: NextRequest) {
              FROM deals
              WHERE tenant_id = $1 AND rep_id = ANY($2::uuid[])
                AND stage IN ('quote_sent', 'payment_pending', 'closed_won')
-               AND created_at >= $3 AND created_at <= $4
+               AND (CASE WHEN stage = 'closed_won' THEN ${dealCloseDateSql("")} ELSE created_at END) >= $3
+               AND (CASE WHEN stage = 'closed_won' THEN ${dealCloseDateSql("")} ELSE created_at END) <= $4
              GROUP BY rep_id`,
             [tenantId, repIds, startOfDay, endOfDay]
           ),
           client.query(
-            `SELECT rep_id, COUNT(id)::int as count, COALESCE(SUM(final_amount), 0)::numeric as "finalAmount"
-             FROM payments
-             WHERE tenant_id = $1 AND rep_id = ANY($2::uuid[])
-               AND ops_approval_status = 'approved' AND created_at >= $3 AND created_at <= $4
-             GROUP BY rep_id`,
+            `SELECT p.rep_id, COUNT(p.id)::int as count, COALESCE(SUM(p.final_amount), 0)::numeric as "finalAmount"
+             FROM payments p
+             LEFT JOIN deals pd ON p.deal_id = pd.id
+             WHERE p.tenant_id = $1 AND p.rep_id = ANY($2::uuid[])
+               AND p.ops_approval_status = 'approved'
+               AND COALESCE(CASE WHEN pd.stage = 'closed_won' THEN ${dealCloseDateSql("pd")} ELSE NULL END, p.created_at) >= $3
+               AND COALESCE(CASE WHEN pd.stage = 'closed_won' THEN ${dealCloseDateSql("pd")} ELSE NULL END, p.created_at) <= $4
+             GROUP BY p.rep_id`,
             [tenantId, repIds, startOfDay, endOfDay]
           ),
         ]);

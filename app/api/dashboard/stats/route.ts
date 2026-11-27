@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { normalizeRole, isManagerOrAdmin, isSalesRep } from "@/lib/rbac";
 import { getSession } from "@/lib/auth";
-import { formatDuration, getISTDateRange, interestedCallSql } from "@/lib/utils";
+import { formatDuration, getISTDateRange, interestedCallSql, dealCloseDateSql } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
   const session = await getSession(request);
@@ -216,13 +216,18 @@ export async function GET(request: NextRequest) {
       const activeDealsCount = activeDeals.length;
       const activePipelineValue = activeDeals.reduce((sum, d) => sum + Number(d.quotedPrice || 0), 0);
 
+      await client.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;").catch(() => {});
+
+      const closeDateSql = dealCloseDateSql("d");
       const dealPeriodRes = await client.query(
         `SELECT
            COUNT(CASE WHEN d.stage = 'closed_won' THEN 1 END)::int as "wonDealsCount",
            COALESCE(SUM(CASE WHEN d.stage = 'closed_won' THEN d.quoted_price ELSE 0 END), 0)::numeric as "wonRevenueInPeriod",
            COUNT(CASE WHEN d.stage = 'closed_lost' THEN 1 END)::int as "lostDealsCount"
          FROM deals d
-         WHERE ${dealWhereClause} AND d.updated_at >= $${dealParams.length + 1} AND d.updated_at <= $${dealParams.length + 2}`,
+         WHERE ${dealWhereClause}
+           AND (CASE WHEN d.stage = 'closed_won' THEN ${closeDateSql} ELSE d.updated_at END) >= $${dealParams.length + 1}
+           AND (CASE WHEN d.stage = 'closed_won' THEN ${closeDateSql} ELSE d.updated_at END) <= $${dealParams.length + 2}`,
         [...dealParams, startOfPeriod, endOfPeriod]
       );
 
@@ -255,7 +260,7 @@ export async function GET(request: NextRequest) {
       // Recent Closed Won Deals (with linked payment verification status)
       const wonDealsRes = await client.query(
         `SELECT d.id, d.quoted_price as "quotedPrice", d.stage, d.service_type as "serviceType",
-                d.updated_at as "closedAt", d.created_at as "createdAt",
+                ${closeDateSql} as "closedAt", d.created_at as "createdAt",
                 l.id as "leadId", l.company_name as "companyName", l.contact_name as "contactName",
                 l.phone_number as "phoneNumber",
                 u.full_name as "repFullName", u.id as "repId",
@@ -271,7 +276,7 @@ export async function GET(request: NextRequest) {
            LIMIT 1
          ) p ON true
          WHERE ${dealWhereClause} AND d.stage = 'closed_won'
-         ORDER BY d.updated_at DESC
+         ORDER BY ${closeDateSql} DESC
          LIMIT 10`,
         dealParams
       );
@@ -301,16 +306,18 @@ export async function GET(request: NextRequest) {
       );
 
       // 5. Verified & Pending Payments Revenue
+      const effectivePaymentDate = `COALESCE(CASE WHEN pd.stage = 'closed_won' THEN ${dealCloseDateSql("pd")} ELSE NULL END, p.created_at)`;
       const paymentWhereClause = targetUserId
-        ? "tenant_id = $1 AND rep_id = $2 AND ops_approval_status = 'approved' AND created_at >= $3 AND created_at <= $4"
-        : "tenant_id = $1 AND ops_approval_status = 'approved' AND created_at >= $2 AND created_at <= $3";
+        ? `p.tenant_id = $1 AND p.rep_id = $2 AND p.ops_approval_status = 'approved' AND ${effectivePaymentDate} >= $3 AND ${effectivePaymentDate} <= $4`
+        : `p.tenant_id = $1 AND p.ops_approval_status = 'approved' AND ${effectivePaymentDate} >= $2 AND ${effectivePaymentDate} <= $3`;
       const paymentParams = targetUserId
         ? [tenantId, targetUserId, startOfPeriod, endOfPeriod]
         : [tenantId, startOfPeriod, endOfPeriod];
 
       const paymentsAggRes = await client.query(
-        `SELECT COALESCE(SUM(final_amount), 0)::numeric as "verifiedRevenue"
-         FROM payments
+        `SELECT COALESCE(SUM(p.final_amount), 0)::numeric as "verifiedRevenue"
+         FROM payments p
+         LEFT JOIN deals pd ON p.deal_id = pd.id
          WHERE ${paymentWhereClause}`,
         paymentParams
       );
@@ -501,7 +508,8 @@ export async function GET(request: NextRequest) {
            LEFT JOIN (
              SELECT rep_id, COUNT(id) as won_deals, SUM(quoted_price) as won_revenue
              FROM deals
-             WHERE tenant_id = $1 AND stage = 'closed_won' AND updated_at >= $2 AND updated_at <= $3
+             WHERE tenant_id = $1 AND stage = 'closed_won'
+               AND ${dealCloseDateSql("")} >= $2 AND ${dealCloseDateSql("")} <= $3
              GROUP BY rep_id
            ) dl ON u.id = dl.rep_id
            LEFT JOIN (

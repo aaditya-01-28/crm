@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { isManagerOrAdmin } from "@/lib/rbac";
-import { parseScheduledDateTime, getISTDateString } from "@/lib/utils";
+import { parseScheduledDateTime, getISTDateString, parseDealDateToTimestamp } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -25,8 +25,10 @@ export async function PATCH(
     const { stage, closingNotes, quotedPrice, expectedClosingDate, serviceType, quantity } = body;
 
     return await withClient(async (client) => {
+      await client.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;").catch(() => {});
+
       const dealRes = await client.query(
-        "SELECT id, lead_id, rep_id, stage, closing_notes, quoted_price, expected_closing_date, service_type, quantity FROM deals WHERE id = $1 AND tenant_id = $2",
+        "SELECT id, lead_id, rep_id, stage, closing_notes, quoted_price, expected_closing_date, closed_at, service_type, quantity FROM deals WHERE id = $1 AND tenant_id = $2",
         [id, tenantId]
       );
 
@@ -57,16 +59,29 @@ export async function PATCH(
 
       const newStage = stage || deal.stage;
       const newPrice = quotedPrice !== undefined ? quotedPrice : deal.quoted_price;
-      const newClosingDate =
+      const wonDetails = body.wonDetails || body || {};
+      const explicitWonDate =
+        typeof wonDetails?.wonDate === "string" && wonDetails.wonDate.trim()
+          ? parseDealDateToTimestamp(wonDetails.wonDate)
+          : null;
+
+      let newClosingDate =
         expectedClosingDate && !isNaN(new Date(expectedClosingDate).getTime())
-          ? new Date(expectedClosingDate)
+          ? (parseDealDateToTimestamp(expectedClosingDate) || new Date(expectedClosingDate))
           : expectedClosingDate === null || expectedClosingDate === ""
           ? null
           : deal.expected_closing_date;
+      if (newStage === "closed_won" && explicitWonDate) {
+        newClosingDate = explicitWonDate;
+      }
+
+      const newClosedAt =
+        newStage === "closed_won"
+          ? (explicitWonDate || deal.closed_at || new Date())
+          : null;
+
       const newService = serviceType !== undefined ? serviceType : deal.service_type;
       const newQuantity = quantity !== undefined ? quantity : deal.quantity;
-
-      const wonDetails = body.wonDetails || body || {};
       let newNotes = closingNotes !== undefined ? closingNotes : deal.closing_notes;
 
       if (newStage === "closed_won" || wonDetails?.userId || wonDetails?.panelUserId) {
@@ -127,13 +142,15 @@ export async function PATCH(
       const updateRes = await client.query(
         `UPDATE deals
          SET stage = $1, closing_notes = $2, quoted_price = $3, expected_closing_date = $4,
-             service_type = $5, quantity = $6, updated_at = NOW()
-         WHERE id = $7
+             closed_at = $5,
+             created_at = COALESCE($6, created_at),
+             service_type = $7, quantity = $8, updated_at = NOW()
+         WHERE id = $9
          RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
                    service_type as "serviceType", quantity, quoted_price as "quotedPrice",
-                   expected_closing_date as "expectedClosingDate", stage, closing_notes as "closingNotes",
+                   expected_closing_date as "expectedClosingDate", closed_at as "closedAt", stage, closing_notes as "closingNotes",
                    created_at as "createdAt", updated_at as "updatedAt"`,
-        [newStage, newNotes, newPrice, newClosingDate, newService, newQuantity, id]
+        [newStage, newNotes, newPrice, newClosingDate, newClosedAt, explicitWonDate, newService, newQuantity, id]
       );
 
       const updated = updateRes.rows[0];
@@ -256,8 +273,9 @@ export async function PATCH(
             `UPDATE payments
              SET user_type = $1, panel_user_id = $2, credits_to_add = $3,
                  original_amount = $4, tax_amount = $5, tds_amount = $6, final_amount = $7,
-                 payment_mode = $8, gstin = $9, screenshot_url = $10
-             WHERE id = $11`,
+                 payment_mode = $8, gstin = $9, screenshot_url = $10,
+                 created_at = COALESCE($11, created_at)
+             WHERE id = $12`,
             [
               wonDetails.userType || "new_user",
               portalUserId,
@@ -269,6 +287,7 @@ export async function PATCH(
               wonDetails.paymentMode || "UPI / QR",
               wonDetails.gstinNumber || wonDetails.gstin || null,
               wonDetails.paymentScreenshotUrl || wonDetails.screenshotUrl || "NA",
+              explicitWonDate,
               existingPay.rows[0].id,
             ]
           );
@@ -279,7 +298,7 @@ export async function PATCH(
                credits_to_add, original_amount, tax_amount, tds_amount, final_amount,
                payment_mode, gstin, screenshot_url, ops_approval_status, credits_provisioned, created_at
              )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending_verification', false, NOW())`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending_verification', false, $15)`,
             [
               tenantId,
               id,
@@ -295,6 +314,7 @@ export async function PATCH(
               wonDetails.paymentMode || "UPI / QR",
               wonDetails.gstinNumber || wonDetails.gstin || null,
               wonDetails.paymentScreenshotUrl || wonDetails.screenshotUrl || "NA",
+              newClosedAt || new Date(),
             ]
           );
         }

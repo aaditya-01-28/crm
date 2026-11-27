@@ -387,3 +387,73 @@ export function getDealDisplayAmount(deal: {
   return Number(deal.quotedPrice || 0);
 }
 
+/**
+ * Parses a deal date string (preferring YYYY-MM-DD anchored to noon IST) into a Date.
+ */
+export function parseDealDateToTimestamp(raw?: string | null): Date | null {
+  if (!raw) return null;
+  const trimmed = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const d = new Date(`${trimmed}T12:00:00+05:30`);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(trimmed);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Extracts `wonDate` string from a deal's closingNotes JSON if present.
+ */
+export function extractWonDateFromNotes(closingNotes?: string | null): string | null {
+  if (!closingNotes) return null;
+  try {
+    const parsed = JSON.parse(closingNotes);
+    if (typeof parsed?.wonDate === "string" && parsed.wonDate.trim()) {
+      return parsed.wonDate.trim();
+    }
+  } catch {}
+  return null;
+}
+
+/**
+ * Resolves the effective Date of a pipeline deal for date filtering and card display.
+ * Closed Won deals honor `wonDate` / `closedAt` / `expectedClosingDate` before `updatedAt`.
+ */
+export function getDealEffectiveDate(deal: {
+  stage?: string | null;
+  closingNotes?: string | null;
+  closedAt?: string | null;
+  expectedClosingDate?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  payment?: { createdAt?: string | null } | null;
+}): Date | null {
+  const wonDateStr = extractWonDateFromNotes(deal.closingNotes);
+  const isClosed = deal.stage === "closed_won" || deal.stage === "won";
+
+  if (isClosed || wonDateStr) {
+    return (
+      parseDealDateToTimestamp(wonDateStr) ||
+      parseDealDateToTimestamp(deal.closedAt) ||
+      parseDealDateToTimestamp(deal.expectedClosingDate) ||
+      parseDealDateToTimestamp(deal.payment?.createdAt) ||
+      parseDealDateToTimestamp(deal.createdAt) ||
+      parseDealDateToTimestamp(deal.updatedAt)
+    );
+  }
+
+  return (
+    parseDealDateToTimestamp(deal.createdAt) ||
+    parseDealDateToTimestamp(deal.updatedAt)
+  );
+}
+
+/**
+ * SQL expression for effective close timestamp of a deal row, preferring explicit `closed_at`
+ * or `closing_notes->>'wonDate'` (anchored at noon IST) before falling back to `updated_at`.
+ */
+export function dealCloseDateSql(alias = "d"): string {
+  const p = alias ? `${alias}.` : "";
+  return `COALESCE(${p}closed_at, CASE WHEN ${p}closing_notes ~ '^\\s*\\{' AND COALESCE(${p}closing_notes::jsonb->>'wonDate', '') ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN ((${p}closing_notes::jsonb->>'wonDate') || ' 12:00:00+05:30')::timestamptz ELSE NULL END, ${p}updated_at)`;
+}
+

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { getSession } from "@/lib/auth";
-import { parseScheduledDateTime, getISTDateString } from "@/lib/utils";
+import { parseScheduledDateTime, getISTDateString, parseDealDateToTimestamp } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -24,6 +24,8 @@ export async function GET(request: NextRequest) {
 
   try {
     return await withClient(async (client) => {
+      await client.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;").catch(() => {});
+
       let whereClause = "d.tenant_id = $1";
       const params: any[] = [tenantId];
 
@@ -38,7 +40,7 @@ export async function GET(request: NextRequest) {
       const dealsRes = await client.query(
         `SELECT d.id, d.tenant_id as "tenantId", d.lead_id as "leadId", d.rep_id as "repId",
                 d.service_type as "serviceType", d.quantity, d.quoted_price as "quotedPrice",
-                d.expected_closing_date as "expectedClosingDate", d.stage, d.closing_notes as "closingNotes",
+                d.expected_closing_date as "expectedClosingDate", d.closed_at as "closedAt", d.stage, d.closing_notes as "closingNotes",
                 d.created_at as "createdAt", d.updated_at as "updatedAt",
                 l.phone_number as "lead_phoneNumber", l.contact_name as "lead_contactName",
                 l.company_name as "lead_companyName", l.business_vertical as "lead_businessVertical",
@@ -122,6 +124,7 @@ export async function GET(request: NextRequest) {
           quantity: r.quantity,
           quotedPrice: r.quotedPrice,
           expectedClosingDate: r.expectedClosingDate,
+          closedAt: r.closedAt,
           stage: normalizedStage,
           closingNotes: r.closingNotes,
           createdAt: r.createdAt,
@@ -185,6 +188,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     return await withClient(async (client) => {
+      await client.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;").catch(() => {});
       let leadId = body.leadId;
 
       // If leadId is not provided, find or create the lead by phone number
@@ -366,23 +370,37 @@ export async function POST(request: NextRequest) {
           [leadId, tenantId]
         );
 
+        const isClosedWonItem = (item.stage || "quote_sent") === "closed_won";
+        const itemWonDateStr = isClosedWonItem
+          ? (item.wonDate || body.wonDate || getISTDateString())
+          : null;
+        const itemWonTs = parseDealDateToTimestamp(itemWonDateStr);
+        const itemExpectedClosing =
+          itemWonTs ||
+          (item.expectedClosingDate ? parseDealDateToTimestamp(item.expectedClosingDate) : null);
+        const itemClosedAt = isClosedWonItem ? (itemWonTs || new Date()) : null;
+        const itemCreatedAt = itemWonTs || new Date();
+
         let itemRes;
         if (existingZeroDeal.rows.length > 0) {
           itemRes = await client.query(
             `UPDATE deals
              SET rep_id = $1, service_type = $2, quantity = $3, quoted_price = $4,
-                 expected_closing_date = $5, stage = $6, closing_notes = $7, updated_at = NOW()
-             WHERE id = $8
+                 expected_closing_date = $5, closed_at = $6, created_at = COALESCE($7, created_at),
+                 stage = $8, closing_notes = $9, updated_at = NOW()
+             WHERE id = $10
              RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
                        service_type as "serviceType", quantity, quoted_price as "quotedPrice",
-                       expected_closing_date as "expectedClosingDate", stage, closing_notes as "closingNotes",
+                       expected_closing_date as "expectedClosingDate", closed_at as "closedAt", stage, closing_notes as "closingNotes",
                        created_at as "createdAt", updated_at as "updatedAt"`,
             [
               repId,
               item.serviceType,
               parseInt(item.quantity) || 0,
               parseFloat(item.quotedPrice) || 0,
-              item.expectedClosingDate ? new Date(item.expectedClosingDate) : null,
+              itemExpectedClosing,
+              itemClosedAt,
+              itemWonTs,
               item.stage || "quote_sent",
               closingNotesToStore,
               existingZeroDeal.rows[0].id,
@@ -392,12 +410,12 @@ export async function POST(request: NextRequest) {
           itemRes = await client.query(
             `INSERT INTO deals (
                tenant_id, lead_id, rep_id, service_type, quantity, quoted_price,
-               expected_closing_date, stage, closing_notes, created_at, updated_at
+               expected_closing_date, closed_at, stage, closing_notes, created_at, updated_at
              )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
              RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
                        service_type as "serviceType", quantity, quoted_price as "quotedPrice",
-                       expected_closing_date as "expectedClosingDate", stage, closing_notes as "closingNotes",
+                       expected_closing_date as "expectedClosingDate", closed_at as "closedAt", stage, closing_notes as "closingNotes",
                        created_at as "createdAt", updated_at as "updatedAt"`,
             [
               tenantId,
@@ -406,9 +424,11 @@ export async function POST(request: NextRequest) {
               item.serviceType,
               parseInt(item.quantity) || 0,
               parseFloat(item.quotedPrice) || 0,
-              item.expectedClosingDate ? new Date(item.expectedClosingDate) : null,
+              itemExpectedClosing,
+              itemClosedAt,
               item.stage || "quote_sent",
               closingNotesToStore,
+              itemCreatedAt,
             ]
           );
         }
@@ -436,13 +456,17 @@ export async function POST(request: NextRequest) {
       // Closed Won payment dossier record
       if (primaryStage === "closed_won") {
         const portalUserId = wonDetails.userId || wonDetails.panelUserId || (leadId ? `TXT_${leadId.slice(0, 6).toUpperCase()}` : "PORTAL_USER");
+        const paymentCreatedAt =
+          parseDealDateToTimestamp(wonDetails.wonDate || body.wonDate) ||
+          primaryDeal?.closedAt ||
+          new Date();
         await client.query(
           `INSERT INTO payments (
              tenant_id, deal_id, lead_id, rep_id, user_type, panel_user_id,
              credits_to_add, original_amount, tax_amount, tds_amount, final_amount,
              payment_mode, gstin, screenshot_url, ops_approval_status, credits_provisioned, created_at
            )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending_verification', false, NOW())`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending_verification', false, $15)`,
           [
             tenantId,
             primaryDeal.id,
@@ -458,6 +482,7 @@ export async function POST(request: NextRequest) {
             wonDetails.paymentMode || "Bank Transfer",
             wonDetails.gstinNumber || wonDetails.gstin || null,
             wonDetails.paymentScreenshotUrl || wonDetails.screenshotUrl || "NA",
+            paymentCreatedAt,
           ]
         );
       }

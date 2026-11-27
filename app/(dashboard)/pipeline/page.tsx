@@ -23,7 +23,7 @@ import {
   Filter,
   AlertCircle,
 } from "lucide-react";
-import { formatCurrency, SERVICE_INTERESTS, getISTDateRange, getDealDisplayAmount } from "@/lib/utils";
+import { formatCurrency, SERVICE_INTERESTS, getISTDateRange, getDealDisplayAmount, getDealEffectiveDate } from "@/lib/utils";
 import { DealCard } from "@/components/pipeline/DealCard";
 import { DealModal } from "@/components/pipeline/DealModal";
 import { PaymentModal } from "@/components/payments/PaymentModal";
@@ -120,6 +120,7 @@ interface Deal {
   } | null;
   createdAt?: string;
   updatedAt?: string;
+  closedAt?: string | null;
 }
 
 async function fetchDeals(repId?: string): Promise<{ deals: Deal[] }> {
@@ -326,12 +327,10 @@ export default function PipelinePage() {
         }
       }
 
-      // 4. Date filter strictly anchored to IST
+      // 4. Date filter strictly anchored to IST (honoring wonDate / closedAt for closed deals)
       if (dateFilter !== "all") {
-        const dealDateStr = deal.createdAt || deal.updatedAt;
-        if (!dealDateStr) return false;
-        const dealDate = new Date(dealDateStr);
-        if (isNaN(dealDate.getTime())) return false;
+        const dealDate = getDealEffectiveDate(deal);
+        if (!dealDate || isNaN(dealDate.getTime())) return false;
 
         if (dateFilter === "custom") {
           if (!customStartDate && !customEndDate) {

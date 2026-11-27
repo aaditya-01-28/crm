@@ -1,18 +1,21 @@
 "use client";
 
-import { formatCurrency, cn, getDealDisplayAmount } from "@/lib/utils";
+import { formatCurrency, cn, getDealDisplayAmount, extractWonDateFromNotes, parseDealDateToTimestamp } from "@/lib/utils";
 import { Calendar, Tag, User, Trash2, Edit3 } from "lucide-react";
 
 interface DealCardProps {
   deal: {
     id: string;
+    stage?: string;
     serviceType: string;
     quantity: number;
     quotedPrice: string;
     closingNotes?: string | null;
+    closedAt?: string | null;
     expectedClosingDate: string | null;
     payment?: {
       finalAmount?: string | null;
+      createdAt?: string | null;
     } | null;
     lead?: {
       phoneNumber?: string;
@@ -125,20 +128,31 @@ export function DealCard({
           </p>
         </div>
 
-        {deal.expectedClosingDate && (
-          <div className="text-right">
-            <p className="text-[10px] text-slate-400 font-medium flex items-center gap-1 justify-end">
-              <Calendar className="w-3 h-3 text-slate-400" />
-              Target
-            </p>
-            <p className="text-xs font-semibold text-slate-700">
-              {new Date(deal.expectedClosingDate).toLocaleDateString("en-IN", {
-                day: "2-digit",
-                month: "short",
-              })}
-            </p>
-          </div>
-        )}
+        {(() => {
+          const isClosedWon = deal.stage === "closed_won" || deal.stage === "won";
+          const wonDate = extractWonDateFromNotes(deal.closingNotes);
+          const displayDate = isClosedWon
+            ? (parseDealDateToTimestamp(wonDate) ||
+                parseDealDateToTimestamp(deal.closedAt) ||
+                parseDealDateToTimestamp(deal.expectedClosingDate))
+            : parseDealDateToTimestamp(deal.expectedClosingDate);
+          if (!displayDate) return null;
+          return (
+            <div className="text-right">
+              <p className="text-[10px] text-slate-400 font-medium flex items-center gap-1 justify-end">
+                <Calendar className="w-3 h-3 text-slate-400" />
+                {isClosedWon ? "Closed" : "Target"}
+              </p>
+              <p className="text-xs font-semibold text-slate-700">
+                {displayDate.toLocaleDateString("en-IN", {
+                  timeZone: "Asia/Kolkata",
+                  day: "2-digit",
+                  month: "short",
+                })}
+              </p>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Rep info footer */}
