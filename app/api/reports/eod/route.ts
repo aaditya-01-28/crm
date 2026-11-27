@@ -82,6 +82,7 @@ export async function GET(request: NextRequest) {
              FROM call_logs
              WHERE tenant_id = $1 AND rep_id = ANY($2::uuid[])
                AND call_timestamp >= $3 AND call_timestamp <= $4
+               AND COALESCE(log_source, 'dialer_web') <> 'sheet_import'
              GROUP BY rep_id`,
             [tenantId, repIds, startOfDay, endOfDay]
           ),
@@ -91,6 +92,7 @@ export async function GET(request: NextRequest) {
              LEFT JOIN leads l ON cl.lead_id = l.id
              WHERE cl.tenant_id = $1 AND cl.rep_id = ANY($2::uuid[])
                AND cl.call_timestamp >= $3 AND cl.call_timestamp <= $4
+               AND COALESCE(cl.log_source, 'dialer_web') <> 'sheet_import'
              GROUP BY cl.rep_id`,
             [tenantId, repIds, startOfDay, endOfDay]
           ),

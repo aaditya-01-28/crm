@@ -364,6 +364,7 @@ export async function POST(request: NextRequest) {
                      website_url = COALESCE(NULLIF($5, ''), website_url),
                      custom_metadata = $6::jsonb,
                      status = CASE WHEN $7 <> 'new' THEN $7 ELSE status END,
+                     is_interested = CASE WHEN $7 = 'interested' THEN true ELSE COALESCE(is_interested, false) END,
                      updated_at = NOW()
                  WHERE id = $8 AND tenant_id = $9`,
                 [
@@ -385,9 +386,9 @@ export async function POST(request: NextRequest) {
                 `INSERT INTO leads (
                    tenant_id, assigned_rep_id, first_assigned_rep_id, first_assigned_at,
                    phone_number, contact_name, company_name, business_vertical,
-                   service_type, website_url, source, status, custom_metadata, created_at, updated_at
+                   service_type, website_url, source, status, is_interested, custom_metadata, created_at, updated_at
                  )
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, NOW())
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15, NOW())
                  RETURNING id, custom_metadata`,
                 [
                   tenantId,
@@ -402,6 +403,7 @@ export async function POST(request: NextRequest) {
                   l.website?.trim() || null,
                   l.source || "Google Sheet Migration",
                   stageInfo.leadStatus,
+                  stageInfo.leadStatus === "interested",
                   JSON.stringify(extraMeta),
                   leadDate,
                 ]
@@ -413,26 +415,9 @@ export async function POST(request: NextRequest) {
 
             const eventDate = parseSheetDate(l.closeDate) || parseSheetDate(l.leadDate) || new Date();
 
-            // Log remark / comment to call_logs & lead_stage_history so it shows in Lead Dossier
+            // Log remark / comment to lead_stage_history only (never call_logs) so sheet imports show in Lead Dossier without polluting Call Logs or Reports
             if (l.remark?.trim() || stageInfo.leadStatus !== "new") {
               const logRemark = l.remark?.trim() || `Imported from Google Sheet (${stageInfo.disposition})`;
-              await client.query(
-                `INSERT INTO call_logs (
-                   tenant_id, lead_id, rep_id, disposition, duration_seconds,
-                   remark, is_interested, log_source, call_timestamp
-                 )
-                 VALUES ($1, $2, $3, $4, 0, $5, $6, 'sheet_import', $7)`,
-                [
-                  tenantId,
-                  leadId,
-                  effectiveRepId,
-                  stageInfo.disposition,
-                  logRemark,
-                  stageInfo.leadStatus === "interested" || stageInfo.isClosedDeal,
-                  eventDate,
-                ]
-              ).catch(() => {});
-
               await client.query(
                 `INSERT INTO lead_stage_history (
                    tenant_id, lead_id, rep_id, stage_name, stage_type, notes, metadata, created_at

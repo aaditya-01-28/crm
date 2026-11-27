@@ -43,10 +43,10 @@ export async function GET(request: NextRequest) {
       );
       const teamUsers = teamRes.rows;
 
-      // 2. Fetch call stats in period
+      // 2. Fetch call stats in period (exclude non-call sheet_import rows)
       const callWhereClause = targetUserId
-        ? "tenant_id = $1 AND call_timestamp >= $2 AND call_timestamp <= $3 AND rep_id = $4"
-        : "tenant_id = $1 AND call_timestamp >= $2 AND call_timestamp <= $3";
+        ? "tenant_id = $1 AND call_timestamp >= $2 AND call_timestamp <= $3 AND rep_id = $4 AND COALESCE(log_source, 'dialer_web') <> 'sheet_import'"
+        : "tenant_id = $1 AND call_timestamp >= $2 AND call_timestamp <= $3 AND COALESCE(log_source, 'dialer_web') <> 'sheet_import'";
       const callParams = targetUserId
         ? [tenantId, startOfPeriod, endOfPeriod, targetUserId]
         : [tenantId, startOfPeriod, endOfPeriod];
@@ -401,6 +401,7 @@ export async function GET(request: NextRequest) {
          JOIN leads l ON c.lead_id = l.id
          JOIN users u ON c.rep_id = u.id
          WHERE ${targetUserId ? "c.tenant_id = $1 AND c.call_timestamp >= $2 AND c.call_timestamp <= $3 AND c.rep_id = $4" : "c.tenant_id = $1 AND c.call_timestamp >= $2 AND c.call_timestamp <= $3"}
+           AND COALESCE(c.log_source, 'dialer_web') <> 'sheet_import'
          ORDER BY c.call_timestamp DESC
          LIMIT 8`,
         callParams
@@ -470,6 +471,7 @@ export async function GET(request: NextRequest) {
                     COALESCE(SUM(duration_seconds), 0) as talk_time_secs
              FROM call_logs
              WHERE tenant_id = $1 AND call_timestamp >= $2 AND call_timestamp <= $3
+               AND COALESCE(log_source, 'dialer_web') <> 'sheet_import'
              GROUP BY rep_id
            ) cl ON u.id = cl.rep_id
            LEFT JOIN (

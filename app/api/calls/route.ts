@@ -66,7 +66,13 @@ export async function GET(request: NextRequest) {
           );
       `).catch(() => {});
 
-      const conditions: string[] = ["c.tenant_id = $1"];
+      // Remove any historical non-call sheet_import rows from call_logs (already preserved in lead_stage_history)
+      await client.query(`DELETE FROM call_logs WHERE log_source = 'sheet_import';`).catch(() => {});
+
+      const conditions: string[] = [
+        "c.tenant_id = $1",
+        "COALESCE(c.log_source, 'dialer_web') <> 'sheet_import'",
+      ];
       const params: any[] = [tenantId];
 
       if (role === "sales_rep") {
@@ -94,6 +100,14 @@ export async function GET(request: NextRequest) {
           conditions.push(
             `(c.disposition IN ('RNR', 'Ringing No Response', 'Ring No Response') OR c.disposition ILIKE '%Ringing%' OR c.disposition ILIKE '%No Response%' OR c.disposition ILIKE '%No Answer%')`
           );
+        } else if (disposition === "RNR1" || disposition === "rnr_1") {
+          conditions.push(`rn.rnr_attempt = 1`);
+        } else if (disposition === "RNR2" || disposition === "rnr_2") {
+          conditions.push(`rn.rnr_attempt = 2`);
+        } else if (disposition === "RNR3" || disposition === "rnr_3") {
+          conditions.push(`rn.rnr_attempt = 3`);
+        } else if (disposition === "RNR4" || disposition === "rnr_4") {
+          conditions.push(`rn.rnr_attempt >= 4`);
         } else if (disposition === "Callback" || disposition === "Callback Requested") {
           conditions.push(`(c.disposition = 'Callback' OR c.disposition ILIKE '%Callback%')`);
         } else if (
@@ -147,17 +161,39 @@ export async function GET(request: NextRequest) {
       const limitIdx = params.push(limit);
       const offsetIdx = params.push(offset);
 
+      const rnrCte = `
+        WITH rnr_numbered AS (
+          SELECT id,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY COALESCE(lead_id::text, id::text)
+                   ORDER BY call_timestamp ASC, id ASC
+                 )::int as rnr_attempt
+          FROM call_logs
+          WHERE tenant_id = $1
+            AND COALESCE(log_source, 'dialer_web') <> 'sheet_import'
+            AND (
+              disposition IN ('RNR', 'Ringing No Response', 'Ring No Response')
+              OR disposition ILIKE '%Ringing%'
+              OR disposition ILIKE '%No Response%'
+              OR disposition ILIKE '%No Answer%'
+            )
+        )
+      `;
+
       const callsRes = await client.query(
-        `SELECT c.id, c.tenant_id as "tenantId", c.lead_id as "leadId", c.rep_id as "repId",
+        `${rnrCte}
+         SELECT c.id, c.tenant_id as "tenantId", c.lead_id as "leadId", c.rep_id as "repId",
                 c.disposition, c.duration_seconds as "durationSeconds", c.remark, c.recording_url as "recordingUrl",
                 COALESCE(c.log_source, 'dialer_web') as "logSource",
                 COALESCE(c.is_interested, false) as "isInterested",
+                rn.rnr_attempt as "rnrAttempt",
                 c.call_timestamp as "callTimestamp",
                 l.id as "lead_id", l.phone_number as "lead_phoneNumber", l.contact_name as "lead_contactName",
                 l.company_name as "lead_companyName", l.business_vertical as "lead_businessVertical",
                 l.status as "lead_status",
                 u.id as "rep_id", u.full_name as "rep_fullName", u.email as "rep_email"
          FROM call_logs c
+         LEFT JOIN rnr_numbered rn ON c.id = rn.id
          LEFT JOIN leads l ON c.lead_id = l.id
          LEFT JOIN users u ON c.rep_id = u.id
          WHERE ${whereClause}
@@ -167,7 +203,8 @@ export async function GET(request: NextRequest) {
       );
 
       const countRes = await client.query(
-        `SELECT COUNT(c.id)::int as total,
+        `${rnrCte}
+         SELECT COUNT(c.id)::int as total,
                 COALESCE(SUM(c.duration_seconds), 0)::int as "totalDuration",
                 COUNT(CASE 
                   WHEN c.disposition NOT IN ('RNR', 'Ringing No Response', 'Ring No Response', 'Invalid')
@@ -179,6 +216,7 @@ export async function GET(request: NextRequest) {
                   THEN 1
                 END)::int as "interestedCount"
          FROM call_logs c
+         LEFT JOIN rnr_numbered rn ON c.id = rn.id
          LEFT JOIN leads l ON c.lead_id = l.id
          WHERE ${whereClause}`,
         countParams
@@ -203,6 +241,7 @@ export async function GET(request: NextRequest) {
         recordingUrl: r.recordingUrl || null,
         logSource: r.logSource || "dialer_web",
         isInterested: Boolean(r.isInterested),
+        rnrAttempt: r.rnrAttempt ? Number(r.rnrAttempt) : null,
         callTimestamp: r.callTimestamp,
         lead: r.lead_id
           ? {
