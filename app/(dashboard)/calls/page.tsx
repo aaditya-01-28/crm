@@ -52,6 +52,7 @@ interface CallLogItem {
   recordingUrl?: string | null;
   logSource?: string | null;
   isInterested?: boolean;
+  rnrAttempt?: number | null;
   callTimestamp: string;
   lead: {
     id: string;
@@ -625,7 +626,11 @@ export default function CallLogsPage() {
               <option value="all">All Dispositions</option>
               <option value="Interested">🔥 Interested (Callbacks, Demos, Quotes)</option>
               <option value="Connected">Connected</option>
-              <option value="RNR">RNR (Ringing No Response)</option>
+              <option value="RNR">RNR (All Attempts)</option>
+              <option value="RNR1">RNR 1 (1st Attempt)</option>
+              <option value="RNR2">RNR 2 (2nd Attempt)</option>
+              <option value="RNR3">RNR 3 (3rd Attempt)</option>
+              <option value="RNR4">RNR 4+ (4th+ Attempt)</option>
               <option value="Callback">Callback</option>
               <option value="Demo Scheduled">Demo Scheduled</option>
               <option value="Demo Done">Demo Done</option>
@@ -730,6 +735,35 @@ export default function CallLogsPage() {
               </span>
             )}
           </button>
+
+          <div className="flex items-center gap-1 bg-amber-50/70 border border-amber-200/80 rounded-lg p-0.5">
+            {[
+              { id: "RNR1", label: "RNR 1" },
+              { id: "RNR2", label: "RNR 2" },
+              { id: "RNR3", label: "RNR 3" },
+              { id: "RNR4", label: "RNR 4+" },
+            ].map((item) => {
+              const active = selectedDisposition === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedDisposition(active ? "all" : item.id);
+                    setPage(1);
+                  }}
+                  className={cn(
+                    "px-2 py-1 rounded-md text-[11px] font-semibold transition cursor-pointer",
+                    active
+                      ? "bg-amber-600 text-white shadow-2xs"
+                      : "text-amber-800 hover:bg-amber-100"
+                  )}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
 
           <div className="ml-auto text-gray-400 font-medium">
             Showing {calls.length} of {pagination.total} calls
@@ -893,6 +927,11 @@ export default function CallLogsPage() {
                           >
                             {badge.label}
                           </span>
+                          {call.rnrAttempt && call.rnrAttempt > 0 && (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                              RNR {call.rnrAttempt}
+                            </span>
+                          )}
                           {call.isInterested && call.disposition !== "Interested" && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-orange-50 text-orange-700 border border-orange-200">
                               🔥 Interested

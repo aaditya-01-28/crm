@@ -95,6 +95,10 @@ const STATUS_FILTERS = [
   { key: "won", label: "Won 🏆" },
   { key: "lost", label: "Lost" },
   { key: "rnr", label: "RNR" },
+  { key: "rnr_1", label: "RNR 1" },
+  { key: "rnr_2", label: "RNR 2" },
+  { key: "rnr_3", label: "RNR 3" },
+  { key: "rnr_4", label: "RNR 4+" },
   { key: "not_interested", label: "Not Interested" },
   { key: "already_using", label: "Already Using Our Service" },
   { key: "already_purchased", label: "Already Purchased / Other" },
@@ -222,6 +226,17 @@ export default function LeadsDirectoryPage() {
           if (tab) {
             reordered.push(tab);
             map.delete(k);
+            if (k === "rnr") {
+              for (const rnrKey of ["rnr_1", "rnr_2", "rnr_3", "rnr_4"]) {
+                if (!order.includes(rnrKey)) {
+                  const subTab = map.get(rnrKey);
+                  if (subTab) {
+                    reordered.push(subTab);
+                    map.delete(rnrKey);
+                  }
+                }
+              }
+            }
           }
         }
         for (const tab of map.values()) {

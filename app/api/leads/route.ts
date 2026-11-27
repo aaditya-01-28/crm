@@ -103,9 +103,19 @@ export async function GET(request: NextRequest) {
       const conditions: string[] = [...baseConditions];
       const params: any[] = [...baseParams];
 
+      const RNR_COUNT_EXPR = `COALESCE((SELECT COUNT(*)::int FROM call_logs WHERE lead_id = l.id AND disposition IN ('RNR', 'Ringing No Response', 'Ring No Response')), l.rnr_count, 0)`;
+
       if (status && status !== "all") {
         if (status === "interested") {
           conditions.push(`(l.status = 'interested' OR l.is_interested = true)`);
+        } else if (status === "rnr_1") {
+          conditions.push(`(l.status = 'rnr' AND ${RNR_COUNT_EXPR} = 1)`);
+        } else if (status === "rnr_2") {
+          conditions.push(`(l.status = 'rnr' AND ${RNR_COUNT_EXPR} = 2)`);
+        } else if (status === "rnr_3") {
+          conditions.push(`(l.status = 'rnr' AND ${RNR_COUNT_EXPR} = 3)`);
+        } else if (status === "rnr_4") {
+          conditions.push(`(l.status = 'rnr' AND ${RNR_COUNT_EXPR} >= 4)`);
         } else {
           conditions.push(`l.status = $${params.push(status)}`);
         }
@@ -153,7 +163,7 @@ export async function GET(request: NextRequest) {
                 l.company_name as "companyName", l.website_url as "websiteUrl",
                 l.business_vertical as "businessVertical", l.service_type as "serviceType",
                 l.source, l.status,
-                COALESCE((SELECT COUNT(*)::int FROM call_logs WHERE lead_id = l.id AND disposition = 'RNR'), l.rnr_count, 0) as "rnrCount",
+                ${RNR_COUNT_EXPR} as "rnrCount",
                 l.custom_metadata as "customMetadata",
                 l.created_at as "createdAt", l.updated_at as "updatedAt",
                 ar.id as "arId", ar.full_name as "arFullName",
@@ -217,6 +227,16 @@ export async function GET(request: NextRequest) {
         `SELECT COUNT(id)::int as count FROM leads l WHERE ${statusWhereClause} AND (l.status = 'interested' OR l.is_interested = true)`,
         statusBaseParams
       );
+      const rnrBucketCountsRes = await client.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE ${RNR_COUNT_EXPR} = 1)::int as rnr_1,
+           COUNT(*) FILTER (WHERE ${RNR_COUNT_EXPR} = 2)::int as rnr_2,
+           COUNT(*) FILTER (WHERE ${RNR_COUNT_EXPR} = 3)::int as rnr_3,
+           COUNT(*) FILTER (WHERE ${RNR_COUNT_EXPR} >= 4)::int as rnr_4
+         FROM leads l
+         WHERE ${statusWhereClause} AND l.status = 'rnr'`,
+        statusBaseParams
+      );
 
       let unassignedTotal = 0;
       if (!isSalesRep(role)) {
@@ -236,6 +256,10 @@ export async function GET(request: NextRequest) {
         all: 0,
         new: 0,
         rnr: 0,
+        rnr_1: rnrBucketCountsRes.rows[0]?.rnr_1 || 0,
+        rnr_2: rnrBucketCountsRes.rows[0]?.rnr_2 || 0,
+        rnr_3: rnrBucketCountsRes.rows[0]?.rnr_3 || 0,
+        rnr_4: rnrBucketCountsRes.rows[0]?.rnr_4 || 0,
         callback: 0,
         demo_scheduled: 0,
         demo_done: 0,

@@ -641,115 +641,121 @@ export default function ReportsPage() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto">
+    <div className="max-w-7xl mx-auto">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <BarChart3 className="w-6 h-6 text-emerald-600" />
-            EOD Sales Report
+      <div className="bg-white border border-gray-200 rounded-2xl px-5 py-4 mb-6 shadow-2xs flex flex-col xl:flex-row xl:items-center justify-between gap-3.5">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2 whitespace-nowrap">
+            <BarChart3 className="w-6 h-6 text-emerald-600 shrink-0" />
+            <span>EOD Sales Report</span>
           </h1>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <p className="text-xs sm:text-sm text-gray-500 mt-0.5 sm:whitespace-nowrap">
             Real-time team performance dashboard
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 flex-wrap">
-          {/* Time Period Dropdown Filter (Matching Image 4) */}
-          <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1 text-xs">
-            <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-            <select
-              value={period}
-              onChange={(e) => {
-                const newPeriod = e.target.value as ReportPeriod;
-                setPeriod(newPeriod);
-                if (newPeriod !== "custom") {
-                  const dates = getPresetDates(newPeriod);
-                  setCustomDateFrom(dates.from);
-                  setCustomDateTo(dates.to);
-                }
-              }}
-              className="bg-transparent font-semibold text-gray-800 outline-none cursor-pointer py-1 text-xs"
-              title="Filter report by period"
+        <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+          {/* Date Controls Group */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Time Period Dropdown Filter */}
+            <div className="h-9 flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-xl px-3 text-xs">
+              <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <select
+                value={period}
+                onChange={(e) => {
+                  const newPeriod = e.target.value as ReportPeriod;
+                  setPeriod(newPeriod);
+                  if (newPeriod !== "custom") {
+                    const dates = getPresetDates(newPeriod);
+                    setCustomDateFrom(dates.from);
+                    setCustomDateTo(dates.to);
+                  }
+                }}
+                className="bg-transparent font-semibold text-gray-800 outline-none cursor-pointer text-xs pr-1"
+                title="Filter report by period"
+              >
+                <option value="today">Today</option>
+                <option value="yesterday">Yesterday</option>
+                <option value="week">This Week (7D)</option>
+                <option value="month">This Month (30D)</option>
+                {period === "custom" && (
+                  <option value="custom">Custom Range</option>
+                )}
+              </select>
+            </div>
+
+            {/* Date Range Picker (From and To) */}
+            <div className="h-9 flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-2.5 text-xs">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-semibold text-gray-500">From:</span>
+                <input
+                  type="date"
+                  value={customDateFrom}
+                  onChange={(e) => {
+                    setCustomDateFrom(e.target.value);
+                    setPeriod("custom");
+                  }}
+                  className="bg-white border border-gray-200 rounded-md px-2 py-0.5 text-xs text-gray-800 outline-none focus:ring-1 focus:ring-emerald-500 font-medium cursor-pointer"
+                  title="Start Date"
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-semibold text-gray-500">To:</span>
+                <input
+                  type="date"
+                  value={customDateTo}
+                  onChange={(e) => {
+                    setCustomDateTo(e.target.value);
+                    setPeriod("custom");
+                  }}
+                  className="bg-white border border-gray-200 rounded-md px-2 py-0.5 text-xs text-gray-800 outline-none focus:ring-1 focus:ring-emerald-500 font-medium cursor-pointer"
+                  title="End Date"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Action Buttons Group (kept together as one unit) */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleRefresh}
+              disabled={isFetching}
+              className="h-9 flex items-center gap-1.5 px-3 text-xs sm:text-sm text-gray-700 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 transition font-medium cursor-pointer disabled:opacity-60 whitespace-nowrap"
+              title="Refresh Report Metrics"
             >
-              <option value="today">Today</option>
-              <option value="yesterday">Yesterday</option>
-              <option value="week">This Week (Last 7 Days)</option>
-              <option value="month">This Month (Last 30 Days)</option>
-              {period === "custom" && (
-                <option value="custom">Custom Date Range</option>
+              <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? "animate-spin text-emerald-600" : ""}`} />
+              <span>Refresh</span>
+            </button>
+            <button
+              onClick={handleCopySnapshot}
+              disabled={!data || isFetching || isCopyingSnapshot}
+              className={`h-9 flex items-center gap-1.5 px-3 text-xs sm:text-sm rounded-xl border transition font-medium cursor-pointer disabled:opacity-60 whitespace-nowrap ${
+                snapshotCopied
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                  : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
+              }`}
+              title="Capture full EOD report & leaderboard as image and copy to clipboard"
+            >
+              {snapshotCopied ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Copied!</span>
+                </>
+              ) : (
+                <>
+                  <Camera className={`w-3.5 h-3.5 text-slate-600 ${isCopyingSnapshot ? "animate-pulse" : ""}`} />
+                  <span>{isCopyingSnapshot ? "Capturing..." : "Copy Snapshot"}</span>
+                </>
               )}
-            </select>
+            </button>
+            <button
+              onClick={handleExport}
+              className="h-9 flex items-center gap-1.5 px-3.5 text-xs sm:text-sm text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 transition font-semibold shadow-xs cursor-pointer whitespace-nowrap"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Export CSV</span>
+            </button>
           </div>
-
-          {/* Date Range Picker (From and To) */}
-          <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-2.5 py-1 text-xs">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-semibold text-gray-500">From:</span>
-              <input
-                type="date"
-                value={customDateFrom}
-                onChange={(e) => {
-                  setCustomDateFrom(e.target.value);
-                  setPeriod("custom");
-                }}
-                className="bg-white border border-gray-200 rounded-lg px-2 py-0.5 text-xs text-gray-800 outline-none focus:ring-1 focus:ring-emerald-500 font-medium cursor-pointer"
-                title="Start Date"
-              />
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-semibold text-gray-500">To:</span>
-              <input
-                type="date"
-                value={customDateTo}
-                onChange={(e) => {
-                  setCustomDateTo(e.target.value);
-                  setPeriod("custom");
-                }}
-                className="bg-white border border-gray-200 rounded-lg px-2 py-0.5 text-xs text-gray-800 outline-none focus:ring-1 focus:ring-emerald-500 font-medium cursor-pointer"
-                title="End Date"
-              />
-            </div>
-          </div>
-
-          <button
-            onClick={handleRefresh}
-            disabled={isFetching}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition cursor-pointer disabled:opacity-60"
-            title="Refresh Report Metrics"
-          >
-            <RefreshCw className={`w-4 h-4 ${isFetching ? "animate-spin text-emerald-600" : ""}`} />
-            Refresh
-          </button>
-          <button
-            onClick={handleCopySnapshot}
-            disabled={!data || isFetching || isCopyingSnapshot}
-            className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border transition font-medium cursor-pointer disabled:opacity-60 ${
-              snapshotCopied
-                ? "bg-emerald-50 text-emerald-700 border-emerald-300"
-                : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50"
-            }`}
-            title="Capture full EOD report & leaderboard as image and copy to clipboard"
-          >
-            {snapshotCopied ? (
-              <>
-                <Check className="w-4 h-4 text-emerald-600" />
-                Copied!
-              </>
-            ) : (
-              <>
-                <Camera className={`w-4 h-4 text-slate-600 ${isCopyingSnapshot ? "animate-pulse" : ""}`} />
-                {isCopyingSnapshot ? "Capturing..." : "Copy Snapshot"}
-              </>
-            )}
-          </button>
-          <button
-            onClick={handleExport}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition font-medium shadow-xs"
-          >
-            <Download className="w-4 h-4" />
-            Export CSV
-          </button>
         </div>
       </div>
 
