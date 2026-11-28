@@ -28,6 +28,7 @@ import { LeadDetailModal } from "@/components/leads/LeadDetailModal";
 import { DateTime12hInput } from "@/components/common/DateTime12hInput";
 
 import { useSession, useCanAssignLeads } from "@/components/layout/SessionProvider";
+import { sanitizeExternalUrl } from "@/lib/url-safety";
 
 interface TaskLead {
   id?: string;
@@ -527,17 +528,22 @@ function TaskRow({
           <p className="text-xs text-gray-600 mt-1 line-clamp-2">{task.notes}</p>
         )}
 
-        {task.meetingLink && (
-          <a
-            href={task.meetingLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="text-xs text-blue-600 hover:underline mt-1.5 inline-flex items-center gap-1 font-medium"
-          >
-            🔗 Join Video Meeting
-          </a>
-        )}
+        {task.meetingLink && (() => {
+          const safeLink = sanitizeExternalUrl(task.meetingLink);
+          return safeLink ? (
+            <a
+              href={safeLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="text-xs text-blue-600 hover:underline mt-1.5 inline-flex items-center gap-1 font-medium"
+            >
+              Join Video Meeting
+            </a>
+          ) : (
+            <span className="text-xs text-slate-500 mt-1.5 block truncate">{task.meetingLink}</span>
+          );
+        })()}
       </div>
 
       <div className="flex items-center gap-2 shrink-0">

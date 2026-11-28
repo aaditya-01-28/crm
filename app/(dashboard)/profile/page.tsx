@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDateTime } from "@/lib/utils";
+import { sanitizeExternalUrl } from "@/lib/url-safety";
 import { APP_VERSION } from "@/lib/version";
 
 interface UserProfile {
@@ -269,17 +270,20 @@ export default function ProfilePage() {
 
             <div className="flex flex-col items-center text-center pb-6 border-b border-gray-100">
               <div className="mb-3">
-                {user.avatarUrl ? (
-                  <img
-                    src={user.avatarUrl}
-                    alt={user.fullName}
-                    className="w-20 h-20 rounded-2xl object-cover shadow-lg shadow-emerald-700/20 border-2 border-white ring-4 ring-emerald-50"
-                  />
-                ) : (
-                  <div className="w-20 h-20 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center font-bold text-3xl shadow-lg shadow-emerald-700/20 border-2 border-white ring-4 ring-emerald-50">
-                    {user.fullName.charAt(0).toUpperCase()}
-                  </div>
-                )}
+                {(() => {
+                  const safeAvatar = sanitizeExternalUrl(user.avatarUrl, { allowRelative: true });
+                  return safeAvatar ? (
+                    <img
+                      src={safeAvatar}
+                      alt={user.fullName}
+                      className="w-20 h-20 rounded-2xl object-cover shadow-lg shadow-emerald-700/20 border-2 border-white ring-4 ring-emerald-50"
+                    />
+                  ) : (
+                    <div className="w-20 h-20 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center font-bold text-3xl shadow-lg shadow-emerald-700/20 border-2 border-white ring-4 ring-emerald-50">
+                      {user.fullName.charAt(0).toUpperCase()}
+                    </div>
+                  );
+                })()}
               </div>
               <h2 className="text-lg font-bold text-gray-900">{user.fullName}</h2>
               <span className={`mt-1.5 text-[11px] font-bold px-3 py-1 rounded-full border uppercase tracking-wider ${roleMeta.badge}`}>

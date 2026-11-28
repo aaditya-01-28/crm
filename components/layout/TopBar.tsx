@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import type { JWTPayload } from "@/lib/auth";
 import { useSidebar } from "./SidebarContext";
 import { NotificationBell } from "./NotificationBell";
+import { sanitizeExternalUrl } from "@/lib/url-safety";
 
 const ROLE_LABELS: Record<string, string> = {
   super_admin: "Super Admin",
@@ -170,11 +171,14 @@ export default function TopBar({ user }: { user: JWTPayload }) {
           title="Manage Account & Profile"
         >
           <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shadow-xs group-hover:scale-105 transition-transform overflow-hidden shrink-0">
-            {user.avatarUrl ? (
-              <img src={user.avatarUrl} alt={user.fullName} className="w-full h-full object-cover" />
-            ) : (
-              user.fullName.charAt(0).toUpperCase()
-            )}
+            {(() => {
+              const safeAvatar = sanitizeExternalUrl(user.avatarUrl, { allowRelative: true });
+              return safeAvatar ? (
+                <img src={safeAvatar} alt={user.fullName} className="w-full h-full object-cover" />
+              ) : (
+                user.fullName.charAt(0).toUpperCase()
+              );
+            })()}
           </div>
           <div className="text-right hidden sm:block">
             <p className="text-sm font-semibold text-gray-800 leading-tight group-hover:text-emerald-700 transition-colors">

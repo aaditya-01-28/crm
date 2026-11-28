@@ -6,6 +6,7 @@ import {
   signRefreshToken,
   setAuthCookies,
 } from "@/lib/auth";
+import { checkRateLimit, getClientIp } from "@/lib/security";
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,19 +14,36 @@ export async function POST(request: NextRequest) {
     const { email, password, client } = body;
     const isMobileClient = client === "mobile";
 
-    if (!email || !password) {
+    if (typeof email !== "string" || typeof password !== "string" || !email.trim() || !password) {
       return NextResponse.json(
         { error: "Email and password are required" },
         { status: 400 }
       );
     }
 
-    const user = await queryUserByEmail(email.trim());
+    const cleanEmail = email.trim().toLowerCase();
+    const ip = getClientIp(request);
+    const rate = checkRateLimit(`login:${ip}:${cleanEmail}`, 15, 15 * 60 * 1000);
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: "Too many sign-in attempts. Please wait a few minutes and try again." },
+        { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } }
+      );
+    }
+
+    const user = await queryUserByEmail(cleanEmail);
 
     if (!user) {
       return NextResponse.json(
         { error: "Invalid credentials" },
         { status: 401 }
+      );
+    }
+
+    if (!user.orgIsActive) {
+      return NextResponse.json(
+        { error: "This organization workspace has been suspended. Please contact Textora Support." },
+        { status: 403 }
       );
     }
 
@@ -53,12 +71,10 @@ export async function POST(request: NextRequest) {
 
     // Record login in database: archive previous login to previous_login_at and record current in last_login_at
     await withClient(async (client) => {
-      await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS previous_login_at TIMESTAMPTZ;").catch(() => {});
-      await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;").catch(() => {});
       await client.query(
         "UPDATE users SET previous_login_at = last_login_at, last_login_at = $1 WHERE id = $2",
         [now, user.id]
-      ).catch(() => {});
+      );
     }).catch((err) => console.warn("[LOGIN] failed to update last_login_at:", err));
 
     const jwtPayload = {
@@ -69,6 +85,7 @@ export async function POST(request: NextRequest) {
       fullName: user.fullName,
       avatarUrl: user.avatarUrl && user.avatarUrl.length < 500 ? user.avatarUrl : null,
       mustChangePassword,
+      tokenVersion: user.tokenVersion,
       lastLoginAt: previousLoginTimestamp,
       loginAt: loginTimestamp,
       phoneNumber: user.phoneNumber || null,
@@ -76,7 +93,7 @@ export async function POST(request: NextRequest) {
 
     const accessToken = await signAccessToken(
       jwtPayload,
-      isMobileClient ? "30d" : undefined
+      isMobileClient ? "12h" : undefined
     );
     const refreshToken = await signRefreshToken(jwtPayload);
 

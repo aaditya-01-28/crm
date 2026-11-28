@@ -4,15 +4,30 @@ const globalForMinio = globalThis as unknown as {
   minioClient: Minio.Client | undefined;
 };
 
-export const minioClient =
-  globalForMinio.minioClient ??
-  new Minio.Client({
+function getMinioCredentials() {
+  const accessKey = process.env.MINIO_ACCESS_KEY;
+  const secretKey = process.env.MINIO_SECRET_KEY;
+  if (process.env.NODE_ENV === "production" && (!accessKey || !secretKey)) {
+    throw new Error("MINIO_ACCESS_KEY and MINIO_SECRET_KEY must be set in production.");
+  }
+  return {
+    accessKey: accessKey || "textora_minio",
+    secretKey: secretKey || "textora_minio_secret",
+  };
+}
+
+function createClient(): Minio.Client {
+  const { accessKey, secretKey } = getMinioCredentials();
+  return new Minio.Client({
     endPoint: process.env.MINIO_ENDPOINT || "localhost",
     port: parseInt(process.env.MINIO_PORT || "9000"),
     useSSL: process.env.MINIO_USE_SSL === "true",
-    accessKey: process.env.MINIO_ACCESS_KEY || "textora_minio",
-    secretKey: process.env.MINIO_SECRET_KEY || "textora_minio_secret",
+    accessKey,
+    secretKey,
   });
+}
+
+export const minioClient = globalForMinio.minioClient ?? createClient();
 
 if (process.env.NODE_ENV !== "production")
   globalForMinio.minioClient = minioClient;
@@ -32,6 +47,14 @@ export async function getPresignedUploadUrl(
 ): Promise<string> {
   await ensureBucket();
   return minioClient.presignedPutObject(BUCKET_NAME, objectName, expiry);
+}
+
+export async function getPresignedDownloadUrl(
+  objectName: string,
+  expiry = 3600 // 1 hour
+): Promise<string> {
+  await ensureBucket();
+  return minioClient.presignedGetObject(BUCKET_NAME, objectName, expiry);
 }
 
 export function getPublicUrl(objectName: string): string {

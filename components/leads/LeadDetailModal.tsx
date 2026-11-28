@@ -43,6 +43,7 @@ import {
   parseServices,
 } from "@/lib/utils";
 import { MultiServiceSelect } from "@/components/common/MultiServiceSelect";
+import { sanitizeExternalUrl } from "@/lib/url-safety";
 import { MultiLanguageSelect } from "@/components/common/MultiLanguageSelect";
 import { DateTime12hInput } from "@/components/common/DateTime12hInput";
 import { AudioRecordingPlayer } from "@/components/calls/AudioRecordingPlayer";
@@ -1856,21 +1857,28 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                         )}
 
                         {/* Meeting Link for Demo Scheduled */}
-                        {item.meetingLink && (
-                          <div className="flex items-center gap-1.5 text-xs bg-purple-50/80 border border-purple-200 px-3 py-1.5 rounded-lg text-purple-800">
-                            <Video className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-                            <span className="font-semibold shrink-0">Meeting Link:</span>
-                            <a
-                              href={item.meetingLink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-purple-700 hover:text-purple-900 underline truncate inline-flex items-center gap-1"
-                            >
-                              {item.meetingLink}
-                              <ExternalLink className="w-3 h-3 shrink-0" />
-                            </a>
-                          </div>
-                        )}
+                        {item.meetingLink && (() => {
+                          const safeLink = sanitizeExternalUrl(item.meetingLink);
+                          return (
+                            <div className="flex items-center gap-1.5 text-xs bg-purple-50/80 border border-purple-200 px-3 py-1.5 rounded-lg text-purple-800">
+                              <Video className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                              <span className="font-semibold shrink-0">Meeting Link:</span>
+                              {safeLink ? (
+                                <a
+                                  href={safeLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-purple-700 hover:text-purple-900 underline truncate inline-flex items-center gap-1"
+                                >
+                                  {safeLink}
+                                  <ExternalLink className="w-3 h-3 shrink-0" />
+                                </a>
+                              ) : (
+                                <span className="text-slate-600 truncate">{item.meetingLink}</span>
+                              )}
+                            </div>
+                          );
+                        })()}
 
                         {item.notes ? (
                           <p className="text-xs text-gray-700 bg-white p-2.5 rounded-lg border border-gray-100">
@@ -2051,16 +2059,21 @@ export function LeadDetailModal({ leadId, onClose, onLeadUpdated }: LeadDetailMo
                       {task.notes && (
                         <p className="text-xs bg-gray-50 p-2 rounded-lg text-gray-700">{task.notes}</p>
                       )}
-                      {task.meetingLink && (
-                        <a
-                          href={task.meetingLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-blue-600 hover:underline block"
-                        >
-                          🔗 Join Demo Meeting
-                        </a>
-                      )}
+                      {task.meetingLink && (() => {
+                        const safeTaskLink = sanitizeExternalUrl(task.meetingLink);
+                        return safeTaskLink ? (
+                          <a
+                            href={safeTaskLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-blue-600 hover:underline block"
+                          >
+                            Join Demo Meeting
+                          </a>
+                        ) : (
+                          <span className="text-xs text-slate-500 block">{task.meetingLink}</span>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>

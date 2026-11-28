@@ -287,6 +287,7 @@ export async function POST(request: NextRequest) {
             ? sanitizeExternalUrl(rawRecordingUrl, { allowRelative: true })
             : null;
           const logSource = item.logSource || "apk_manual";
+          const isHistoricalSync = Boolean(item.historicalSync);
           const isPendingAutoCapture = logSource === "apk_connected" || logSource === "dialer_connected";
           const explicitInterestedVal: boolean | null = isPendingAutoCapture
             ? null
@@ -426,13 +427,14 @@ export async function POST(request: NextRequest) {
                )
                OR (
                  $6::boolean = false
+                 AND $7::boolean = false
                  AND call_timestamp >= NOW() - INTERVAL '15 minutes'
                  AND (remark = 'Captured from SIM dialer' OR log_source IN ('dialer_connected', 'apk_connected', 'dialer_rnr'))
                )
              )
            ORDER BY call_timestamp DESC
            LIMIT 1`,
-          [tenantId, targetLeadId, repId, callTimestamp, durationSeconds, isInboundSource]
+          [tenantId, targetLeadId, repId, callTimestamp, durationSeconds, isInboundSource, isHistoricalSync]
         );
 
         let finalLog;
@@ -493,8 +495,53 @@ export async function POST(request: NextRequest) {
           );
         }
 
+        // Synchronize lead status when a call moves a fresh lead (new / uncontacted) out of New,
+        // or explicitly marks Demo Scheduled / Demo Done (respecting historical backdated calls).
+        const leadMetaRes = await client.query(
+          `SELECT l.status,
+                  (SELECT MAX(cl.call_timestamp) FROM call_logs cl WHERE cl.lead_id = l.id AND cl.tenant_id = l.tenant_id AND cl.id <> $3) as "latestOtherCall"
+           FROM leads l WHERE l.id = $1 AND l.tenant_id = $2`,
+          [targetLeadId, tenantId, finalLog.id]
+        );
+        const curLeadStatus = String(leadMetaRes.rows[0]?.status || "").toLowerCase();
+        const latestOtherCallTs = leadMetaRes.rows[0]?.latestOtherCall
+          ? new Date(leadMetaRes.rows[0].latestOtherCall).getTime()
+          : 0;
+        const isOlderThanLatest =
+          isHistoricalSync && latestOtherCallTs > 0 && callTimestamp.getTime() < latestOtherCallTs;
+
+        if (!isOlderThanLatest && (curLeadStatus === "new" || curLeadStatus === "uncontacted")) {
+          const dispLower = String(disposition || "").toLowerCase().trim();
+          let nextFreshStatus: string | null = null;
+          if (dispLower === "rnr" || dispLower.includes("ringing") || dispLower.includes("no response") || dispLower.includes("no answer")) {
+            nextFreshStatus = "rnr";
+          } else if (dispLower === "interested") {
+            nextFreshStatus = "interested";
+          } else if (dispLower.includes("callback")) {
+            nextFreshStatus = "callback";
+          } else if (dispLower === "connected") {
+            nextFreshStatus = "callback";
+          } else if (dispLower === "not interested") {
+            nextFreshStatus = "not_interested";
+          } else if (dispLower === "invalid" || dispLower === "switched off") {
+            nextFreshStatus = "invalid";
+          } else if (dispLower.includes("future")) {
+            nextFreshStatus = "future_requirement";
+          }
+          if (nextFreshStatus) {
+            await client.query(
+              `UPDATE leads
+               SET status = $1,
+                   is_interested = CASE WHEN $2::boolean THEN true ELSE COALESCE(is_interested, false) END,
+                   updated_at = NOW()
+               WHERE id = $3 AND tenant_id = $4`,
+              [nextFreshStatus, Boolean(explicitInterestedVal), targetLeadId, tenantId]
+            );
+          }
+        }
+
         // Synchronize lead status and demo scheduled/completed tasks
-        if (disposition === "Demo Done" || disposition === "Demo Completed") {
+        if (!isOlderThanLatest && (disposition === "Demo Done" || disposition === "Demo Completed")) {
           const taskUpdate = await client.query(
             "UPDATE scheduled_tasks SET status = 'completed', updated_at = NOW() WHERE lead_id = $1 AND tenant_id = $2 AND task_type = 'product_demo' AND status = 'pending' RETURNING id",
             [targetLeadId, tenantId]
@@ -528,7 +575,7 @@ export async function POST(request: NextRequest) {
               [tenantId, targetLeadId, repId]
             );
           }
-        } else if (disposition === "Demo Scheduled") {
+        } else if (!isOlderThanLatest && disposition === "Demo Scheduled") {
           await client.query(
             "UPDATE leads SET status = 'demo_scheduled', updated_at = NOW() WHERE id = $1 AND tenant_id = $2",
             [targetLeadId, tenantId]
@@ -547,7 +594,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Clear overdue pending callback tasks when a real/disposed call is synced via APK/Dialer
-        if (!isPendingAutoCapture && targetLeadId) {
+        if (!isPendingAutoCapture && !isOlderThanLatest && targetLeadId) {
           const syncTag = remark
             ? `[Attempted via Dialer/APK: ${disposition} — ${remark}]`
             : `[Attempted via Dialer/APK: ${disposition}]`;

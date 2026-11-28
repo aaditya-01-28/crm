@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
+import { isAdmin, isManagerOrAdmin } from "@/lib/rbac";
+import { validateStrongPassword } from "@/lib/security";
 import bcrypt from "bcryptjs";
 
+const ALLOWED_ROLES = new Set(["sales_rep", "sales_manager", "accounts_ops", "super_admin"]);
+
 export async function GET(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -33,20 +37,19 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  if (!["super_admin", "sales_manager"].includes(role)) {
+  if (!isManagerOrAdmin(role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   try {
     return await withClient(async (client) => {
-      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_call_target INTEGER DEFAULT 60;`).catch(() => {});
       const res = await client.query(
         `SELECT u.id, u.full_name as "fullName", u.email, u.phone_number as "phoneNumber",
                 u.role, u.language, u.is_active as "isActive", u.created_at as "createdAt",
                 COALESCE(u.daily_call_target, 60)::int as "dailyCallTarget",
-                (SELECT COUNT(*)::int FROM leads WHERE assigned_rep_id = u.id) as "assignedLeadsCount",
-                (SELECT COUNT(*)::int FROM call_logs WHERE rep_id = u.id) as "callLogsCount",
-                (SELECT COUNT(*)::int FROM deals WHERE rep_id = u.id) as "dealsCount"
+                (SELECT COUNT(*)::int FROM leads WHERE assigned_rep_id = u.id AND tenant_id = u.tenant_id) as "assignedLeadsCount",
+                (SELECT COUNT(*)::int FROM call_logs WHERE rep_id = u.id AND tenant_id = u.tenant_id) as "callLogsCount",
+                (SELECT COUNT(*)::int FROM deals WHERE rep_id = u.id AND tenant_id = u.tenant_id) as "dealsCount"
          FROM users u
          WHERE u.tenant_id = $1
          ORDER BY u.created_at ASC`,
@@ -79,14 +82,14 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const tenantId = session.tenantId;
   const role = session.role;
 
-  if (role !== "super_admin") {
+  if (!isAdmin(role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -101,10 +104,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const cleanEmail = String(email).trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      return NextResponse.json({ error: "A valid email address is required" }, { status: 400 });
+    }
+
+    if (!ALLOWED_ROLES.has(String(userRole).trim())) {
+      return NextResponse.json({ error: "Invalid role specified" }, { status: 400 });
+    }
+
+    const pwCheck = validateStrongPassword(password);
+    if (!pwCheck.valid) {
+      return NextResponse.json({ error: pwCheck.error }, { status: 400 });
+    }
+
     return await withClient(async (client) => {
       const existing = await client.query(
         "SELECT id FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1",
-        [email.trim()]
+        [cleanEmail]
       );
       if (existing.rows.length > 0) {
         return NextResponse.json(
@@ -115,11 +132,11 @@ export async function POST(request: NextRequest) {
 
       const passwordHash = await bcrypt.hash(password, 12);
       const insertRes = await client.query(
-        `INSERT INTO users (tenant_id, full_name, email, password_hash, role, phone_number, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, true)
+        `INSERT INTO users (tenant_id, full_name, email, password_hash, role, phone_number, is_active, must_change_password, token_version)
+         VALUES ($1, $2, $3, $4, $5, $6, true, true, 1)
          RETURNING id, full_name as "fullName", email, phone_number as "phoneNumber",
                    role, is_active as "isActive", created_at as "createdAt"`,
-        [tenantId, fullName.trim(), email.trim(), passwordHash, userRole, phoneNumber ? phoneNumber.trim() : null]
+        [tenantId, String(fullName).trim(), cleanEmail, passwordHash, String(userRole).trim(), phoneNumber ? String(phoneNumber).trim() : null]
       );
 
       return NextResponse.json({ user: insertRes.rows[0] }, { status: 201 });

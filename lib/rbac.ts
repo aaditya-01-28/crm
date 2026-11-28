@@ -48,6 +48,7 @@ export function normalizeRole(role?: string | null): string {
     r === "admin" ||
     r === "super_admin" ||
     r === "superadmin" ||
+    r === "org_admin" ||
     r === "administrator"
   ) {
     return "super_admin";

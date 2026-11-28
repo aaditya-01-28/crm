@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDateTime, formatLanguageLabels } from "@/lib/utils";
-import { useSession, useIsAdmin } from "@/components/layout/SessionProvider";
+import { useSession, useIsAdmin, useIsManagerOrAdmin } from "@/components/layout/SessionProvider";
 
 interface TeamUser {
   id: string;
@@ -76,12 +76,30 @@ const ROLE_BADGES: Record<string, string> = {
 };
 
 function generateSecurePassword(): string {
-  const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let pwd = "Textora@";
-  for (let i = 0; i < 4; i++) {
-    pwd += chars.charAt(Math.floor(Math.random() * chars.length));
+  const lower = "abcdefghjkmnpqrstuvwxyz";
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const digits = "23456789";
+  const symbols = "!@#$%&*";
+  const all = lower + upper + digits + symbols;
+
+  const pick = (pool: string) => {
+    const arr = new Uint32Array(1);
+    crypto.getRandomValues(arr);
+    return pool.charAt(arr[0] % pool.length);
+  };
+
+  // Guarantee all 4 classes + 14 chars total (>= 12 strong password policy)
+  const chars = [pick(lower), pick(upper), pick(digits), pick(symbols)];
+  for (let i = chars.length; i < 14; i++) {
+    chars.push(pick(all));
   }
-  return pwd + "!";
+  for (let i = chars.length - 1; i > 0; i--) {
+    const arr = new Uint32Array(1);
+    crypto.getRandomValues(arr);
+    const j = arr[0] % (i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join("");
 }
 
 async function fetchTeam(): Promise<{ users: TeamUser[] }> {
@@ -94,6 +112,7 @@ export default function TeamPage() {
   const queryClient = useQueryClient();
   const { userId: currentUserId, role: currentUserRole } = useSession();
   const isAdmin = useIsAdmin();
+  const canViewTeam = useIsManagerOrAdmin();
   const canManageTargets = isAdmin || currentUserRole === "sales_manager";
   const [editingTargetUserId, setEditingTargetUserId] = useState<string | null>(null);
   const [targetInputValue, setTargetInputValue] = useState<string>("60");
@@ -130,6 +149,7 @@ export default function TeamPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["team"],
     queryFn: fetchTeam,
+    enabled: canViewTeam,
   });
 
   // Query password reset requests for Super Admin
@@ -313,6 +333,10 @@ export default function TeamPage() {
 
   async function handleAddUser(e: React.FormEvent) {
     e.preventDefault();
+    if (!password || password.length < 12) {
+      toast.error("Password must be at least 12 characters with mixed classes.");
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch("/api/team", {
@@ -379,6 +403,18 @@ export default function TeamPage() {
     setCopied(true);
     toast.success("Credentials copied to clipboard! 📋");
     setTimeout(() => setCopied(false), 2500);
+  }
+
+  if (!canViewTeam) {
+    return (
+      <div className="max-w-md mx-auto my-12 p-8 bg-amber-50 border border-amber-200 rounded-2xl text-center space-y-3">
+        <ShieldAlert className="w-8 h-8 text-amber-600 mx-auto" />
+        <h2 className="text-base font-bold text-amber-950">Access Restricted</h2>
+        <p className="text-xs text-amber-800">
+          Team management is restricted to Sales Managers and Super Administrators.
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -785,8 +821,8 @@ export default function TeamPage() {
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
-                    if (!newPassword || newPassword.length < 6) {
-                      toast.error("Password must be at least 6 characters.");
+                    if (!newPassword || newPassword.length < 12) {
+                      toast.error("Password must be at least 12 characters with mixed classes.");
                       return;
                     }
                     adminResetPasswordMutation.mutate({
@@ -826,7 +862,8 @@ export default function TeamPage() {
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
                         required
-                        placeholder="Minimum 6 characters"
+                        minLength={12}
+                        placeholder="Min 12 chars (upper, lower, number, symbol)"
                         className="w-full pl-3.5 pr-10 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm bg-gray-50/50 font-mono"
                       />
                       <button
@@ -1198,7 +1235,8 @@ export default function TeamPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  placeholder="••••••••"
+                  minLength={12}
+                  placeholder="Min 12 chars (upper, lower, number/symbol)"
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                 />
               </div>

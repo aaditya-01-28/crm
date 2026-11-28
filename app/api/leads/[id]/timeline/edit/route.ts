@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
 import { isManagerOrAdmin } from "@/lib/rbac";
+import { filterValidUuids, isValidUuid, sanitizeExternalUrl } from "@/lib/security";
 import { parseScheduledDateTime } from "@/lib/utils";
 
 function mapDispositionMeta(disposition: string): {
@@ -47,9 +48,12 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: leadId } = await params;
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!isValidUuid(leadId)) {
+    return NextResponse.json({ error: "Invalid lead ID" }, { status: 400 });
   }
 
   // Only Level 2 Sales Manager & Level 3 Super Admin can edit logged entries
@@ -67,9 +71,9 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const callLogIds: string[] = Array.isArray(body.callLogIds) ? body.callLogIds.filter(Boolean) : [];
-  const stageHistoryIds: string[] = Array.isArray(body.stageHistoryIds) ? body.stageHistoryIds.filter(Boolean) : [];
-  const taskIds: string[] = Array.isArray(body.taskIds) ? body.taskIds.filter(Boolean) : [];
+  const callLogIds = filterValidUuids(body.callLogIds);
+  const stageHistoryIds = filterValidUuids(body.stageHistoryIds);
+  const taskIds = filterValidUuids(body.taskIds);
 
   const disposition: string | undefined =
     typeof body.disposition === "string" && body.disposition.trim() ? body.disposition.trim() : undefined;
@@ -94,11 +98,17 @@ export async function PATCH(
   }
 
   const hasMeetingLink = body.meetingLink !== undefined;
-  const meetingLink: string | null =
-    hasMeetingLink ? (body.meetingLink ? String(body.meetingLink).trim() : null) : null;
+  let meetingLink: string | null = null;
+  if (hasMeetingLink && body.meetingLink) {
+    const validatedLink = sanitizeExternalUrl(body.meetingLink);
+    if (!validatedLink) {
+      return NextResponse.json({ error: "Invalid meetingLink URL" }, { status: 400 });
+    }
+    meetingLink = validatedLink;
+  }
 
   if (callLogIds.length === 0 && stageHistoryIds.length === 0 && taskIds.length === 0) {
-    return NextResponse.json({ error: "No log or task IDs provided to edit" }, { status: 400 });
+    return NextResponse.json({ error: "No valid log or task IDs provided to edit" }, { status: 400 });
   }
 
   const dispMeta = disposition ? mapDispositionMeta(disposition) : null;
@@ -106,6 +116,7 @@ export async function PATCH(
   try {
     return await withClient(async (client) => {
       await client.query("BEGIN");
+      try {
 
       const leadRes = await client.query(
         `SELECT id, status FROM leads WHERE id = $1 AND tenant_id = $2`,
@@ -290,7 +301,7 @@ export async function PATCH(
       // 4. Sync lead RNR count and latest status if disposition was modified
       await client.query(
         `UPDATE leads
-         SET rnr_count = COALESCE((SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $1 AND disposition = 'RNR'), 0),
+         SET rnr_count = COALESCE((SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $1 AND tenant_id = $2 AND disposition = 'RNR'), 0),
              updated_at = NOW()
          WHERE id = $1 AND tenant_id = $2`,
         [leadId, session.tenantId]
@@ -311,11 +322,15 @@ export async function PATCH(
 
       await client.query("COMMIT");
       return NextResponse.json({ success: true });
+      } catch (txErr) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw txErr;
+      }
     });
   } catch (error: any) {
     console.error("[TIMELINE LOG EDIT]", error);
     return NextResponse.json(
-      { error: error?.message || "Failed to edit log entry" },
+      { error: "Failed to edit log entry" },
       { status: 500 }
     );
   }

@@ -1,30 +1,50 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import bcrypt from "bcryptjs";
+import {
+  checkRateLimit,
+  getClientIp,
+  hashResetToken,
+  validateStrongPassword,
+} from "@/lib/security";
 
 export async function POST(request: NextRequest) {
   try {
+    const ip = getClientIp(request);
+    const rate = checkRateLimit(`reset-pw:${ip}`, 10, 15 * 60 * 1000);
+    if (!rate.allowed) {
+      return NextResponse.json(
+        { error: "Too many password reset attempts. Please try again later." },
+        { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } }
+      );
+    }
+
     const body = await request.json();
     const { token, newPassword } = body;
 
-    if (!token || typeof token !== "string") {
+    if (!token || typeof token !== "string" || token.trim().length < 16) {
       return NextResponse.json(
         { error: "Invalid or missing password reset token" },
         { status: 400 }
       );
     }
 
-    if (!newPassword || typeof newPassword !== "string" || newPassword.length < 6) {
-      return NextResponse.json(
-        { error: "New password must be at least 6 characters in length" },
-        { status: 400 }
-      );
+    const pwCheck = validateStrongPassword(newPassword);
+    if (!pwCheck.valid) {
+      return NextResponse.json({ error: pwCheck.error }, { status: 400 });
     }
+
+    const tokenHash = hashResetToken(token.trim());
 
     return await withClient(async (client) => {
       const userRes = await client.query(
-        "SELECT id, role, is_active as \"isActive\" FROM users WHERE reset_token = $1 AND reset_token_expiry > NOW() LIMIT 1",
-        [token]
+        `SELECT u.id, u.role, u.is_active as "isActive",
+                COALESCE(o.is_active, true) as "orgIsActive"
+         FROM users u
+         JOIN organizations o ON u.tenant_id = o.id
+         WHERE u.reset_token = $1 AND u.reset_token_expiry > NOW()
+         LIMIT 1`,
+        [tokenHash]
       );
 
       if (userRes.rows.length === 0) {
@@ -36,9 +56,9 @@ export async function POST(request: NextRequest) {
 
       const user = userRes.rows[0];
 
-      if (!user.isActive) {
+      if (!user.isActive || !user.orgIsActive) {
         return NextResponse.json(
-          { error: "This account has been deactivated or blocked by an Administrator." },
+          { error: "This account or organization has been deactivated by an Administrator." },
           { status: 403 }
         );
       }
@@ -53,7 +73,12 @@ export async function POST(request: NextRequest) {
       const passwordHash = await bcrypt.hash(newPassword, 12);
 
       await client.query(
-        "UPDATE users SET password_hash = $1, reset_token = NULL, reset_token_expiry = NULL WHERE id = $2",
+        `UPDATE users
+         SET password_hash = $1,
+             reset_token = NULL,
+             reset_token_expiry = NULL,
+             token_version = COALESCE(token_version, 1) + 1
+         WHERE id = $2`,
         [passwordHash, user.id]
       );
 

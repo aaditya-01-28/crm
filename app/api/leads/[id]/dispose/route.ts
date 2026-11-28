@@ -38,6 +38,7 @@ export async function PATCH(
       forceNewLog = false,
       isManualNote = false,
       isInterested = false,
+      historicalSync = false,
     } = body;
 
     const isExplicitInterested = Boolean(isInterested) || disposition === "Interested";
@@ -350,30 +351,58 @@ export async function PATCH(
       } else {
         await client.query(
           `INSERT INTO lead_stage_history (tenant_id, lead_id, rep_id, stage_name, stage_type, notes, metadata, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
-          [tenantId, id, repId, stageName, stageType, remark || null, stageMeta]
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [tenantId, id, repId, stageName, stageType, remark || null, stageMeta, historicalSync ? finalTimestamp : new Date()]
         ).catch(() => {});
       }
 
+      // Check if this is a backdated historical phone log older than an already logged call on a progressed lead
+      const latestOtherCallRes = historicalSync
+        ? await client.query(
+            `SELECT MAX(call_timestamp) as "latestTs" FROM call_logs WHERE lead_id = $1 AND tenant_id = $2 AND ($3::uuid IS NULL OR id <> $3)`,
+            [id, tenantId, targetCallId]
+          ).catch(() => ({ rows: [] }))
+        : { rows: [] };
+      const latestOtherTs = latestOtherCallRes.rows[0]?.latestTs
+        ? new Date(latestOtherCallRes.rows[0].latestTs).getTime()
+        : 0;
+      const curStatusLower = String(lead.status || "").toLowerCase();
+      const preserveNewerLeadState =
+        Boolean(historicalSync) &&
+        latestOtherTs > 0 &&
+        finalTimestamp.getTime() < latestOtherTs &&
+        curStatusLower !== "new" &&
+        curStatusLower !== "uncontacted";
+
       // Synchronize lead status, explicit interested flag, and exact rnr_count from call_logs
-      const shouldClearInterested = ["rnr", "not_interested", "invalid", "already_using", "lost"].includes(newStatus);
-      await client.query(
-        `UPDATE leads
-         SET status = $1::varchar,
-             is_interested = CASE
-               WHEN $3::boolean THEN true
-               WHEN $4::boolean THEN false
-               ELSE COALESCE(is_interested, false)
-             END,
-             rnr_count = (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $2::uuid AND tenant_id = $5::uuid AND disposition = 'RNR'),
-             updated_at = NOW()
-         WHERE id = $2::uuid AND tenant_id = $5::uuid`,
-        [newStatus, id, isExplicitInterested, shouldClearInterested, tenantId]
-      );
+      if (preserveNewerLeadState) {
+        await client.query(
+          `UPDATE leads
+           SET rnr_count = (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $1::uuid AND tenant_id = $2::uuid AND disposition = 'RNR'),
+               updated_at = NOW()
+           WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+          [id, tenantId]
+        );
+      } else {
+        const shouldClearInterested = ["rnr", "not_interested", "invalid", "already_using", "lost"].includes(newStatus);
+        await client.query(
+          `UPDATE leads
+           SET status = $1::varchar,
+               is_interested = CASE
+                 WHEN $3::boolean THEN true
+                 WHEN $4::boolean THEN false
+                 ELSE COALESCE(is_interested, false)
+               END,
+               rnr_count = (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $2::uuid AND tenant_id = $5::uuid AND disposition = 'RNR'),
+               updated_at = NOW()
+           WHERE id = $2::uuid AND tenant_id = $5::uuid`,
+          [newStatus, id, isExplicitInterested, shouldClearInterested, tenantId]
+        );
+      }
 
       // Create scheduled task if needed
       // task_source = 'dialer' so Agenda shows these (not 'pipeline' tasks from deal stage changes)
-      if (taskToCreate) {
+      if (!preserveNewerLeadState && taskToCreate) {
         let updatedExistingTask = false;
         if (taskToCreate.taskType === "callback") {
           const existingCb = await client.query(
@@ -445,7 +474,7 @@ export async function PATCH(
       }
 
       // Complete pending product_demo tasks if demo done
-      if (newStatus === "demo_done") {
+      if (!preserveNewerLeadState && newStatus === "demo_done") {
         await client.query(
           "UPDATE scheduled_tasks SET status = 'completed', updated_at = NOW() WHERE lead_id = $1 AND tenant_id = $2 AND task_type = 'product_demo' AND status = 'pending'",
           [id, tenantId]
@@ -454,7 +483,7 @@ export async function PATCH(
 
       // If a pending product_demo was called via Dialer/APK and disposed as RNR or Callback,
       // mark the demo task as 'rescheduled' (never 'completed') so Agenda & Demo Done reports stay accurate.
-      if (hasPendingDemo && (disposition === "RNR" || disposition === "Callback" || disposition === "Future Requirement")) {
+      if (!preserveNewerLeadState && hasPendingDemo && (disposition === "RNR" || disposition === "Callback" || disposition === "Future Requirement")) {
         const rescheduleTag = remark ? `[${disposition}: ${remark}]` : `[${disposition} — Moved to Callback]`;
         await client.query(
           `UPDATE scheduled_tasks
@@ -468,6 +497,7 @@ export async function PATCH(
 
       // Cancel pending product_demo (never mark completed) on disqualified outcomes
       if (
+        !preserveNewerLeadState &&
         hasPendingDemo &&
         (disposition === "Not Interested" ||
           disposition === "Invalid" ||
@@ -487,7 +517,7 @@ export async function PATCH(
       }
 
       // Auto-resolve pending callback tasks on decisive outcomes, and clear overdue callbacks when attempted (e.g. RNR)
-      if (!isManualNote) {
+      if (!preserveNewerLeadState && !isManualNote) {
         const shouldAutoCompletePending =
           disposition === "Not Interested" ||
           disposition === "Invalid" ||
@@ -537,10 +567,11 @@ export async function PATCH(
 
       // Sync Deal Pipeline for pipeline stages
       if (
-        newStatus === "demo_scheduled" ||
-        newStatus === "demo_done" ||
-        newStatus === "won" ||
-        newStatus === "lost"
+        !preserveNewerLeadState &&
+        (newStatus === "demo_scheduled" ||
+          newStatus === "demo_done" ||
+          newStatus === "won" ||
+          newStatus === "lost")
       ) {
         const stageMap: Record<string, string> = {
           demo_scheduled: "demo_scheduled",

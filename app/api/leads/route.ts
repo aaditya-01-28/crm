@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { can, isSalesRep, isAdmin, normalizeRole } from "@/lib/rbac";
-import { getSession } from "@/lib/auth";
+import { can, isSalesRep, isAdmin } from "@/lib/rbac";
+import { requireActiveSession } from "@/lib/auth";
+import {
+  escapeLikePattern,
+  filterValidUuids,
+  isValidUuid,
+  sanitizeExternalUrl,
+} from "@/lib/security";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -26,15 +32,14 @@ export async function GET(request: NextRequest) {
   const queue = searchParams.get("queue") === "true";
   const allIds = searchParams.get("allIds") === "true";
 
+  if (filterRepId && filterRepId !== "all" && filterRepId !== "unassigned" && !isValidUuid(filterRepId)) {
+    return NextResponse.json({ error: "Invalid repId" }, { status: 400 });
+  }
+
   try {
     return await withClient(async (client) => {
-      await client.query("ALTER TABLE leads ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ;").catch(() => {});
-
       // 1. Queue mode for Dialer Console
       if (queue) {
-        // Fix: use stable ordering — new leads first (by assignment time), then RNR retries.
-        // Ordering by rnr_count ASC was causing leads to shuffle after each RNR disposition.
-        // Now: status='new' leads are served first in insertion order, THEN rnr leads (oldest first).
         const queueRes = await client.query(
           `SELECT l.id, l.tenant_id as "tenantId", l.assigned_rep_id as "assignedRepId",
                   COALESCE(l.assigned_at, l.first_assigned_at, (CASE WHEN l.assigned_rep_id IS NOT NULL THEN l.created_at ELSE NULL END)) as "assignedAt",
@@ -42,13 +47,13 @@ export async function GET(request: NextRequest) {
                   l.company_name as "companyName", l.website_url as "websiteUrl",
                   l.business_vertical as "businessVertical", l.service_type as "serviceType",
                   l.source, l.status,
-                  COALESCE((SELECT COUNT(*)::int FROM call_logs WHERE lead_id = l.id AND disposition = 'RNR'), l.rnr_count, 0) as "rnrCount",
+                  COALESCE((SELECT COUNT(*)::int FROM call_logs WHERE lead_id = l.id AND tenant_id = l.tenant_id AND disposition = 'RNR'), l.rnr_count, 0) as "rnrCount",
                   l.custom_metadata as "customMetadata",
                   l.created_at as "createdAt", l.updated_at as "updatedAt",
                   u.full_name as "assignedRepFullName",
-                  (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = l.id AND rep_id = $2) as "callLogsCount"
+                  (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = l.id AND tenant_id = l.tenant_id AND rep_id = $2) as "callLogsCount"
            FROM leads l
-           LEFT JOIN users u ON l.assigned_rep_id = u.id
+           LEFT JOIN users u ON l.assigned_rep_id = u.id AND u.tenant_id = l.tenant_id
            WHERE l.tenant_id = $1 AND l.assigned_rep_id = $2
              AND (l.status = 'new' OR (l.status = 'rnr' AND l.rnr_count < 3))
            ORDER BY
@@ -117,14 +122,18 @@ export async function GET(request: NextRequest) {
           conditions.push(`(l.status = 'interested' OR l.is_interested = true)`);
         } else if (status === "demo_done") {
           conditions.push(DEMO_DONE_LEAD_SQL);
+        } else if (status === "new") {
+          conditions.push(`(l.status IN ('new', 'uncontacted') AND ${RNR_COUNT_EXPR} = 0)`);
+        } else if (status === "rnr") {
+          conditions.push(`(l.status = 'rnr' OR (l.status IN ('new', 'uncontacted') AND ${RNR_COUNT_EXPR} > 0))`);
         } else if (status === "rnr_1") {
-          conditions.push(`(l.status = 'rnr' AND ${RNR_COUNT_EXPR} = 1)`);
+          conditions.push(`((l.status = 'rnr' OR (l.status IN ('new', 'uncontacted') AND ${RNR_COUNT_EXPR} > 0)) AND ${RNR_COUNT_EXPR} = 1)`);
         } else if (status === "rnr_2") {
-          conditions.push(`(l.status = 'rnr' AND ${RNR_COUNT_EXPR} = 2)`);
+          conditions.push(`((l.status = 'rnr' OR (l.status IN ('new', 'uncontacted') AND ${RNR_COUNT_EXPR} > 0)) AND ${RNR_COUNT_EXPR} = 2)`);
         } else if (status === "rnr_3") {
-          conditions.push(`(l.status = 'rnr' AND ${RNR_COUNT_EXPR} = 3)`);
+          conditions.push(`((l.status = 'rnr' OR (l.status IN ('new', 'uncontacted') AND ${RNR_COUNT_EXPR} > 0)) AND ${RNR_COUNT_EXPR} = 3)`);
         } else if (status === "rnr_4") {
-          conditions.push(`(l.status = 'rnr' AND ${RNR_COUNT_EXPR} >= 4)`);
+          conditions.push(`((l.status = 'rnr' OR (l.status IN ('new', 'uncontacted') AND ${RNR_COUNT_EXPR} > 0)) AND ${RNR_COUNT_EXPR} >= 4)`);
         } else {
           conditions.push(`l.status = $${params.push(status)}`);
         }
@@ -135,7 +144,7 @@ export async function GET(request: NextRequest) {
       }
 
       if (search) {
-        const searchPattern = `%${search}%`;
+        const searchPattern = `%${escapeLikePattern(search)}%`;
         const pIdx = params.push(searchPattern);
         conditions.push(
           `(l.company_name ILIKE $${pIdx} OR l.contact_name ILIKE $${pIdx} OR l.phone_number ILIKE $${pIdx} OR COALESCE(l.custom_metadata->>'secondaryPhone', '') ILIKE $${pIdx} OR l.business_vertical ILIKE $${pIdx} OR l.service_type ILIKE $${pIdx})`
@@ -195,16 +204,16 @@ export async function GET(request: NextRequest) {
                    'rep', json_build_object('fullName', ru.full_name)
                  )
                  FROM call_logs cl
-                 LEFT JOIN users ru ON cl.rep_id = ru.id
-                 WHERE cl.lead_id = l.id ${isSalesRep(role) ? "AND cl.rep_id = $2" : ""}
+                 LEFT JOIN users ru ON cl.rep_id = ru.id AND ru.tenant_id = l.tenant_id
+                 WHERE cl.lead_id = l.id AND cl.tenant_id = l.tenant_id ${isSalesRep(role) ? "AND cl.rep_id = $2" : ""}
                  ORDER BY cl.call_timestamp DESC LIMIT 1
                 ) as "latestCallLog",
-                (SELECT COUNT(*)::int FROM call_logs cl WHERE cl.lead_id = l.id ${isSalesRep(role) ? "AND cl.rep_id = $2" : ""}) as "callLogsCount",
-                (SELECT COUNT(*)::int FROM scheduled_tasks st WHERE st.lead_id = l.id ${isSalesRep(role) ? "AND st.rep_id = $2" : ""}) as "tasksCount",
-                (SELECT COUNT(*)::int FROM deals d WHERE d.lead_id = l.id ${isSalesRep(role) ? "AND d.rep_id = $2" : ""}) as "dealsCount"
+                (SELECT COUNT(*)::int FROM call_logs cl WHERE cl.lead_id = l.id AND cl.tenant_id = l.tenant_id ${isSalesRep(role) ? "AND cl.rep_id = $2" : ""}) as "callLogsCount",
+                (SELECT COUNT(*)::int FROM scheduled_tasks st WHERE st.lead_id = l.id AND st.tenant_id = l.tenant_id ${isSalesRep(role) ? "AND st.rep_id = $2" : ""}) as "tasksCount",
+                (SELECT COUNT(*)::int FROM deals d WHERE d.lead_id = l.id AND d.tenant_id = l.tenant_id ${isSalesRep(role) ? "AND d.rep_id = $2" : ""}) as "dealsCount"
          FROM leads l
-         LEFT JOIN users ar ON l.assigned_rep_id = ar.id
-         LEFT JOIN users far ON l.first_assigned_rep_id = far.id
+         LEFT JOIN users ar ON l.assigned_rep_id = ar.id AND ar.tenant_id = l.tenant_id
+         LEFT JOIN users far ON l.first_assigned_rep_id = far.id AND far.tenant_id = l.tenant_id
          WHERE ${whereClause}
          ORDER BY ${orderByClause}
          LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
@@ -257,7 +266,15 @@ export async function GET(request: NextRequest) {
            COUNT(*) FILTER (WHERE ${RNR_COUNT_EXPR} = 3)::int as rnr_3,
            COUNT(*) FILTER (WHERE ${RNR_COUNT_EXPR} >= 4)::int as rnr_4
          FROM leads l
-         WHERE ${statusWhereClause} AND l.status = 'rnr'`,
+         WHERE ${statusWhereClause} AND (l.status = 'rnr' OR (l.status IN ('new', 'uncontacted') AND ${RNR_COUNT_EXPR} > 0))`,
+        statusBaseParams
+      );
+      const effectiveNewRnrRes = await client.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE l.status IN ('new', 'uncontacted') AND ${RNR_COUNT_EXPR} = 0)::int as pure_new,
+           COUNT(*) FILTER (WHERE l.status = 'rnr' OR (l.status IN ('new', 'uncontacted') AND ${RNR_COUNT_EXPR} > 0))::int as effective_rnr
+         FROM leads l
+         WHERE ${statusWhereClause}`,
         statusBaseParams
       );
 
@@ -302,9 +319,16 @@ export async function GET(request: NextRequest) {
         stats[s.status] = s.count;
         stats.all += s.count;
       });
+      stats.new = effectiveNewRnrRes.rows[0]?.pure_new ?? stats.new;
+      stats.rnr = effectiveNewRnrRes.rows[0]?.effective_rnr ?? stats.rnr;
       stats.demo_done = demoDoneLeadsRes.rows[0]?.count || 0;
 
-      const mappedLeads = leadsRes.rows.map((l) => ({
+      const mappedLeads = leadsRes.rows.map((l) => {
+        const effectiveStatus =
+          (l.status === "new" || l.status === "uncontacted") && Number(l.rnrCount || 0) > 0
+            ? "rnr"
+            : l.status;
+        return {
         id: l.id,
         tenantId: l.tenantId,
         assignedRepId: l.assignedRepId,
@@ -318,7 +342,7 @@ export async function GET(request: NextRequest) {
         businessVertical: l.businessVertical,
         serviceType: l.serviceType,
         source: l.source,
-        status: l.status,
+        status: effectiveStatus,
         rnrCount: l.rnrCount,
         isDemoDone: Boolean(l.isDemoDone),
         customMetadata: l.customMetadata,
@@ -335,7 +359,8 @@ export async function GET(request: NextRequest) {
         },
         preferredLanguage:
           ((l.customMetadata as Record<string, unknown>)?.preferredLanguage as string) || null,
-      }));
+        };
+      });
 
       return NextResponse.json(
         {
@@ -362,7 +387,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -391,18 +416,38 @@ export async function POST(request: NextRequest) {
       preferredLanguage,
     } = body;
 
-    if (!phoneNumber) {
+    if (!phoneNumber || typeof phoneNumber !== "string" || !phoneNumber.trim()) {
       return NextResponse.json(
         { error: "Phone number is required" },
         { status: 400 }
       );
     }
 
+    let safeWebsiteUrl: string | null = null;
+    if (typeof websiteUrl === "string" && websiteUrl.trim()) {
+      const trimmedSite = websiteUrl.trim();
+      const candidate = /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmedSite)
+        ? trimmedSite
+        : `https://${trimmedSite}`;
+      const validated = sanitizeExternalUrl(candidate);
+      if (!validated) {
+        return NextResponse.json(
+          { error: "Invalid website URL" },
+          { status: 400 }
+        );
+      }
+      safeWebsiteUrl = validated;
+    }
+
     const initialRep = can(role, "leads:assign")
       ? assignedRepId && assignedRepId !== "unassigned"
-        ? assignedRepId
+        ? String(assignedRepId).trim()
         : null
       : repId;
+
+    if (initialRep && !isValidUuid(initialRep)) {
+      return NextResponse.json({ error: "Invalid assignedRepId" }, { status: 400 });
+    }
 
     const metadata = {
       ...(preferredLanguage ? { preferredLanguage } : {}),
@@ -410,6 +455,19 @@ export async function POST(request: NextRequest) {
     };
 
     return await withClient(async (client) => {
+      if (initialRep) {
+        const repCheck = await client.query(
+          `SELECT id FROM users WHERE id = $1 AND tenant_id = $2 AND is_active = true LIMIT 1`,
+          [initialRep, tenantId]
+        );
+        if (repCheck.rows.length === 0) {
+          return NextResponse.json(
+            { error: "Selected representative not found or inactive in workspace." },
+            { status: 400 }
+          );
+        }
+      }
+
       const insertRes = await client.query(
         `INSERT INTO leads (
            tenant_id, assigned_rep_id, first_assigned_rep_id, first_assigned_at,
@@ -430,10 +488,10 @@ export async function POST(request: NextRequest) {
           initialRep || null,
           initialRep || null,
           initialRep ? new Date() : null,
-          phoneNumber,
+          phoneNumber.trim(),
           contactName || null,
           companyName || null,
-          websiteUrl || null,
+          safeWebsiteUrl,
           businessVertical || null,
           serviceType || null,
           source || "Manual Entry",
@@ -460,7 +518,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -477,32 +535,51 @@ export async function DELETE(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { leadIds } = body;
+    const validLeadIds = filterValidUuids(body?.leadIds);
 
-    if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+    if (validLeadIds.length === 0) {
       return NextResponse.json(
-        { error: "No lead IDs provided for deletion" },
+        { error: "No valid lead IDs provided for deletion" },
         { status: 400 }
       );
     }
 
     return await withClient(async (client) => {
       await client.query("BEGIN");
-      await client.query("DELETE FROM call_logs WHERE lead_id = ANY($1::uuid[])", [leadIds]);
-      await client.query("DELETE FROM scheduled_tasks WHERE lead_id = ANY($1::uuid[])", [leadIds]);
-      await client.query("DELETE FROM payments WHERE lead_id = ANY($1::uuid[])", [leadIds]);
-      await client.query("DELETE FROM deals WHERE lead_id = ANY($1::uuid[])", [leadIds]);
-      const res = await client.query(
-        "DELETE FROM leads WHERE id = ANY($1::uuid[]) AND tenant_id = $2 RETURNING id",
-        [leadIds, tenantId]
-      );
-      await client.query("COMMIT");
+      try {
+        // Verify ownership within this tenant BEFORE touching any child tables
+        const ownedRes = await client.query(
+          "SELECT id FROM leads WHERE id = ANY($1::uuid[]) AND tenant_id = $2",
+          [validLeadIds, tenantId]
+        );
+        const ownedIds = ownedRes.rows.map((r: any) => r.id);
 
-      return NextResponse.json({
-        success: true,
-        count: res.rowCount || 0,
-        message: `Permanently deleted ${res.rowCount || 0} leads.`,
-      });
+        if (ownedIds.length === 0) {
+          await client.query("ROLLBACK");
+          return NextResponse.json({ error: "No matching leads found" }, { status: 404 });
+        }
+
+        await client.query("DELETE FROM call_logs WHERE lead_id = ANY($1::uuid[]) AND tenant_id = $2", [ownedIds, tenantId]);
+        await client.query("DELETE FROM scheduled_tasks WHERE lead_id = ANY($1::uuid[]) AND tenant_id = $2", [ownedIds, tenantId]);
+        await client.query("DELETE FROM payments WHERE lead_id = ANY($1::uuid[]) AND tenant_id = $2", [ownedIds, tenantId]);
+        await client.query("DELETE FROM deals WHERE lead_id = ANY($1::uuid[]) AND tenant_id = $2", [ownedIds, tenantId]);
+        await client.query("DELETE FROM lead_stage_history WHERE lead_id = ANY($1::uuid[]) AND tenant_id = $2", [ownedIds, tenantId]).catch(() => {});
+        await client.query("DELETE FROM push_to_dial_jobs WHERE lead_id = ANY($1::uuid[]) AND tenant_id = $2", [ownedIds, tenantId]).catch(() => {});
+        const res = await client.query(
+          "DELETE FROM leads WHERE id = ANY($1::uuid[]) AND tenant_id = $2 RETURNING id",
+          [ownedIds, tenantId]
+        );
+        await client.query("COMMIT");
+
+        return NextResponse.json({
+          success: true,
+          count: res.rowCount || 0,
+          message: `Permanently deleted ${res.rowCount || 0} leads.`,
+        });
+      } catch (txErr) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw txErr;
+      }
     });
   } catch (error) {
     console.error("[LEADS_BULK_DELETE]", error);

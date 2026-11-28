@@ -39,6 +39,7 @@ import { MultiServiceSelect } from "@/components/common/MultiServiceSelect";
 import { LeadDetailModal } from "@/components/leads/LeadDetailModal";
 import { CSVImporter } from "@/components/dialer/CSVImporter";
 import { toast } from "sonner";
+import { buildCsvRow } from "@/lib/url-safety";
 import { useCanImportLeads, useCanAssignLeads, useIsAdmin, useSession } from "@/components/layout/SessionProvider";
 
 interface LastCallLog {
@@ -520,24 +521,27 @@ export default function LeadsDirectoryPage() {
       "Assigned Rep",
     ];
 
-    const rows = leads.map((l) => {
-      const lastLog = l.callLogs?.[0];
-      return [
-        `"${l.companyName || ""}"`,
-        `"${l.contactName || ""}"`,
-        `"${l.phoneNumber}"`,
-        `"${l.businessVertical || ""}"`,
-        `"${l.serviceType || ""}"`,
-        `"${l.status}"`,
-        l._count.callLogs,
-        `"${lastLog?.disposition || "None"}"`,
-        `"${lastLog ? formatDateTime(lastLog.callTimestamp) : "Never"}"`,
-        `"${(lastLog?.remark || "").replace(/"/g, '""')}"`,
-        `"${l.assignedRep?.fullName || "Unassigned"}"`,
-      ];
-    });
+    const csvLines = [
+      buildCsvRow(headers),
+      ...leads.map((l) => {
+        const lastLog = l.callLogs?.[0];
+        return buildCsvRow([
+          l.companyName || "",
+          l.contactName || "",
+          l.phoneNumber,
+          l.businessVertical || "",
+          l.serviceType || "",
+          l.status,
+          l._count.callLogs,
+          lastLog?.disposition || "None",
+          lastLog ? formatDateTime(lastLog.callTimestamp) : "Never",
+          lastLog?.remark || "",
+          l.assignedRep?.fullName || "Unassigned",
+        ]);
+      }),
+    ];
 
-    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const csvContent = csvLines.join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -546,6 +550,7 @@ export default function LeadsDirectoryPage() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   }
 
   return (

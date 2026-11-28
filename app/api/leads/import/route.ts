@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { can } from "@/lib/rbac";
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
+import { isValidUuid } from "@/lib/security";
 
 interface ImportedLead {
   phone: string | number;
@@ -17,7 +18,6 @@ interface ImportedLead {
   leadDate?: string;
   closeDate?: string;
   userId?: string;
-  password?: string;
   credits?: number;
   amount?: number;
   stage?: string;
@@ -135,7 +135,7 @@ function mapStageToDb(
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.role) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -238,6 +238,9 @@ export async function POST(request: NextRequest) {
 
       let defaultTargetRep: string | null = null;
       if (assignmentMode === "specific" && assignToRepId && assignToRepId !== "unassigned") {
+        if (!isValidUuid(assignToRepId)) {
+          return NextResponse.json({ error: "Invalid assignToRepId" }, { status: 400 });
+        }
         const userRes = await client.query(
           "SELECT id FROM users WHERE id = $1 AND tenant_id = $2 AND is_active = true",
           [assignToRepId, tenantId]
@@ -332,7 +335,6 @@ export async function POST(request: NextRequest) {
             const extraMeta: Record<string, any> = {};
             if (l.email?.trim()) extraMeta.email = l.email.trim();
             if (l.userId?.trim()) extraMeta.panelUserId = l.userId.trim();
-            if (l.password?.trim()) extraMeta.panelPassword = l.password.trim();
             if (l.secondaryPhone?.trim()) extraMeta.secondaryPhone = l.secondaryPhone.trim();
 
             let leadId: string;
@@ -464,7 +466,6 @@ export async function POST(request: NextRequest) {
 
               const closingNotes = JSON.stringify({
                 userId: l.userId?.trim() || null,
-                password: l.password?.trim() || null,
                 mailId: l.email?.trim() || null,
                 closeDate: l.closeDate?.trim() || null,
                 leadDate: l.leadDate?.trim() || null,
@@ -552,7 +553,7 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error("[IMPORT]", error);
     return NextResponse.json(
-      { error: `Import failed: ${error?.message || "Unknown server error"}` },
+      { error: "Failed to import leads" },
       { status: 500 }
     );
   }

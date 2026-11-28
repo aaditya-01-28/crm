@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { can } from "@/lib/rbac";
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.role) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

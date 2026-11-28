@@ -40,6 +40,7 @@ import {
 import { useSession } from "@/components/layout/SessionProvider";
 import { LeadDetailModal } from "@/components/leads/LeadDetailModal";
 import { AudioRecordingPlayer } from "@/components/calls/AudioRecordingPlayer";
+import { buildCsvRow } from "@/lib/url-safety";
 import { toast } from "sonner";
 
 interface CallLogItem {
@@ -334,25 +335,31 @@ export default function CallLogsPage() {
       "Remarks",
     ];
 
-    const rows = calls.map((c) => [
-      `"${c.callTimestamp}"`,
-      `"${c.lead.phoneNumber}"`,
-      `"${c.lead.contactName || ""}"`,
-      `"${c.lead.companyName || ""}"`,
-      `"${c.rep.fullName}"`,
-      `"${c.disposition}"`,
-      c.durationSeconds,
-      `"${formatDuration(c.durationSeconds)}"`,
-      `"${(c.remark || "").replace(/"/g, '""')}"`,
-    ]);
+    const csvLines = [
+      buildCsvRow(headers),
+      ...calls.map((c) =>
+        buildCsvRow([
+          c.callTimestamp,
+          c.lead.phoneNumber,
+          c.lead.contactName || "",
+          c.lead.companyName || "",
+          c.rep.fullName,
+          c.disposition,
+          c.durationSeconds,
+          formatDuration(c.durationSeconds),
+          c.remark || "",
+        ])
+      ),
+    ];
 
-    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const csvContent = csvLines.join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
     link.download = `call-logs-${new Date().toISOString().split("T")[0]}.csv`;
     link.click();
+    URL.revokeObjectURL(url);
     toast.success("Call logs exported to CSV ✅");
   }
 

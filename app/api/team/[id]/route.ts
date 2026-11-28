@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
+import { isManagerOrAdmin, isSalesManager } from "@/lib/rbac";
+import { getTrustedAppBaseUrl, isValidUuid, validateStrongPassword } from "@/lib/security";
 import { sendTemporaryPasswordEmail } from "@/lib/mail";
 import bcrypt from "bcryptjs";
 
@@ -9,9 +11,12 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!isValidUuid(id)) {
+    return NextResponse.json({ error: "Invalid user ID" }, { status: 400 });
   }
 
   const tenantId = session.tenantId;
@@ -19,7 +24,7 @@ export async function PATCH(
   const currentUserId = session.sub;
 
   // Level 3 Super Admin can manage all user fields; Level 2 Sales Manager can update dailyCallTarget
-  if (!["super_admin", "sales_manager"].includes(role)) {
+  if (!isManagerOrAdmin(role)) {
     return NextResponse.json(
       { error: "Forbidden: Only Level 2 Sales Managers and Level 3 Super Admins can manage team targets." },
       { status: 403 }
@@ -30,7 +35,7 @@ export async function PATCH(
     const body = await request.json();
     const { fullName, email, phoneNumber, isActive, role: newRole, newPassword, dailyCallTarget } = body;
 
-    if (role === "sales_manager") {
+    if (isSalesManager(role)) {
       const hasRestrictedFields =
         fullName !== undefined ||
         email !== undefined ||
@@ -63,11 +68,9 @@ export async function PATCH(
     }
 
     if (newPassword !== undefined && newPassword !== "") {
-      if (typeof newPassword !== "string" || newPassword.length < 6) {
-        return NextResponse.json(
-          { error: "New password must be at least 6 characters in length." },
-          { status: 400 }
-        );
+      const pwCheck = validateStrongPassword(newPassword);
+      if (!pwCheck.valid) {
+        return NextResponse.json({ error: pwCheck.error }, { status: 400 });
       }
     }
 
@@ -155,8 +158,10 @@ export async function PATCH(
         passwordHash = await bcrypt.hash(newPassword, 12);
       }
 
-      await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false;").catch(() => {});
-      await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_call_target INTEGER DEFAULT 60;").catch(() => {});
+      const shouldRevokeSessions =
+        !targetIsActive ||
+        targetRole !== existing.role ||
+        Boolean(passwordHash);
 
       const updateRes = await client.query(
         `UPDATE users
@@ -169,12 +174,13 @@ export async function PATCH(
              password_hash = COALESCE($7, password_hash),
              must_change_password = CASE WHEN $7 IS NOT NULL THEN true ELSE must_change_password END,
              reset_token = NULL,
-             reset_token_expiry = NULL
+             reset_token_expiry = NULL,
+             token_version = CASE WHEN $10::boolean THEN COALESCE(token_version, 1) + 1 ELSE COALESCE(token_version, 1) END
          WHERE id = $8 AND tenant_id = $9
          RETURNING id, full_name as "fullName", email, phone_number as "phoneNumber",
                    role, language, COALESCE(daily_call_target, 60)::int as "dailyCallTarget",
                    is_active as "isActive", created_at as "createdAt"`,
-        [targetIsActive, targetRole, targetFullName, targetEmail, targetPhone, targetDailyCallTarget, passwordHash, id, tenantId]
+        [targetIsActive, targetRole, targetFullName, targetEmail, targetPhone, targetDailyCallTarget, passwordHash, id, tenantId, shouldRevokeSessions]
       );
 
       const updatedUser = updateRes.rows[0];
@@ -189,11 +195,7 @@ export async function PATCH(
           [currentUserId, id, tenantId]
         );
 
-        const origin =
-          request.headers.get("origin") ||
-          process.env.NEXT_PUBLIC_APP_URL ||
-          "https://crm.textorasms.com";
-        const loginUrl = `${origin}/login`;
+        const loginUrl = `${getTrustedAppBaseUrl()}/login`;
 
         try {
           const mailResult = await sendTemporaryPasswordEmail({

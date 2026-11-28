@@ -12,6 +12,7 @@ export async function GET() {
       releaseNotes: APP_RELEASE_NOTES,
       isMandatory: false,
       minSupportedBuild: 1,
+      sha256: process.env.APK_SHA256?.trim() || null,
       releasedAt: APP_RELEASE_DATE
     },
     {

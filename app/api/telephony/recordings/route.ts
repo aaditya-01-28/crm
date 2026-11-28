@@ -1,18 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
+import { isSalesRep } from "@/lib/rbac";
+import { isValidUuid } from "@/lib/security";
 import { minioClient, BUCKET_NAME, ensureBucket, getPublicUrl } from "@/lib/minio";
 import { v4 as uuidv4 } from "uuid";
-import fs from "fs";
-import path from "path";
+
+const MAX_AUDIO_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB
 
 export async function POST(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const tenantId = session.tenantId;
   const repId = session.sub;
+  const role = session.role;
 
   try {
     const formData = await request.formData();
@@ -23,6 +26,19 @@ export async function POST(request: NextRequest) {
     if (!file) {
       return NextResponse.json({ error: "No audio file provided" }, { status: 400 });
     }
+    if (file.size <= 0 || file.size > MAX_AUDIO_SIZE_BYTES) {
+      return NextResponse.json(
+        { error: "Audio file must be non-empty and under 15 MB." },
+        { status: 413 }
+      );
+    }
+
+    if (callLogId && !isValidUuid(callLogId)) {
+      return NextResponse.json({ error: "Invalid callLogId" }, { status: 400 });
+    }
+    if (leadId && !isValidUuid(leadId)) {
+      return NextResponse.json({ error: "Invalid leadId" }, { status: 400 });
+    }
 
     const rawExt = (file.name || "recording.m4a").split(".").pop()?.toLowerCase() || "m4a";
     const ext = rawExt.replace(/[^a-z0-9]/g, "");
@@ -32,12 +48,27 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    if (buffer.length > MAX_AUDIO_SIZE_BYTES) {
+      return NextResponse.json({ error: "Audio payload exceeds 15 MB limit." }, { status: 413 });
+    }
+
+    if (callLogId) {
+      const ownsCall = await withClient(async (client) => {
+        const check = await client.query(
+          `SELECT id FROM call_logs WHERE id = $1 AND tenant_id = $2 ${isSalesRep(role) ? "AND rep_id = $3" : ""} LIMIT 1`,
+          isSalesRep(role) ? [callLogId, tenantId, repId] : [callLogId, tenantId]
+        );
+        return check.rows.length > 0;
+      });
+      if (!ownsCall) {
+        return NextResponse.json({ error: "Call log not found or forbidden" }, { status: 403 });
+      }
+    }
+
     const fileName = `${uuidv4()}.${ext}`;
     const objectName = `${tenantId}/recordings/${fileName}`;
 
     let recordingUrl = "";
-
-    // 1. Try MinIO Object Storage first
     try {
       await ensureBucket();
       await minioClient.putObject(
@@ -49,24 +80,18 @@ export async function POST(request: NextRequest) {
       );
       recordingUrl = getPublicUrl(objectName);
     } catch (minioErr) {
-      // 2. Fallback to local static public storage if MinIO is not running
-      console.warn("[RECORDING_UPLOAD] MinIO unavailable, falling back to local storage:", minioErr);
-      const publicDir = path.join(process.cwd(), "public", "recordings");
-      if (!fs.existsSync(publicDir)) {
-        fs.mkdirSync(publicDir, { recursive: true });
-      }
-      const localFilePath = path.join(publicDir, fileName);
-      fs.writeFileSync(localFilePath, buffer);
-      recordingUrl = `/recordings/${fileName}`;
+      console.error("[RECORDING_UPLOAD] Object storage error:", minioErr);
+      return NextResponse.json(
+        { error: "Audio storage service unavailable. Please retry shortly." },
+        { status: 503 }
+      );
     }
 
-    // 3. If callLogId is provided, attach directly to call_logs
     if (callLogId) {
       await withClient(async (client) => {
-        await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
         await client.query(
-          "UPDATE call_logs SET recording_url = $1 WHERE id = $2 AND tenant_id = $3",
-          [recordingUrl, callLogId, tenantId]
+          `UPDATE call_logs SET recording_url = $1 WHERE id = $2 AND tenant_id = $3 ${isSalesRep(role) ? "AND rep_id = $4" : ""}`,
+          isSalesRep(role) ? [recordingUrl, callLogId, tenantId, repId] : [recordingUrl, callLogId, tenantId]
         );
       });
     }
@@ -88,28 +113,36 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const tenantId = session.tenantId;
+  const repId = session.sub;
+  const role = session.role;
+  const isRep = isSalesRep(role);
   const { searchParams } = new URL(request.url);
 
   const callLogId = searchParams.get("callLogId");
   const leadId = searchParams.get("leadId");
 
+  if (callLogId && !isValidUuid(callLogId)) {
+    return NextResponse.json({ error: "Invalid callLogId" }, { status: 400 });
+  }
+  if (leadId && !isValidUuid(leadId)) {
+    return NextResponse.json({ error: "Invalid leadId" }, { status: 400 });
+  }
+
   try {
     return await withClient(async (client) => {
-      await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
-
       if (callLogId) {
         const res = await client.query(
           `SELECT id, recording_url as "recordingUrl", duration_seconds as "durationSeconds",
                   call_timestamp as "callTimestamp", disposition
            FROM call_logs
-           WHERE id = $1 AND tenant_id = $2
+           WHERE id = $1 AND tenant_id = $2 ${isRep ? "AND rep_id = $3" : ""}
            LIMIT 1`,
-          [callLogId, tenantId]
+          isRep ? [callLogId, tenantId, repId] : [callLogId, tenantId]
         );
         return NextResponse.json({ recording: res.rows[0] || null });
       }
@@ -119,9 +152,9 @@ export async function GET(request: NextRequest) {
           `SELECT id, recording_url as "recordingUrl", duration_seconds as "durationSeconds",
                   call_timestamp as "callTimestamp", disposition
            FROM call_logs
-           WHERE lead_id = $1 AND tenant_id = $2 AND recording_url IS NOT NULL
+           WHERE lead_id = $1 AND tenant_id = $2 AND recording_url IS NOT NULL ${isRep ? "AND rep_id = $3" : ""}
            ORDER BY call_timestamp DESC`,
-          [leadId, tenantId]
+          isRep ? [leadId, tenantId, repId] : [leadId, tenantId]
         );
         return NextResponse.json({ recordings: res.rows });
       }
@@ -130,10 +163,10 @@ export async function GET(request: NextRequest) {
         `SELECT id, lead_id as "leadId", recording_url as "recordingUrl", 
                 duration_seconds as "durationSeconds", call_timestamp as "callTimestamp", disposition
          FROM call_logs
-         WHERE tenant_id = $1 AND recording_url IS NOT NULL
+         WHERE tenant_id = $1 AND recording_url IS NOT NULL ${isRep ? "AND rep_id = $2" : ""}
          ORDER BY call_timestamp DESC
          LIMIT 20`,
-        [tenantId]
+        isRep ? [tenantId, repId] : [tenantId]
       );
       return NextResponse.json({ recordings: res.rows });
     });

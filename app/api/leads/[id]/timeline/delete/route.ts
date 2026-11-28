@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
 import { isAdmin } from "@/lib/rbac";
+import { filterValidUuids, isValidUuid } from "@/lib/security";
 
 function mapDispositionToStatus(disposition: string | null | undefined): string {
   const d = (disposition || "").trim().toLowerCase();
@@ -24,9 +25,12 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: leadId } = await params;
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!isValidUuid(leadId)) {
+    return NextResponse.json({ error: "Invalid lead ID" }, { status: 400 });
   }
 
   // Only Level 3 Super Admin can delete lead activity logs
@@ -44,11 +48,11 @@ export async function POST(
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const callLogIds: string[] = Array.isArray(body.callLogIds) ? body.callLogIds.filter(Boolean) : [];
-  const stageHistoryIds: string[] = Array.isArray(body.stageHistoryIds) ? body.stageHistoryIds.filter(Boolean) : [];
-  const revertTaskIds: string[] = Array.isArray(body.revertTaskIds) ? body.revertTaskIds.filter(Boolean) : [];
-  const deleteTaskIds: string[] = Array.isArray(body.deleteTaskIds) ? body.deleteTaskIds.filter(Boolean) : [];
-  const dealIds: string[] = Array.isArray(body.dealIds) ? body.dealIds.filter(Boolean) : [];
+  const callLogIds = filterValidUuids(body.callLogIds);
+  const stageHistoryIds = filterValidUuids(body.stageHistoryIds);
+  const revertTaskIds = filterValidUuids(body.revertTaskIds);
+  const deleteTaskIds = filterValidUuids(body.deleteTaskIds);
+  const dealIds = filterValidUuids(body.dealIds);
   const isDemoDone = Boolean(body.isDemoDone);
 
   if (
@@ -58,12 +62,13 @@ export async function POST(
     deleteTaskIds.length === 0 &&
     dealIds.length === 0
   ) {
-    return NextResponse.json({ error: "No log IDs provided" }, { status: 400 });
+    return NextResponse.json({ error: "No valid log IDs provided" }, { status: 400 });
   }
 
   try {
     return await withClient(async (client) => {
       await client.query("BEGIN");
+      try {
 
       const leadRes = await client.query(
         `SELECT id, status FROM leads WHERE id = $1 AND tenant_id = $2`,
@@ -201,7 +206,7 @@ export async function POST(
       // Recalculate RNR count from remaining call logs
       await client.query(
         `UPDATE leads
-         SET rnr_count = COALESCE((SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $1 AND disposition = 'RNR'), 0),
+         SET rnr_count = COALESCE((SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $1 AND tenant_id = $2 AND disposition = 'RNR'), 0),
              updated_at = NOW()
          WHERE id = $1 AND tenant_id = $2`,
         [leadId, session.tenantId]
@@ -209,6 +214,10 @@ export async function POST(
 
       await client.query("COMMIT");
       return NextResponse.json({ success: true });
+      } catch (txErr) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw txErr;
+      }
     });
   } catch (error) {
     console.error("[TIMELINE LOG DELETE]", error);

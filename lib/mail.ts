@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { escapeHtml } from "@/lib/security";
 
 interface SendResetEmailParams {
   to: string;
@@ -10,12 +11,14 @@ export async function sendPasswordResetEmail({
   to,
   fullName,
   resetUrl,
-}: SendResetEmailParams): Promise<{ success: boolean; delivered: boolean; resetUrl?: string }> {
+}: SendResetEmailParams): Promise<{ success: boolean; delivered: boolean }> {
   const host = process.env.SMTP_HOST;
   const port = parseInt(process.env.SMTP_PORT || "587", 10);
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
   const from = process.env.SMTP_FROM || "noreply@textorasms.com";
+  const safeName = escapeHtml(fullName);
+  const safeUrl = escapeHtml(resetUrl);
 
   const emailHtml = `
   <!DOCTYPE html>
@@ -40,13 +43,13 @@ export async function sendPasswordResetEmail({
           Password Reset Request
         </h2>
         <p style="font-size: 14px; line-height: 1.6; color: #475569; margin: 0 0 16px;">
-          Hello <strong>${fullName}</strong>,
+          Hello <strong>${safeName}</strong>,
         </p>
         <p style="font-size: 14px; line-height: 1.6; color: #475569; margin: 0 0 24px;">
           We received a request to reset your password for your <strong>Textora Engage</strong> console account. Click the button below to choose a new secure password:
         </p>
         <div style="text-align: center; margin: 32px 0;">
-          <a href="${resetUrl}" style="display: inline-block; background-color: #059669; color: #ffffff; font-weight: 600; font-size: 14px; padding: 12px 32px; border-radius: 10px; text-decoration: none; box-shadow: 0 2px 4px rgba(5, 150, 105, 0.3);">
+          <a href="${safeUrl}" style="display: inline-block; background-color: #059669; color: #ffffff; font-weight: 600; font-size: 14px; padding: 12px 32px; border-radius: 10px; text-decoration: none; box-shadow: 0 2px 4px rgba(5, 150, 105, 0.3);">
             Reset Password
           </a>
         </div>
@@ -54,7 +57,7 @@ export async function sendPasswordResetEmail({
           Or copy and paste this link in your browser:
         </p>
         <div style="background-color: #f1f5f9; padding: 10px 14px; border-radius: 8px; word-break: break-all; font-size: 12px; color: #0284c7; font-family: monospace;">
-          ${resetUrl}
+          ${safeUrl}
         </div>
         <div style="margin-top: 28px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
           <p style="font-size: 12px; color: #94a3b8; line-height: 1.5; margin: 0;">
@@ -88,23 +91,18 @@ export async function sendPasswordResetEmail({
         text: `Hello ${fullName},\n\nReset your Textora CRM password by clicking this link:\n${resetUrl}\n\nThis link is valid for 1 hour. If you didn't request this, ignore this email.`,
       });
 
-      console.log(`[MAIL] Password reset email successfully dispatched to ${to}`);
-      return { success: true, delivered: true, resetUrl };
+      return { success: true, delivered: true };
     } catch (error) {
       console.error("[MAIL ERROR] Failed to send email via SMTP:", error);
-      // Fallback: still log the link for dev/testing
-      console.log(`[MAIL DEV FALLBACK] Password Reset URL for ${to}: ${resetUrl}`);
-      return { success: true, delivered: false, resetUrl };
+      return { success: false, delivered: false };
     }
   }
 
-  // Local development / mock mode when SMTP credentials are not yet entered
-  console.log("------------------------------------------------------------");
-  console.log(`[MAIL DEV MODE] Password Reset Requested for: ${to} (${fullName})`);
-  console.log(`[MAIL DEV MODE] Reset URL: ${resetUrl}`);
-  console.log("------------------------------------------------------------");
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`[MAIL DEV MODE] Password reset requested for: ${to}`);
+  }
 
-  return { success: true, delivered: false, resetUrl };
+  return { success: true, delivered: false };
 }
 
 interface SendResetRequestParams {
@@ -135,10 +133,10 @@ export async function sendPasswordResetRequestNotificationEmail({
       ? "Level 1 • Sales Representative"
       : requesterRole;
 
-  console.log("------------------------------------------------------------");
-  console.log(`[PASSWORD RESET REQUEST] Requester: ${requesterName} (${requesterEmail}, ${roleLabel})`);
-  console.log(`[PASSWORD RESET REQUEST] Organization Admin Notified: ${adminEmail}`);
-  console.log("------------------------------------------------------------");
+  const safeAdminName = escapeHtml(adminName);
+  const safeRequesterName = escapeHtml(requesterName);
+  const safeRequesterEmail = escapeHtml(requesterEmail);
+  const safeRoleLabel = escapeHtml(roleLabel);
 
   if (host && user && pass) {
     try {
@@ -157,13 +155,13 @@ export async function sendPasswordResetRequestNotificationEmail({
         <div style="font-family: sans-serif; padding: 20px; background: #f8fafc; color: #1e293b;">
           <div style="max-width: 500px; margin: 0 auto; background: #fff; padding: 24px; border-radius: 12px; border: 1px solid #e2e8f0;">
             <h2 style="color: #0f172a; margin-top: 0;">Password Reset Request</h2>
-            <p>Hello <strong>${adminName}</strong>,</p>
-            <p><strong>${requesterName}</strong> (${roleLabel}) has requested a password reset for their Textora CRM console account.</p>
+            <p>Hello <strong>${safeAdminName}</strong>,</p>
+            <p><strong>${safeRequesterName}</strong> (${safeRoleLabel}) has requested a password reset for their Textora CRM console account.</p>
             <p>As a Level 3 Super Admin, please sign in to your Textora console, navigate to <strong>Team Management</strong>, and set a new password for this user.</p>
             <div style="background: #f1f5f9; padding: 12px; border-radius: 8px; font-size: 13px;">
-              <div><strong>Requester:</strong> ${requesterName}</div>
-              <div><strong>Email:</strong> ${requesterEmail}</div>
-              <div><strong>Role:</strong> ${roleLabel}</div>
+              <div><strong>Requester:</strong> ${safeRequesterName}</div>
+              <div><strong>Email:</strong> ${safeRequesterEmail}</div>
+              <div><strong>Role:</strong> ${safeRoleLabel}</div>
             </div>
           </div>
         </div>
@@ -172,7 +170,7 @@ export async function sendPasswordResetRequestNotificationEmail({
       return { success: true, delivered: true };
     } catch (err) {
       console.error("[MAIL ERROR] Failed to send admin notification:", err);
-      return { success: true, delivered: false };
+      return { success: false, delivered: false };
     }
   }
 
@@ -197,6 +195,9 @@ export async function sendTemporaryPasswordEmail({
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
   const from = process.env.SMTP_FROM || "noreply@textorasms.com";
+  const safeName = escapeHtml(fullName);
+  const safeTempPw = escapeHtml(tempPassword);
+  const safeLoginUrl = escapeHtml(loginUrl);
 
   const emailHtml = `
   <!DOCTYPE html>
@@ -221,7 +222,7 @@ export async function sendTemporaryPasswordEmail({
           Temporary Login Password
         </h2>
         <p style="font-size: 14px; line-height: 1.6; color: #475569; margin: 0 0 16px;">
-          Hello <strong>${fullName}</strong>,
+          Hello <strong>${safeName}</strong>,
         </p>
         <p style="font-size: 14px; line-height: 1.6; color: #475569; margin: 0 0 20px;">
           A temporary password has been assigned for your Textora Engage CRM account. Use the temporary password below to sign in:
@@ -232,7 +233,7 @@ export async function sendTemporaryPasswordEmail({
             Your Temporary Password
           </span>
           <div style="font-size: 24px; font-weight: 800; color: #047857; letter-spacing: 2px; font-family: Monaco, Menlo, Consolas, monospace; background: #ffffff; display: inline-block; padding: 8px 24px; border-radius: 8px; border: 1px solid #a7f3d0;">
-            ${tempPassword}
+            ${safeTempPw}
           </div>
         </div>
 
@@ -241,14 +242,14 @@ export async function sendTemporaryPasswordEmail({
             Next Steps to Complete Login:
           </h4>
           <ol style="margin: 0; padding-left: 20px; font-size: 13px; color: #475569; line-height: 1.6;">
-            <li>Go to the sign-in page at <a href="${loginUrl}" style="color: #059669; font-weight: 600; text-decoration: none;">${loginUrl}</a>.</li>
+            <li>Go to the sign-in page at <a href="${safeLoginUrl}" style="color: #059669; font-weight: 600; text-decoration: none;">${safeLoginUrl}</a>.</li>
             <li>Enter your registered email and the temporary password above.</li>
             <li>You will immediately be prompted to create your new permanent password before accessing the console.</li>
           </ol>
         </div>
 
         <div style="text-align: center; margin: 28px 0 12px;">
-          <a href="${loginUrl}" style="display: inline-block; background-color: #059669; color: #ffffff; font-weight: 600; font-size: 14px; padding: 12px 36px; border-radius: 10px; text-decoration: none; box-shadow: 0 2px 4px rgba(5, 150, 105, 0.3);">
+          <a href="${safeLoginUrl}" style="display: inline-block; background-color: #059669; color: #ffffff; font-weight: 600; font-size: 14px; padding: 12px 36px; border-radius: 10px; text-decoration: none; box-shadow: 0 2px 4px rgba(5, 150, 105, 0.3);">
             Proceed to Sign In
           </a>
         </div>
@@ -284,20 +285,16 @@ export async function sendTemporaryPasswordEmail({
         text: `Hello ${fullName},\n\nYour temporary password for Textora CRM is: ${tempPassword}\n\nSign in at: ${loginUrl}\nUpon login, you will be prompted to set your new permanent password.`,
       });
 
-      console.log(`[MAIL] Temporary password email dispatched to ${to}`);
       return { success: true, delivered: true };
     } catch (error) {
       console.error("[MAIL ERROR] Failed to send temp password via SMTP:", error);
-      console.log(`[MAIL DEV FALLBACK] Temp Password for ${to}: ${tempPassword}`);
-      return { success: true, delivered: false };
+      return { success: false, delivered: false };
     }
   }
 
-  console.log("------------------------------------------------------------");
-  console.log(`[MAIL DEV MODE] Temporary Password for: ${to} (${fullName})`);
-  console.log(`[MAIL DEV MODE] Temp Password: ${tempPassword}`);
-  console.log(`[MAIL DEV MODE] Sign In URL: ${loginUrl}`);
-  console.log("------------------------------------------------------------");
+  if (process.env.NODE_ENV !== "production") {
+    console.log(`[MAIL DEV MODE] Temporary password generated for: ${to}`);
+  }
 
   return { success: true, delivered: false };
 }

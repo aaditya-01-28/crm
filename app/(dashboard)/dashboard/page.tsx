@@ -1,16 +1,17 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
+import { Loader2, AlertTriangle, RefreshCw, CreditCard, ArrowRight, CheckCircle2, Clock } from "lucide-react";
 import { useSession } from "@/components/layout/SessionProvider";
 import { isAdmin, isSalesManager, isSalesRep, isManagerOrAdmin } from "@/lib/rbac";
 import { DashboardHeader, type DashboardPeriod } from "@/components/dashboard/DashboardHeader";
 import { RepDashboardView } from "@/components/dashboard/RepDashboardView";
 import { ManagerDashboardView } from "@/components/dashboard/ManagerDashboardView";
 import { AdminDashboardView } from "@/components/dashboard/AdminDashboardView";
-import { getISTDateRange, getISTDateString } from "@/lib/utils";
+import { formatCurrency, getISTDateRange, getISTDateString } from "@/lib/utils";
 
 const getPresetDates = (preset: DashboardPeriod): { from: string; to: string } => {
   if (preset === "all") {
@@ -209,15 +210,58 @@ export default function DashboardPage() {
             />
           )}
 
-          {/* Accounts & Operations / Other Fallback */}
+          {/* Accounts & Operations Payment Verification Summary */}
           {!isAdmin(role) && !isSalesManager(role) && !isSalesRep(role) && (
-            <ManagerDashboardView
-              metrics={data.metrics}
-              period={period}
-              periodLabel={periodLabel}
-              onSelectRep={handleSelectRep}
-              selectedRepId={selectedUserId}
-            />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white rounded-2xl border border-amber-200 p-5 shadow-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-amber-700">
+                    Pending Verification
+                  </span>
+                  <Clock className="w-4 h-4 text-amber-600" />
+                </div>
+                <p className="text-2xl font-bold text-gray-900">
+                  {data.metrics?.pendingPaymentsCount ?? 0} Deals
+                </p>
+                <p className="text-xs text-gray-500">
+                  Value: {formatCurrency(data.metrics?.pendingPaymentsValue ?? 0)}
+                </p>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-emerald-200 p-5 shadow-xs space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
+                    Verified Revenue ({periodLabel})
+                  </span>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                </div>
+                <p className="text-2xl font-bold text-emerald-700">
+                  {formatCurrency(data.metrics?.verifiedRevenue ?? 0)}
+                </p>
+                <p className="text-xs text-gray-500">
+                  All-time verified: {formatCurrency(data.metrics?.allTimeVerifiedRevenue ?? 0)}
+                </p>
+              </div>
+
+              <div className="bg-slate-900 text-white rounded-2xl p-5 shadow-xs flex flex-col justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-emerald-400 text-xs font-semibold uppercase tracking-wider">
+                    <CreditCard className="w-4 h-4" />
+                    Operations Queue
+                  </div>
+                  <p className="text-sm text-slate-300">
+                    Review receipts and provision customer credits from the verification queue.
+                  </p>
+                </div>
+                <Link
+                  href="/payments"
+                  className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold py-2.5 px-4 rounded-xl transition"
+                >
+                  Open Payments Queue
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+            </div>
           )}
         </>
       )}

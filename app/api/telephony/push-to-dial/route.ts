@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
+import { isSalesRep } from "@/lib/rbac";
+import { isValidUuid } from "@/lib/security";
+
+const ALLOWED_PUSH_STATUSES = new Set(["pending", "ringing", "in_call", "completed", "cancelled"]);
 
 // Cached flag so DDL is never executed on high-frequency polling requests
 let pushTableChecked = false;
@@ -32,33 +36,51 @@ async function ensurePushTable(client: any) {
  * Initiated from Web CRM by sales representative to dial prospect on phone.
  */
 export async function POST(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const tenantId = session.tenantId;
   const repId = session.sub;
+  const role = session.role;
 
   try {
     const body = await request.json();
     const { leadId, phoneNumber, contactName, companyName } = body;
 
-    if (!phoneNumber) {
+    if (!phoneNumber || typeof phoneNumber !== "string" || !phoneNumber.trim()) {
       return NextResponse.json(
         { error: "phoneNumber is required to push dial trigger" },
         { status: 400 }
       );
     }
 
+    if (leadId !== undefined && leadId !== null && !isValidUuid(leadId)) {
+      return NextResponse.json({ error: "Invalid leadId" }, { status: 400 });
+    }
+
     return await withClient(async (client) => {
       await ensurePushTable(client);
 
-      // Cancel any older pending push jobs for this rep
+      if (leadId) {
+        const leadCheck = await client.query(
+          `SELECT id, assigned_rep_id as "assignedRepId" FROM leads WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          [leadId, tenantId]
+        );
+        if (leadCheck.rows.length === 0) {
+          return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+        }
+        if (isSalesRep(role) && leadCheck.rows[0].assignedRepId && leadCheck.rows[0].assignedRepId !== repId) {
+          return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
+      }
+
+      // Cancel any older pending push jobs for this rep in this tenant
       await client.query(
         `UPDATE push_to_dial_jobs 
          SET status = 'cancelled', updated_at = NOW() 
-         WHERE rep_id = $1 AND status = 'pending'`,
-        [repId]
+         WHERE rep_id = $1 AND tenant_id = $2 AND status = 'pending'`,
+        [repId, tenantId]
       );
 
       // Insert new push-to-dial trigger
@@ -103,16 +125,21 @@ export async function POST(request: NextRequest) {
  * Polled by mobile app (with ?poll=true) or checked by web CRM (with ?jobId=...).
  */
 export async function GET(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const tenantId = session.tenantId;
   const repId = session.sub;
+  const role = session.role;
   const { searchParams } = new URL(request.url);
 
   const jobId = searchParams.get("jobId");
   const isPolling = searchParams.get("poll") === "true";
+
+  if (jobId && !isValidUuid(jobId)) {
+    return NextResponse.json({ error: "Invalid jobId" }, { status: 400 });
+  }
 
   try {
     return await withClient(async (client) => {
@@ -124,9 +151,9 @@ export async function GET(request: NextRequest) {
                   company_name as "companyName", status, created_at as "createdAt",
                   updated_at as "updatedAt"
            FROM push_to_dial_jobs
-           WHERE id = $1 AND tenant_id = $2
+           WHERE id = $1 AND tenant_id = $2 ${isSalesRep(role) ? "AND rep_id = $3" : ""}
            LIMIT 1`,
-          [jobId, tenantId]
+          isSalesRep(role) ? [jobId, tenantId, repId] : [jobId, tenantId]
         );
 
         if (res.rows.length === 0) {
@@ -184,20 +211,21 @@ export async function GET(request: NextRequest) {
  * Updates job status ('ringing', 'in_call', 'completed', 'cancelled')
  */
 export async function PATCH(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const tenantId = session.tenantId;
   const repId = session.sub;
+  const role = session.role;
 
   try {
     const body = await request.json();
     const { jobId, status } = body;
 
-    if (!jobId || !status) {
+    if (!isValidUuid(jobId) || typeof status !== "string" || !ALLOWED_PUSH_STATUSES.has(status)) {
       return NextResponse.json(
-        { error: "jobId and status are required" },
+        { error: "Valid jobId and status are required" },
         { status: 400 }
       );
     }
@@ -208,9 +236,9 @@ export async function PATCH(request: NextRequest) {
       const res = await client.query(
         `UPDATE push_to_dial_jobs 
          SET status = $1, updated_at = NOW() 
-         WHERE id = $2 AND tenant_id = $3
+         WHERE id = $2 AND tenant_id = $3 ${isSalesRep(role) ? "AND rep_id = $4" : ""}
          RETURNING id, status, updated_at as "updatedAt"`,
-        [status, jobId, tenantId]
+        isSalesRep(role) ? [status, jobId, tenantId, repId] : [status, jobId, tenantId]
       );
 
       if (res.rows.length === 0) {
@@ -233,16 +261,19 @@ export async function PATCH(request: NextRequest) {
  * Cancels a pending push-to-dial job
  */
 export async function DELETE(request: NextRequest) {
-  const session = await getSession(request);
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
-  const { searchParams } = new URL(request.url);
-
-  if (!tenantId || !repId) {
+  const session = await requireActiveSession(request);
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const repId = session.sub;
+  const role = session.role;
+  const { searchParams } = new URL(request.url);
 
   const jobId = searchParams.get("jobId");
+  if (jobId && !isValidUuid(jobId)) {
+    return NextResponse.json({ error: "Invalid jobId" }, { status: 400 });
+  }
 
   try {
     return await withClient(async (client) => {
@@ -252,15 +283,15 @@ export async function DELETE(request: NextRequest) {
         await client.query(
           `UPDATE push_to_dial_jobs 
            SET status = 'cancelled', updated_at = NOW() 
-           WHERE id = $1 AND tenant_id = $2`,
-          [jobId, tenantId]
+           WHERE id = $1 AND tenant_id = $2 ${isSalesRep(role) ? "AND rep_id = $3" : ""}`,
+          isSalesRep(role) ? [jobId, tenantId, repId] : [jobId, tenantId]
         );
       } else {
         await client.query(
           `UPDATE push_to_dial_jobs 
            SET status = 'cancelled', updated_at = NOW() 
-           WHERE rep_id = $1 AND status = 'pending'`,
-          [repId]
+           WHERE rep_id = $1 AND tenant_id = $2 AND status = 'pending'`,
+          [repId, tenantId]
         );
       }
 

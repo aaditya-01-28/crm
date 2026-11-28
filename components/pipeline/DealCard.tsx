@@ -2,6 +2,7 @@
 
 import { formatCurrency, cn, getDealDisplayAmount, extractWonDateFromNotes, parseDealDateToTimestamp } from "@/lib/utils";
 import { Calendar, Clock, Tag, User, Trash2, Edit3, Video, Phone, MessageSquareText, ExternalLink, CreditCard, AlertCircle } from "lucide-react";
+import { sanitizeExternalUrl } from "@/lib/url-safety";
 
 function parseClosingNotesMeta(raw?: string | null): {
   meta: Record<string, any>;
@@ -186,7 +187,6 @@ export function DealCard({
   })();
 
   const meetingLink = (deal.demoTask?.meetingLink || meta.meetingLink || "") as string;
-  const isMeetingUrl = /^https?:\/\//i.test(meetingLink.trim());
   const followupAt = formatISTCardDateTime(
     meta.contactBackDate || deal.followupTask?.scheduledTime || null,
     true
@@ -396,25 +396,28 @@ export function DealCard({
                     <span className="font-medium text-slate-700">{meta.decisionMakerName}</span>
                   </p>
                 )}
-                {meetingLink && (
-                  <div className="flex items-center gap-1 min-w-0">
-                    <Video className="w-3 h-3 text-sky-600 shrink-0" />
-                    {isMeetingUrl ? (
-                      <a
-                        href={meetingLink.trim()}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-sky-700 hover:underline font-medium inline-flex items-center gap-1 truncate"
-                      >
-                        <span>Join Demo Link</span>
-                        <ExternalLink className="w-2.5 h-2.5 shrink-0" />
-                      </a>
-                    ) : (
-                      <span className="truncate text-slate-700">{meetingLink}</span>
-                    )}
-                  </div>
-                )}
+                {meetingLink && (() => {
+                  const safeMeetingLink = sanitizeExternalUrl(meetingLink);
+                  return (
+                    <div className="flex items-center gap-1 min-w-0">
+                      <Video className="w-3 h-3 text-sky-600 shrink-0" />
+                      {safeMeetingLink ? (
+                        <a
+                          href={safeMeetingLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-sky-700 hover:underline font-medium inline-flex items-center gap-1 truncate"
+                        >
+                          <span>Join Demo Link</span>
+                          <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                        </a>
+                      ) : (
+                        <span className="truncate text-slate-700">{meetingLink}</span>
+                      )}
+                    </div>
+                  );
+                })()}
               </>
             )}
 

@@ -1,18 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { can, normalizeRole } from "@/lib/rbac";
-import { getSession } from "@/lib/auth";
+import { can } from "@/lib/rbac";
+import { requireActiveSession } from "@/lib/auth";
+import { filterValidUuids, isValidUuid } from "@/lib/security";
 
 export async function POST(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.role || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const tenantId = session.tenantId;
   const role = session.role;
-  const currentUserId = session.sub;
-  const normalizedRole = normalizeRole(role);
 
   if (!can(role, "leads:assign")) {
     return NextResponse.json(
@@ -23,23 +22,29 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { leadIds, repId, mode, repIds } = body;
+    const { repId, mode, repIds } = body;
+    const leadIds = filterValidUuids(body?.leadIds);
 
-    if (!leadIds || !Array.isArray(leadIds) || leadIds.length === 0) {
+    if (leadIds.length === 0) {
       return NextResponse.json(
-        { error: "No leads selected for assignment" },
+        { error: "No valid lead IDs selected for assignment" },
         { status: 400 }
       );
     }
 
     return await withClient(async (client) => {
-      await client.query("ALTER TABLE leads ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ;").catch(() => {});
-
       // Mode 1: Round Robin Distribution
       if (mode === "round_robin") {
-        let targetRepIds: string[] = Array.isArray(repIds) ? repIds.filter(Boolean) : [];
+        const requestedRepIds = filterValidUuids(repIds);
+        let targetRepIds: string[] = [];
 
-        if (targetRepIds.length === 0) {
+        if (requestedRepIds.length > 0) {
+          const verifiedRepsRes = await client.query(
+            "SELECT id FROM users WHERE id = ANY($1::uuid[]) AND tenant_id = $2 AND is_active = true",
+            [requestedRepIds, tenantId]
+          );
+          targetRepIds = verifiedRepsRes.rows.map((r: any) => r.id);
+        } else {
           const activeRepsRes = await client.query(
             "SELECT id FROM users WHERE tenant_id = $1 AND role = 'sales_rep' AND is_active = true",
             [tenantId]
@@ -49,14 +54,14 @@ export async function POST(request: NextRequest) {
 
         if (targetRepIds.length === 0) {
           return NextResponse.json(
-            { error: "No active sales executives available for round-robin assignment." },
+            { error: "No active representatives available in this workspace for round-robin assignment." },
             { status: 400 }
           );
         }
 
         const repAssignments = leadIds.map((_, i) => targetRepIds[i % targetRepIds.length]);
 
-        await client.query(
+        const updateRes = await client.query(
           `UPDATE leads AS l
            SET assigned_rep_id = v.rep_id,
                first_assigned_rep_id = COALESCE(l.first_assigned_rep_id, v.rep_id),
@@ -70,10 +75,11 @@ export async function POST(request: NextRequest) {
           [leadIds, repAssignments, tenantId]
         );
 
+        const assignedCount = updateRes.rowCount || 0;
         return NextResponse.json({
           success: true,
-          count: leadIds.length,
-          message: `Distributed ${leadIds.length} leads across ${targetRepIds.length} representatives.`,
+          count: assignedCount,
+          message: `Distributed ${assignedCount} leads across ${targetRepIds.length} representatives.`,
         });
       }
 
@@ -92,10 +98,11 @@ export async function POST(request: NextRequest) {
       }
 
       // Mode 3: Assign to specific representative
-      if (typeof repId === "string" && repId.trim()) {
+      if (isValidUuid(repId)) {
+        const cleanRepId = repId.trim();
         const targetRepRes = await client.query(
           "SELECT id, full_name as \"fullName\" FROM users WHERE id = $1 AND tenant_id = $2 AND is_active = true",
-          [repId, tenantId]
+          [cleanRepId, tenantId]
         );
 
         if (targetRepRes.rows.length === 0) {
@@ -118,7 +125,7 @@ export async function POST(request: NextRequest) {
                updated_at = NOW()
            WHERE id = ANY($2::uuid[]) AND tenant_id = $3
            RETURNING id`,
-          [repId, leadIds, tenantId]
+          [cleanRepId, leadIds, tenantId]
         );
 
         const totalCount = updateRes.rowCount || 0;

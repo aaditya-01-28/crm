@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
 import { normalizeRole, isManagerOrAdmin, isSalesRep } from "@/lib/rbac";
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
+import { isValidUuid } from "@/lib/security";
 import { formatDuration, getISTDateRange, interestedCallSql, dealCloseDateSql } from "@/lib/utils";
 import { ensureDealSplitsTable, effectiveDealSharesCte } from "@/lib/deal-splits";
 
 export async function GET(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -25,7 +26,10 @@ export async function GET(request: NextRequest) {
   if (isSalesRep(role)) {
     targetUserId = currentUserId;
   } else if (requestedUserId && requestedUserId !== "all" && requestedUserId.trim() !== "") {
-    targetUserId = requestedUserId;
+    if (!isValidUuid(requestedUserId)) {
+      return NextResponse.json({ error: "Invalid userId" }, { status: 400 });
+    }
+    targetUserId = requestedUserId.trim();
   }
 
   const now = new Date();
@@ -34,6 +38,84 @@ export async function GET(request: NextRequest) {
 
   try {
     return await withClient(async (client) => {
+      // Accounts & Operations users only receive payment verification aggregates (no sales/leads/calls leakage)
+      if (role === "accounts_ops") {
+        const [pendingRes, periodPayRes, allPayRes] = await Promise.all([
+          client.query(
+            `SELECT COUNT(id)::int as count, COALESCE(SUM(final_amount), 0)::numeric as value
+             FROM payments
+             WHERE tenant_id = $1 AND ops_approval_status IN ('pending_verification', 'pending')`,
+            [tenantId]
+          ),
+          client.query(
+            `SELECT COALESCE(SUM(CASE WHEN ops_approval_status = 'approved' THEN final_amount ELSE 0 END), 0)::numeric as "verifiedRevenue"
+             FROM payments
+             WHERE tenant_id = $1 AND created_at >= $2 AND created_at <= $3`,
+            [tenantId, startOfPeriod, endOfPeriod]
+          ),
+          client.query(
+            `SELECT COALESCE(SUM(CASE WHEN ops_approval_status = 'approved' THEN final_amount ELSE 0 END), 0)::numeric as "allTimeVerified",
+                    COALESCE(SUM(CASE WHEN ops_approval_status IN ('pending_verification', 'pending') THEN final_amount ELSE 0 END), 0)::numeric as "allTimePending"
+             FROM payments
+             WHERE tenant_id = $1`,
+            [tenantId]
+          ),
+        ]);
+
+        const opsMetrics = {
+          totalCalls: 0,
+          uniqueDials: 0,
+          connectedCalls: 0,
+          connectRate: 0,
+          interestedCalls: 0,
+          interestedRate: 0,
+          talkTimeMins: 0,
+          talkTimeFormatted: "0m 0s",
+          totalDurationSeconds: 0,
+          dispositionMap: {},
+          queueRemainingCount: 0,
+          unassignedLeadsCount: 0,
+          todayCallbacksCount: 0,
+          todayDemosCount: 0,
+          todayDemosDoneCount: 0,
+          overdueTasksCount: 0,
+          todayAgenda: [],
+          activeDealsCount: 0,
+          activePipelineValue: 0,
+          wonDealsCount: 0,
+          wonRevenueInPeriod: 0,
+          verifiedRevenue: Number(periodPayRes.rows[0]?.verifiedRevenue || 0),
+          winRate: 0,
+          allTimeWonDealsCount: 0,
+          allTimeWonRevenue: 0,
+          allTimeLostDealsCount: 0,
+          allTimeVerifiedRevenue: Number(allPayRes.rows[0]?.allTimeVerified || 0),
+          allTimePendingRevenue: Number(allPayRes.rows[0]?.allTimePending || 0),
+          recentWonDeals: [],
+          allDealsByStage: [],
+          recentDeals: [],
+          totalLeadsCount: 0,
+          leadsByStatus: [],
+          leadsByVertical: [],
+          leadsBySource: [],
+          leaderboard: [],
+          recentCalls: [],
+          pendingPaymentsCount: pendingRes.rows[0]?.count || 0,
+          pendingPaymentsValue: Number(pendingRes.rows[0]?.value || 0),
+        };
+
+        return NextResponse.json({
+          role,
+          period,
+          dateFrom: startOfPeriod.toISOString(),
+          dateTo: endOfPeriod.toISOString(),
+          targetUserId: null,
+          teamMembers: [],
+          metrics: opsMetrics,
+          stats: opsMetrics,
+        });
+      }
+
       // 1. Fetch team members (for dropdown)
       const teamRes = await client.query(
         `SELECT id, full_name as "fullName", email, role, phone_number as "phoneNumber"
@@ -217,7 +299,6 @@ export async function GET(request: NextRequest) {
       const activeDealsCount = activeDeals.length;
       const activePipelineValue = activeDeals.reduce((sum, d) => sum + Number(d.quotedPrice || 0), 0);
 
-      await client.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;").catch(() => {});
       await ensureDealSplitsTable(client);
 
       const closeDateSql = dealCloseDateSql("d");
@@ -716,7 +797,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error("[DASHBOARD_STATS_ERROR]", error);
     return NextResponse.json(
-      { error: error?.message || "Failed to generate dashboard statistics", details: String(error), stack: error?.stack },
+      { error: "Failed to generate dashboard statistics" },
       { status: 500 }
     );
   }

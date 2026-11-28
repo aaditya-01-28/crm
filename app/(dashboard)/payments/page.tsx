@@ -5,6 +5,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CreditCard, CheckCircle2, XCircle, Clock, ExternalLink, User } from "lucide-react";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { useIsManagerOrAdmin, useSession } from "@/components/layout/SessionProvider";
+import { can } from "@/lib/rbac";
+import { sanitizeExternalUrl } from "@/lib/url-safety";
 import { toast } from "sonner";
 
 interface Payment {
@@ -55,7 +57,7 @@ export default function PaymentsPage() {
   const queryClient = useQueryClient();
   const canManagePayments = useIsManagerOrAdmin();
   const { role } = useSession();
-  const canApproveReject = role !== "sales_rep";
+  const canApproveReject = can(role, "payments:approve");
   const [activeTab, setActiveTab] = useState("pending_verification");
   const [repFilter, setRepFilter] = useState("all");
 
@@ -234,25 +236,32 @@ function PaymentRow({
   const [showImg, setShowImg] = useState(false);
   const StatusConfig = STATUS_CONFIG[payment.opsApprovalStatus as keyof typeof STATUS_CONFIG];
   const StatusIcon = StatusConfig?.icon || Clock;
+  const safeScreenshotUrl = sanitizeExternalUrl(payment.screenshotUrl, { allowRelative: true });
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
       <div className="flex items-start gap-4">
         {/* Screenshot thumbnail */}
         <div className="shrink-0">
-          <button
-            onClick={() => setShowImg(true)}
-            className="w-16 h-16 rounded-lg border border-gray-200 overflow-hidden bg-gray-50 flex items-center justify-center hover:opacity-80 transition"
-          >
-            <img
-              src={payment.screenshotUrl}
-              alt="Receipt"
-              className="w-full h-full object-cover"
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = "none";
-              }}
-            />
-          </button>
+          {safeScreenshotUrl ? (
+            <button
+              onClick={() => setShowImg(true)}
+              className="w-16 h-16 rounded-lg border border-gray-200 overflow-hidden bg-gray-50 flex items-center justify-center hover:opacity-80 transition"
+            >
+              <img
+                src={safeScreenshotUrl}
+                alt="Receipt"
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = "none";
+                }}
+              />
+            </button>
+          ) : (
+            <div className="w-16 h-16 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center text-[10px] text-gray-400">
+              No Image
+            </div>
+          )}
         </div>
 
         {/* Details */}
@@ -310,9 +319,9 @@ function PaymentRow({
       {/* Action buttons for pending */}
       {(payment.opsApprovalStatus === "pending_verification" || payment.opsApprovalStatus === "pending") && (
         <div className="flex gap-2 mt-4 pt-4 border-t border-gray-100 justify-end items-center">
-          {payment.screenshotUrl && payment.screenshotUrl !== "NA" && (
+          {safeScreenshotUrl && (
             <a
-              href={payment.screenshotUrl}
+              href={safeScreenshotUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1 text-xs text-gray-600 border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition"
@@ -349,13 +358,13 @@ function PaymentRow({
       )}
 
       {/* Full image lightbox */}
-      {showImg && (
+      {showImg && safeScreenshotUrl && (
         <div
           className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
           onClick={() => setShowImg(false)}
         >
           <img
-            src={payment.screenshotUrl}
+            src={safeScreenshotUrl}
             alt="Receipt"
             className="max-w-2xl max-h-[85vh] object-contain rounded-xl"
             onClick={(e) => e.stopPropagation()}

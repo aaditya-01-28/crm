@@ -24,8 +24,8 @@ function ResetPasswordForm() {
       toast.error("Missing reset token. Please request a new password reset link.");
       return;
     }
-    if (newPassword.length < 6) {
-      toast.error("Password must be at least 6 characters long.");
+    if (newPassword.length < 12) {
+      toast.error("Password must be at least 12 characters with uppercase, lowercase, and numbers/symbols.");
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -113,7 +113,8 @@ function ResetPasswordForm() {
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
             required
-            placeholder="At least 6 characters"
+            minLength={12}
+            placeholder="Min 12 chars (upper, lower, number/symbol)"
             className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition text-sm pr-10 bg-gray-50/50"
           />
           <button

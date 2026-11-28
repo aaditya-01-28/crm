@@ -1,17 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
+import { can, isSalesRep } from "@/lib/rbac";
+import { isValidUuid } from "@/lib/security";
 import { formatDuration, getISTDateRange, interestedCallSql, dealCloseDateSql } from "@/lib/utils";
 import { ensureDealSplitsTable, effectiveDealSharesCte } from "@/lib/deal-splits";
 
 export async function GET(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const tenantId = session.tenantId;
   const repId = session.sub;
   const role = session.role;
+
+  if (!isSalesRep(role) && !can(role, "reports:view_all")) {
+    return NextResponse.json(
+      { error: "Forbidden: You do not have permission to view EOD reports." },
+      { status: 403 }
+    );
+  }
+
   const { searchParams } = new URL(request.url);
 
   const rawDateFrom = searchParams.get("dateFrom") || searchParams.get("startDate") || searchParams.get("date");
@@ -24,11 +34,18 @@ export async function GET(request: NextRequest) {
   const dateFromStr = rawDateFrom || istTodayStr;
   const dateToStr = rawDateTo || dateFromStr;
 
-  const repFilter = role === "sales_rep" ? repId : searchParams.get("repId") || undefined;
+  const requestedRepId = searchParams.get("repId");
+  if (!isSalesRep(role) && requestedRepId && requestedRepId !== "all" && !isValidUuid(requestedRepId)) {
+    return NextResponse.json({ error: "Invalid repId" }, { status: 400 });
+  }
+  const repFilter = isSalesRep(role)
+    ? repId
+    : requestedRepId && requestedRepId !== "all"
+    ? requestedRepId
+    : undefined;
 
   try {
     return await withClient(async (client) => {
-      await client.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;").catch(() => {});
       await ensureDealSplitsTable(client);
       const repsRes = await client.query(
         `SELECT id, full_name as "fullName"

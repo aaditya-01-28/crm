@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import Papa from "papaparse";
-import * as XLSX from "xlsx";
+import { readSheet } from "read-excel-file/browser";
 import {
   Upload,
   X,
@@ -42,7 +42,6 @@ interface ExtractedLead {
   leadDate?: string;
   closeDate?: string;
   userId?: string;
-  password?: string;
   credits?: number;
   amount?: number;
   stage?: string;
@@ -127,7 +126,6 @@ function parseRawMatrix(
   let companyColIdx = -1;
   let emailColIdx = -1;
   let userIdColIdx = -1;
-  let passwordColIdx = -1;
   let verticalColIdx = -1;
   let serviceColIdx = -1;
   let creditsColIdx = -1;
@@ -186,9 +184,6 @@ function parseRawMatrix(
         (lower === "userid" || lower.includes("paneluser"))
       ) {
         userIdColIdx = idx;
-        hasHeaders = true;
-      } else if (passwordColIdx === -1 && lower.includes("password")) {
-        passwordColIdx = idx;
         hasHeaders = true;
       } else if (
         verticalColIdx === -1 &&
@@ -315,7 +310,6 @@ function parseRawMatrix(
           undefined,
         closeDate: closeDateColIdx >= 0 ? cleanCell(row[closeDateColIdx]) : undefined,
         userId: userIdColIdx >= 0 ? cleanCell(row[userIdColIdx]) : undefined,
-        password: passwordColIdx >= 0 ? cleanCell(row[passwordColIdx]) : undefined,
         credits: creditsColIdx >= 0 ? parseNumericCell(row[creditsColIdx]) : undefined,
         amount: amountColIdx >= 0 ? parseNumericCell(row[amountColIdx]) : undefined,
         stage: stageColIdx >= 0 ? cleanCell(row[stageColIdx]) : undefined,
@@ -475,7 +469,7 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
     }
   }
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
     if (!file) return;
     setFileName(file.name);
@@ -507,18 +501,22 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
           }
         },
       });
-    } else if (ext === "xlsx" || ext === "xls") {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: "array" });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const matrix = XLSX.utils.sheet_to_json<(string | number)[]>(sheet, {
-          header: 1,
-          defval: "",
-          raw: false,
-          dateNF: "dd-mm-yyyy",
-        });
+    } else if (ext === "xlsx") {
+      try {
+        const rawMatrix = await readSheet(file);
+        const matrix: (string | number)[][] = rawMatrix.map((row) =>
+          row.map((cell) => {
+            if (cell === null || cell === undefined) return "";
+            if (cell instanceof Date) {
+              const dd = String(cell.getUTCDate()).padStart(2, "0");
+              const mm = String(cell.getUTCMonth() + 1).padStart(2, "0");
+              const yyyy = cell.getUTCFullYear();
+              return `${dd}-${mm}-${yyyy}`;
+            }
+            if (typeof cell === "boolean") return cell ? "true" : "false";
+            return cell;
+          })
+        );
         const { leads: parsed, detectedSheetType } = parseRawMatrix(matrix, file.name);
         setExtractedLeads(parsed);
         setSheetType(detectedSheetType);
@@ -531,10 +529,14 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
           toast.success(`Found ${parsed.length} valid phone numbers!`);
           checkDuplicatesInCrm(parsed);
         }
-      };
-      reader.readAsArrayBuffer(file);
+      } catch (err) {
+        console.error("[CSV_IMPORTER_XLSX]", err);
+        toast.error("Failed to parse .xlsx file. Please verify the file is not corrupted or password-protected.");
+      }
+    } else if (ext === "xls") {
+      toast.error("Legacy .xls binary format is disabled for security. Please save as .xlsx or .csv and re-upload.");
     } else {
-      toast.error("Please upload a CSV or Excel file (.csv, .xlsx, .xls)");
+      toast.error("Please upload a CSV or Excel (.xlsx) file");
     }
   }, []);
 
@@ -542,7 +544,6 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
     onDrop,
     accept: {
       "text/csv": [".csv"],
-      "application/vnd.ms-excel": [".xls"],
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [
         ".xlsx",
       ],
@@ -1073,7 +1074,7 @@ export function CSVImporter({ onClose, onImported }: CSVImporterProps) {
                       Drag & Drop CSV / Excel or click to browse
                     </p>
                     <p className="text-gray-400 text-xs mt-1">
-                      Supports .csv, .xlsx, .xls with up to 100,000 rows
+                      Supports .csv and .xlsx with up to 100,000 rows
                     </p>
                   </>
                 )}

@@ -1,9 +1,12 @@
-export const APP_VERSION = "1.3.10";
-export const APP_BUILD = 24;
-export const APK_VERSION = "1.3.10";
-export const APK_BUILD = 24;
-export const APP_RELEASE_DATE = "2026-11-27";
+export const APP_VERSION = "1.3.11";
+export const APP_BUILD = 25;
+export const APK_VERSION = "1.3.11";
+export const APK_BUILD = 25;
+export const APP_RELEASE_DATE = "2026-11-28";
 export const APP_RELEASE_NOTES = [
+  "Added Phone Logs scanner & batch/queue disposition in Lead Profile and Calls tab so historical carrier calls and talk time can be synced after adding an old lead",
+  "Stopped prematurely blacklisting non-CRM phone call signatures before a lead exists in CRM",
+  "Fixed RNR x1 leads staying inside the New tab and preserved newer lead status when syncing backdated historical calls",
   "Kept leads with completed demos visible inside the Demo Done tab even after follow-up callbacks or status changes",
   "Added RNR 1, RNR 2, RNR 3, and RNR 4+ filter tabs across Web Leads Directory, Call Logs, and Mobile App",
   "Added Newest/Oldest Sort By controls across all Leads tabs on both Web CRM and Mobile App",

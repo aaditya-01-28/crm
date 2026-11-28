@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
+import { isAdmin } from "@/lib/rbac";
+import { getTrustedAppBaseUrl, isValidUuid, validateStrongPassword } from "@/lib/security";
 import { sendTemporaryPasswordEmail } from "@/lib/mail";
 import bcrypt from "bcryptjs";
 
 export async function GET(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -13,7 +15,7 @@ export async function GET(request: NextRequest) {
   const role = session.role;
 
   // Only Level 3 Super Admin can view password reset requests
-  if (role !== "super_admin") {
+  if (!isAdmin(role)) {
     return NextResponse.json(
       { error: "Forbidden: Only Level 3 Super Admin can view password reset requests." },
       { status: 403 }
@@ -29,7 +31,7 @@ export async function GET(request: NextRequest) {
                 u.full_name as "fullName", u.email, u.role, u.phone_number as "phoneNumber",
                 u.is_active as "isActive"
          FROM password_reset_requests r
-         JOIN users u ON r.user_id = u.id
+         JOIN users u ON r.user_id = u.id AND u.tenant_id = r.tenant_id
          WHERE r.tenant_id = $1
          ORDER BY (CASE WHEN r.status = 'pending' THEN 0 ELSE 1 END), r.requested_at DESC
          LIMIT 100`,
@@ -53,7 +55,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -62,7 +64,7 @@ export async function PATCH(request: NextRequest) {
   const currentUserId = session.sub;
 
   // Only Level 3 Super Admin can fulfill/resolve password reset requests
-  if (role !== "super_admin") {
+  if (!isAdmin(role)) {
     return NextResponse.json(
       { error: "Forbidden: Only Level 3 Super Admin can resolve password reset requests." },
       { status: 403 }
@@ -73,103 +75,109 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json();
     const { requestId, action, newPassword, adminNotes } = body;
 
-    if (!requestId || !action) {
+    if (!isValidUuid(requestId) || !action) {
       return NextResponse.json(
-        { error: "Missing requestId or action parameter" },
+        { error: "Valid requestId and action parameter are required" },
         { status: 400 }
       );
     }
 
     return await withClient(async (client) => {
-      const reqRes = await client.query(
-        `SELECT r.id, r.user_id as "userId", r.status, u.full_name as "fullName", u.email
-         FROM password_reset_requests r
-         JOIN users u ON r.user_id = u.id
-         WHERE r.id = $1 AND r.tenant_id = $2`,
-        [requestId, tenantId]
-      );
-
-      if (reqRes.rows.length === 0) {
-        return NextResponse.json(
-          { error: "Password reset request not found" },
-          { status: 404 }
+      await client.query("BEGIN");
+      try {
+        const reqRes = await client.query(
+          `SELECT r.id, r.user_id as "userId", r.status, u.full_name as "fullName", u.email
+           FROM password_reset_requests r
+           JOIN users u ON r.user_id = u.id AND u.tenant_id = r.tenant_id
+           WHERE r.id = $1 AND r.tenant_id = $2 FOR UPDATE`,
+          [requestId, tenantId]
         );
-      }
 
-      const resetReq = reqRes.rows[0];
-
-      if (action === "resolve") {
-        if (!newPassword || typeof newPassword !== "string" || newPassword.length < 6) {
+        if (reqRes.rows.length === 0) {
+          await client.query("ROLLBACK");
           return NextResponse.json(
-            { error: "New password must be at least 6 characters in length." },
-            { status: 400 }
+            { error: "Password reset request not found" },
+            { status: 404 }
           );
         }
 
-        const passwordHash = await bcrypt.hash(newPassword, 12);
+        const resetReq = reqRes.rows[0];
 
-        await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false;").catch(() => {});
+        if (action === "resolve") {
+          const pwCheck = validateStrongPassword(newPassword);
+          if (!pwCheck.valid) {
+            await client.query("ROLLBACK");
+            return NextResponse.json({ error: pwCheck.error }, { status: 400 });
+          }
 
-        // Update target user's password and require password change on first login
-        await client.query(
-          `UPDATE users
-           SET password_hash = $1,
-               must_change_password = true,
-               reset_token = NULL,
-               reset_token_expiry = NULL
-           WHERE id = $2 AND tenant_id = $3`,
-          [passwordHash, resetReq.userId, tenantId]
-        );
+          const passwordHash = await bcrypt.hash(newPassword, 12);
 
-        // Mark request as resolved
-        await client.query(
-          `UPDATE password_reset_requests
-           SET status = 'resolved', resolved_at = NOW(), resolved_by = $1, admin_notes = $2
-           WHERE id = $3`,
-          [currentUserId, adminNotes || null, requestId]
-        );
+          // Update target user's password, invalidate existing tokens, and require password change on first login
+          await client.query(
+            `UPDATE users
+             SET password_hash = $1,
+                 must_change_password = true,
+                 reset_token = NULL,
+                 reset_token_expiry = NULL,
+                 token_version = COALESCE(token_version, 1) + 1
+             WHERE id = $2 AND tenant_id = $3`,
+            [passwordHash, resetReq.userId, tenantId]
+          );
 
-        const origin =
-          request.headers.get("origin") ||
-          process.env.NEXT_PUBLIC_APP_URL ||
-          "https://crm.textorasms.com";
-        const loginUrl = `${origin}/login`;
+          // Mark request as resolved
+          await client.query(
+            `UPDATE password_reset_requests
+             SET status = 'resolved', resolved_at = NOW(), resolved_by = $1, admin_notes = $2
+             WHERE id = $3 AND tenant_id = $4`,
+            [currentUserId, adminNotes || null, requestId, tenantId]
+          );
 
-        let emailDelivered = false;
-        try {
-          const mailResult = await sendTemporaryPasswordEmail({
-            to: resetReq.email,
-            fullName: resetReq.fullName,
-            tempPassword: newPassword,
-            loginUrl,
+          await client.query("COMMIT");
+
+          const loginUrl = `${getTrustedAppBaseUrl()}/login`;
+
+          let emailDelivered = false;
+          try {
+            const mailResult = await sendTemporaryPasswordEmail({
+              to: resetReq.email,
+              fullName: resetReq.fullName,
+              tempPassword: newPassword,
+              loginUrl,
+            });
+            emailDelivered = mailResult.delivered;
+          } catch (err) {
+            console.error("[PASSWORD_REQUEST_EMAIL_ERROR]", err);
+          }
+
+          return NextResponse.json({
+            success: true,
+            emailDelivered,
+            message: `Temporary password assigned and sent to ${resetReq.email}. User will create their permanent password on next login.`,
           });
-          emailDelivered = mailResult.delivered;
-        } catch (err) {
-          console.error("[PASSWORD_REQUEST_EMAIL_ERROR]", err);
         }
 
-        return NextResponse.json({
-          success: true,
-          emailDelivered,
-          message: `Temporary password assigned and sent to ${resetReq.email}. User will create their permanent password on next login.`,
-        });
+        if (action === "reject") {
+          await client.query(
+            `UPDATE password_reset_requests
+             SET status = 'rejected', resolved_at = NOW(), resolved_by = $1, admin_notes = $2
+             WHERE id = $3 AND tenant_id = $4`,
+            [currentUserId, adminNotes || null, requestId, tenantId]
+          );
+
+          await client.query("COMMIT");
+
+          return NextResponse.json({
+            success: true,
+            message: `Password reset request for ${resetReq.fullName} has been dismissed.`,
+          });
+        }
+
+        await client.query("ROLLBACK");
+        return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+      } catch (txErr) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw txErr;
       }
-
-      if (action === "reject") {
-        await client.query(
-          `UPDATE password_reset_requests
-           SET status = 'rejected', resolved_at = NOW(), resolved_by = $1, admin_notes = $2
-           WHERE id = $3`,
-          [currentUserId, adminNotes || null, requestId]
-        );
-
-        return NextResponse.json({
-          success: true,
-          message: `Password reset request for ${resetReq.fullName} has been dismissed.`,
-        });
-      }
-
-      return NextResponse.json({ error: "Invalid action" }, { status: 400 });
     });
   } catch (error) {
     console.error("[PATCH_PASSWORD_REQUESTS_ERROR]", error);

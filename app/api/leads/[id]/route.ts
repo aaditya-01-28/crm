@@ -1,16 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { can, isSalesRep, isAdmin, normalizeRole } from "@/lib/rbac";
-import { getSession } from "@/lib/auth";
+import { can, isSalesRep, isAdmin } from "@/lib/rbac";
+import { requireActiveSession } from "@/lib/auth";
+import { isValidUuid, sanitizeExternalUrl } from "@/lib/security";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!isValidUuid(id)) {
+    return NextResponse.json({ error: "Invalid lead ID" }, { status: 400 });
   }
   const tenantId = session.tenantId;
   const repId = session.sub;
@@ -28,14 +32,14 @@ export async function GET(
                 l.company_name as "companyName", l.website_url as "websiteUrl",
                 l.business_vertical as "businessVertical", l.service_type as "serviceType",
                 l.source, l.status,
-                COALESCE((SELECT COUNT(*)::int FROM call_logs WHERE lead_id = l.id AND disposition = 'RNR'), l.rnr_count, 0) as "rnrCount",
+                COALESCE((SELECT COUNT(*)::int FROM call_logs WHERE lead_id = l.id AND tenant_id = l.tenant_id AND disposition = 'RNR'), l.rnr_count, 0) as "rnrCount",
                 l.custom_metadata as "customMetadata",
                 l.created_at as "createdAt", l.updated_at as "updatedAt",
                 ar.id as "arId", ar.full_name as "arFullName", ar.email as "arEmail",
                 far.id as "farId", far.full_name as "farFullName", far.email as "farEmail"
          FROM leads l
-         LEFT JOIN users ar ON l.assigned_rep_id = ar.id
-         LEFT JOIN users far ON l.first_assigned_rep_id = far.id
+         LEFT JOIN users ar ON l.assigned_rep_id = ar.id AND ar.tenant_id = l.tenant_id
+         LEFT JOIN users far ON l.first_assigned_rep_id = far.id AND far.tenant_id = l.tenant_id
          WHERE l.id = $1 AND l.tenant_id = $2 ${isLevel1 ? "AND l.assigned_rep_id = $3" : ""}`,
         isLevel1 ? [id, tenantId, repId] : [id, tenantId]
       );
@@ -46,7 +50,7 @@ export async function GET(
 
       const l = leadRes.rows[0];
 
-      // Call logs: Level 1 sees only their own calls; Level 2 & 3 see all calls
+      // Call logs: Level 1 sees only their own calls; Level 2 & 3 see all calls within tenant
       const callLogsRes = await client.query(
         `SELECT c.id, c.tenant_id as "tenantId", c.lead_id as "leadId", c.rep_id as "repId",
                 c.disposition, c.duration_seconds as "durationSeconds", c.remark,
@@ -55,10 +59,10 @@ export async function GET(
                 c.call_timestamp as "callTimestamp",
                 u.full_name as "repFullName", u.email as "repEmail"
          FROM call_logs c
-         LEFT JOIN users u ON c.rep_id = u.id
-         WHERE c.lead_id = $1 ${isLevel1 ? "AND c.rep_id = $2" : ""}
+         LEFT JOIN users u ON c.rep_id = u.id AND u.tenant_id = c.tenant_id
+         WHERE c.lead_id = $1 AND c.tenant_id = $2 ${isLevel1 ? "AND c.rep_id = $3" : ""}
          ORDER BY c.call_timestamp DESC`,
-        isLevel1 ? [id, repId] : [id]
+        isLevel1 ? [id, tenantId, repId] : [id, tenantId]
       );
 
       const callLogs = callLogsRes.rows.map((c) => ({
@@ -75,7 +79,7 @@ export async function GET(
         rep: { fullName: c.repFullName, email: c.repEmail },
       }));
 
-      // Tasks: Level 1 sees only their own tasks; Level 2 & 3 see all tasks
+      // Tasks: Level 1 sees only their own tasks; Level 2 & 3 see all tasks within tenant
       const tasksRes = await client.query(
         `SELECT t.id, t.tenant_id as "tenantId", t.lead_id as "leadId", t.rep_id as "repId",
                 t.task_type as "taskType", t.scheduled_time as "scheduledTime", t.status,
@@ -83,10 +87,10 @@ export async function GET(
                 t.updated_at as "updatedAt",
                 u.full_name as "repFullName"
          FROM scheduled_tasks t
-         LEFT JOIN users u ON t.rep_id = u.id
-         WHERE t.lead_id = $1 ${isLevel1 ? "AND t.rep_id = $2" : ""}
+         LEFT JOIN users u ON t.rep_id = u.id AND u.tenant_id = t.tenant_id
+         WHERE t.lead_id = $1 AND t.tenant_id = $2 ${isLevel1 ? "AND t.rep_id = $3" : ""}
          ORDER BY t.scheduled_time DESC`,
-        isLevel1 ? [id, repId] : [id]
+        isLevel1 ? [id, tenantId, repId] : [id, tenantId]
       );
 
       const tasks = tasksRes.rows.map((t) => ({
@@ -94,7 +98,7 @@ export async function GET(
         rep: { fullName: t.repFullName },
       }));
 
-      // Deals: Level 1 sees only their own deals; Level 2 & 3 see all deals
+      // Deals: Level 1 sees only their own deals; Level 2 & 3 see all deals within tenant
       const dealsRes = await client.query(
         `SELECT d.id, d.tenant_id as "tenantId", d.lead_id as "leadId", d.rep_id as "repId",
                 d.service_type as "serviceType", d.quantity, d.quoted_price as "quotedPrice",
@@ -102,10 +106,10 @@ export async function GET(
                 d.created_at as "createdAt", d.updated_at as "updatedAt",
                 u.full_name as "repFullName"
          FROM deals d
-         LEFT JOIN users u ON d.rep_id = u.id
-         WHERE d.lead_id = $1 ${isLevel1 ? "AND d.rep_id = $2" : ""}
+         LEFT JOIN users u ON d.rep_id = u.id AND u.tenant_id = d.tenant_id
+         WHERE d.lead_id = $1 AND d.tenant_id = $2 ${isLevel1 ? "AND d.rep_id = $3" : ""}
          ORDER BY d.created_at DESC`,
-        isLevel1 ? [id, repId] : [id]
+        isLevel1 ? [id, tenantId, repId] : [id, tenantId]
       );
 
       const deals = dealsRes.rows.map((d) => ({
@@ -114,49 +118,16 @@ export async function GET(
         payments: [],
       }));
 
-      // Stage History: Detailed lifecycle milestones and stage transitions
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS lead_stage_history (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          tenant_id UUID NOT NULL,
-          lead_id UUID NOT NULL,
-          rep_id UUID,
-          stage_name VARCHAR(100) NOT NULL,
-          stage_type VARCHAR(50) NOT NULL,
-          notes TEXT,
-          metadata JSONB DEFAULT '{}',
-          created_at TIMESTAMPTZ(6) DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_lead_stage_history_lead ON lead_stage_history(lead_id, created_at DESC);
-      `).catch(() => {});
-
-      // Self-healing: Clean up duplicate stage history records created within 5 minutes for the same lead and stage
-      await client.query(`
-        DELETE FROM lead_stage_history h1
-        WHERE EXISTS (
-          SELECT 1 FROM lead_stage_history h2
-          WHERE h2.lead_id = h1.lead_id
-            AND h2.id != h1.id
-            AND (
-              h2.stage_name = h1.stage_name
-              OR (h2.notes IS NOT NULL AND h2.notes != '' AND h2.notes = h1.notes)
-            )
-            AND h2.created_at >= (h1.created_at - INTERVAL '5 minutes')
-            AND h2.created_at <= (h1.created_at + INTERVAL '5 minutes')
-            AND h2.created_at > h1.created_at
-        );
-      `).catch(() => {});
-
       const stageHistoryRes = await client.query(
         `SELECT h.id, h.tenant_id as "tenantId", h.lead_id as "leadId", h.rep_id as "repId",
                 h.stage_name as "stageName", h.stage_type as "stageType", h.notes,
                 h.metadata, h.created_at as "createdAt",
                 u.full_name as "repFullName"
          FROM lead_stage_history h
-         LEFT JOIN users u ON h.rep_id = u.id
-         WHERE h.lead_id = $1
+         LEFT JOIN users u ON h.rep_id = u.id AND u.tenant_id = h.tenant_id
+         WHERE h.lead_id = $1 AND h.tenant_id = $2
          ORDER BY h.created_at DESC`,
-        [id]
+        [id, tenantId]
       ).catch(() => ({ rows: [] }));
 
       const stageHistory = stageHistoryRes.rows.map((h: any) => ({
@@ -217,9 +188,12 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!isValidUuid(id)) {
+    return NextResponse.json({ error: "Invalid lead ID" }, { status: 400 });
   }
   const tenantId = session.tenantId;
   const role = session.role;
@@ -240,9 +214,50 @@ export async function PATCH(
     } = body;
 
     const isLevel1 = isSalesRep(role);
+    if (isLevel1 && (status === "won" || status === "closed_won")) {
+      return NextResponse.json(
+        { error: "Forbidden: Sales representatives cannot mark leads as Won directly. Submit a deal for Operations approval." },
+        { status: 403 }
+      );
+    }
+
+    let normalizedWebsite: string | null | undefined = undefined;
+    if (websiteUrl !== undefined) {
+      if (!websiteUrl || !String(websiteUrl).trim()) {
+        normalizedWebsite = null;
+      } else {
+        const trimmedSite = String(websiteUrl).trim();
+        const candidate = /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmedSite)
+          ? trimmedSite
+          : `https://${trimmedSite}`;
+        const validated = sanitizeExternalUrl(candidate);
+        if (!validated) {
+          return NextResponse.json({ error: "Invalid website URL" }, { status: 400 });
+        }
+        normalizedWebsite = validated;
+      }
+    }
+
+    if (can(role, "leads:assign") && assignedRepId !== undefined && assignedRepId !== "" && assignedRepId !== "unassigned") {
+      if (!isValidUuid(assignedRepId)) {
+        return NextResponse.json({ error: "Invalid assignedRepId" }, { status: 400 });
+      }
+    }
 
     return await withClient(async (client) => {
-      await client.query("ALTER TABLE leads ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ;").catch(() => {});
+      if (can(role, "leads:assign") && assignedRepId && assignedRepId !== "unassigned") {
+        const targetRepCheck = await client.query(
+          `SELECT id FROM users WHERE id = $1 AND tenant_id = $2 AND is_active = true LIMIT 1`,
+          [assignedRepId.trim(), tenantId]
+        );
+        if (targetRepCheck.rows.length === 0) {
+          return NextResponse.json(
+            { error: "Selected representative not found or inactive in workspace." },
+            { status: 400 }
+          );
+        }
+      }
+
       const existingRes = await client.query(
         `SELECT * FROM leads WHERE id = $1 AND tenant_id = $2 ${isLevel1 ? "AND assigned_rep_id = $3" : ""}`,
         isLevel1 ? [id, tenantId, repId] : [id, tenantId]
@@ -321,7 +336,7 @@ export async function PATCH(
           contactName !== undefined ? (contactName || null) : existing.contact_name,
           companyName !== undefined ? (companyName || null) : existing.company_name,
           phoneNumber !== undefined && phoneNumber.trim() !== "" ? phoneNumber.trim() : existing.phone_number,
-          websiteUrl !== undefined ? (websiteUrl || null) : existing.website_url,
+          websiteUrl !== undefined ? normalizedWebsite : existing.website_url,
           businessVertical !== undefined ? (businessVertical || null) : existing.business_vertical,
           serviceType !== undefined ? (serviceType || null) : existing.service_type,
           status !== undefined && status !== null && status !== "" ? status : (existing.status || "new"),
@@ -368,8 +383,8 @@ export async function PATCH(
         if (dealRepId) {
           if (dealCheck.rows.length > 0) {
             await client.query(
-              "UPDATE deals SET stage = $1, rep_id = COALESCE(rep_id, $2), updated_at = NOW() WHERE id = $3",
-              [targetStage, dealRepId, dealCheck.rows[0].id]
+              "UPDATE deals SET stage = $1, rep_id = COALESCE(rep_id, $2), updated_at = NOW() WHERE id = $3 AND tenant_id = $4",
+              [targetStage, dealRepId, dealCheck.rows[0].id, tenantId]
             );
           } else {
             await client.query(
@@ -395,8 +410,8 @@ export async function PATCH(
 
         if (status === "demo_done" || status === "won" || status === "closed_won") {
           await client.query(
-            "UPDATE scheduled_tasks SET status = 'completed', updated_at = NOW() WHERE lead_id = $1 AND task_type = 'product_demo' AND status = 'pending'",
-            [id]
+            "UPDATE scheduled_tasks SET status = 'completed', updated_at = NOW() WHERE lead_id = $1 AND tenant_id = $2 AND task_type = 'product_demo' AND status = 'pending'",
+            [id, tenantId]
           );
         }
       }
@@ -413,7 +428,7 @@ export async function PATCH(
     });
   } catch (error: any) {
     console.error("[LEAD PATCH]", error);
-    return NextResponse.json({ error: error?.message || "Failed to update lead" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to update lead" }, { status: 500 });
   }
 }
 
@@ -422,13 +437,12 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await getSession(request);
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const role = request.headers.get("x-user-role") || session?.role || "";
-
-  if (!tenantId) {
+  const session = await requireActiveSession(request);
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const role = session.role;
 
   // Only Level 3 Super Admin can delete leads
   if (!isAdmin(role)) {
@@ -438,27 +452,47 @@ export async function DELETE(
     );
   }
 
+  if (!isValidUuid(id)) {
+    return NextResponse.json({ error: "Invalid lead ID" }, { status: 400 });
+  }
+
   try {
     return await withClient(async (client) => {
       await client.query("BEGIN");
-      await client.query("DELETE FROM call_logs WHERE lead_id = $1", [id]);
-      await client.query("DELETE FROM scheduled_tasks WHERE lead_id = $1", [id]);
-      await client.query("DELETE FROM payments WHERE lead_id = $1", [id]);
-      await client.query("DELETE FROM deals WHERE lead_id = $1", [id]);
-      const res = await client.query(
-        "DELETE FROM leads WHERE id = $1 AND tenant_id = $2 RETURNING id",
-        [id, tenantId]
-      );
-      await client.query("COMMIT");
+      try {
+        const ownedRes = await client.query(
+          "SELECT id FROM leads WHERE id = $1 AND tenant_id = $2 LIMIT 1",
+          [id, tenantId]
+        );
+        if (ownedRes.rows.length === 0) {
+          await client.query("ROLLBACK");
+          return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+        }
 
-      if (res.rowCount === 0) {
-        return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+        await client.query("DELETE FROM call_logs WHERE lead_id = $1 AND tenant_id = $2", [id, tenantId]);
+        await client.query("DELETE FROM scheduled_tasks WHERE lead_id = $1 AND tenant_id = $2", [id, tenantId]);
+        await client.query("DELETE FROM payments WHERE lead_id = $1 AND tenant_id = $2", [id, tenantId]);
+        await client.query("DELETE FROM deals WHERE lead_id = $1 AND tenant_id = $2", [id, tenantId]);
+        await client.query("DELETE FROM lead_stage_history WHERE lead_id = $1 AND tenant_id = $2", [id, tenantId]).catch(() => {});
+        await client.query("DELETE FROM push_to_dial_jobs WHERE lead_id = $1 AND tenant_id = $2", [id, tenantId]).catch(() => {});
+        const res = await client.query(
+          "DELETE FROM leads WHERE id = $1 AND tenant_id = $2 RETURNING id",
+          [id, tenantId]
+        );
+        await client.query("COMMIT");
+
+        if (res.rowCount === 0) {
+          return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+        }
+
+        return NextResponse.json({
+          success: true,
+          message: "Lead permanently deleted.",
+        });
+      } catch (txErr) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw txErr;
       }
-
-      return NextResponse.json({
-        success: true,
-        message: "Lead permanently deleted.",
-      });
     });
   } catch (error) {
     console.error("[LEAD DELETE]", error);

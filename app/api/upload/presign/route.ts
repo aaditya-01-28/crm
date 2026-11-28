@@ -1,18 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPresignedUploadUrl, getPublicUrl } from "@/lib/minio";
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
 import { v4 as uuidv4 } from "uuid";
 
-const ALLOWED_EXTENSIONS = new Set([
-  "jpg", "jpeg", "png", "webp", "pdf",
-  "m4a", "mp3", "wav", "aac", "ogg", "3gp", "webm"
-]);
+const FOLDER_EXTENSIONS: Record<string, Set<string>> = {
+  receipts: new Set(["jpg", "jpeg", "png", "webp", "pdf"]),
+  avatars: new Set(["jpg", "jpeg", "png", "webp"]),
+  recordings: new Set(["m4a", "mp3", "wav", "aac", "ogg", "3gp", "webm"]),
+};
 
-const ALLOWED_SUBFOLDERS = new Set(["recordings", "receipts", "avatars"]);
+const ALLOWED_SUBFOLDERS = new Set(Object.keys(FOLDER_EXTENSIONS));
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await getSession(request);
+    const session = await requireActiveSession(request);
     if (!session?.tenantId || !session?.sub) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -20,22 +21,22 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { filename, contentType, folder } = body;
 
-    const rawExt = filename?.split(".").pop()?.toLowerCase() || "jpg";
+    const rawExt = typeof filename === "string" ? filename.split(".").pop()?.toLowerCase() || "jpg" : "jpg";
     const ext = rawExt.replace(/[^a-z0-9]/g, "");
-
-    if (!ALLOWED_EXTENSIONS.has(ext)) {
-      return NextResponse.json(
-        { error: `File type .${ext} is not allowed.` },
-        { status: 400 }
-      );
-    }
 
     const sanitizedFolder =
       folder && ALLOWED_SUBFOLDERS.has(folder)
         ? folder
-        : contentType?.startsWith("audio/")
+        : typeof contentType === "string" && contentType.startsWith("audio/")
         ? "recordings"
         : "receipts";
+
+    if (!FOLDER_EXTENSIONS[sanitizedFolder].has(ext)) {
+      return NextResponse.json(
+        { error: `File type .${ext} is not allowed in ${sanitizedFolder}.` },
+        { status: 400 }
+      );
+    }
 
     const objectName = `${session.tenantId}/${sanitizedFolder}/${uuidv4()}.${ext}`;
 

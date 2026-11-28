@@ -76,8 +76,8 @@ export default function LoginPage() {
 
   async function handleSetNewPassword(e: React.FormEvent) {
     e.preventDefault();
-    if (!newPassword || newPassword.length < 6) {
-      toast.error("New password must be at least 6 characters in length");
+    if (!newPassword || newPassword.length < 12) {
+      toast.error("New password must be at least 12 characters with uppercase, lowercase, and numbers/symbols");
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -143,12 +143,13 @@ export default function LoginPage() {
       setForgotMessage(data.message || "Password reset request processed.");
       if (data.isRequestRaised) {
         setIsRequestRaised(true);
-        toast.success("Request raised to Level 3 Super Admin! 🛡️");
+        toast.success("Request raised to Level 3 Super Admin!");
       } else if (data.isSuperAdmin) {
         setIsSuperAdmin(true);
-        toast.success("Temporary password dispatched to your email! 📬");
+        toast.success("Reset instructions dispatched to your email!");
       } else {
-        toast.success("Request processed. Please check with your administrator.");
+        setIsRequestRaised(true);
+        toast.success(data.message || "Request processed. Check your email or administrator.");
       }
     } catch {
       toast.error("Network error. Please try again.");
@@ -473,8 +474,8 @@ export default function LoginPage() {
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       required
-                      minLength={6}
-                      placeholder="Minimum 6 characters"
+                      minLength={12}
+                      placeholder="Min 12 chars (upper, lower, number/symbol)"
                       className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 transition text-sm pr-10 bg-gray-50/50"
                     />
                     <button
@@ -497,7 +498,7 @@ export default function LoginPage() {
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       required
-                      minLength={6}
+                      minLength={12}
                       placeholder="Re-enter new password"
                       className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 transition text-sm pr-10 bg-gray-50/50"
                     />

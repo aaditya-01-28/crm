@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { formatDateTime } from "@/lib/utils";
 import { useSession } from "@/components/layout/SessionProvider";
 import { isManagerOrAdmin } from "@/lib/rbac";
+import { sanitizeExternalUrl } from "@/lib/url-safety";
 
 interface TaskItem {
   id: string;
@@ -249,17 +250,20 @@ export function NotificationBell() {
                             Call Now
                           </button>
                         )}
-                        {task.meetingLink && (
-                          <a
-                            href={task.meetingLink}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md transition"
-                          >
-                            <Video className="w-3 h-3" />
-                            Join Meeting
-                          </a>
-                        )}
+                        {task.meetingLink && (() => {
+                          const safeMeetingLink = sanitizeExternalUrl(task.meetingLink);
+                          return safeMeetingLink ? (
+                            <a
+                              href={safeMeetingLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md transition"
+                            >
+                              <Video className="w-3 h-3" />
+                              Join Meeting
+                            </a>
+                          ) : null;
+                        })()}
                       </div>
                     ) : null}
                   </div>

@@ -72,6 +72,15 @@ export async function syncDealSplits(params: {
     throw new Error("Split partner must be a different valid team member.");
   }
 
+  // Verify both split reps belong to this tenant and are active
+  const validUsersRes = await client.query(
+    `SELECT id FROM users WHERE id = ANY($1::uuid[]) AND tenant_id = $2 AND is_active = true`,
+    [[primaryRepId, partnerRepId], tenantId]
+  );
+  if (validUsersRes.rows.length !== 2) {
+    throw new Error("Split representatives must both belong to the active organization workspace.");
+  }
+
   const pPct = Number(splitConfig.primaryPercentage);
   const sPct = Number(splitConfig.partnerPercentage);
   if (
@@ -102,7 +111,7 @@ export async function syncDealSplits(params: {
             u.full_name as "repName", ds.percentage::float8 as percentage,
             ds.is_primary as "isPrimary", ds.status
      FROM deal_splits ds
-     LEFT JOIN users u ON ds.rep_id = u.id
+     LEFT JOIN users u ON ds.rep_id = u.id AND u.tenant_id = ds.tenant_id
      WHERE ds.deal_id = $1 AND ds.tenant_id = $2
      ORDER BY ds.is_primary DESC, ds.percentage DESC`,
     [dealId, tenantId]
@@ -128,10 +137,11 @@ export function effectiveDealSharesCte(): string {
       FROM deals d
       LEFT JOIN deal_splits ds
         ON ds.deal_id = d.id
+       AND ds.tenant_id = d.tenant_id
        AND ds.status = 'approved'
        AND EXISTS (
          SELECT 1 FROM deal_splits ds_chk
-         WHERE ds_chk.deal_id = d.id AND ds_chk.status = 'approved'
+         WHERE ds_chk.deal_id = d.id AND ds_chk.tenant_id = d.tenant_id AND ds_chk.status = 'approved'
        )
       WHERE d.tenant_id = $1
     )

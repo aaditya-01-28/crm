@@ -1,20 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { getSession, signAccessToken, signRefreshToken, setAuthCookies } from "@/lib/auth";
-import bcrypt from "bcryptjs";
+import { requireActiveSession, signAccessToken, signRefreshToken, setAuthCookies } from "@/lib/auth";
+import { isAdmin } from "@/lib/rbac";
+import { sanitizeExternalUrl } from "@/lib/security";
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await getSession(request);
+    const session = await requireActiveSession(request);
     if (!session?.sub || !session?.tenantId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const currentUserId = session.sub;
+    const tenantId = session.tenantId;
 
     return await withClient(async (client) => {
-      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;`).catch(() => {});
-      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_call_target INTEGER DEFAULT 60;`).catch(() => {});
-
       const res = await client.query(
         `SELECT u.id, u.tenant_id as "tenantId", u.full_name as "fullName",
                 u.email, u.phone_number as "phoneNumber", u.role, u.language,
@@ -22,15 +21,15 @@ export async function GET(request: NextRequest) {
                 COALESCE(u.daily_call_target, 60)::int as "dailyCallTarget",
                 u.is_active as "isActive", u.created_at as "createdAt",
                 o.id as "orgId", o.name as "orgName", o.plan_tier as "orgPlanTier",
-                (SELECT COUNT(*)::int FROM leads WHERE assigned_rep_id = u.id) as "assignedLeadsCount",
-                (SELECT COUNT(*)::int FROM call_logs WHERE rep_id = u.id) as "callLogsCount",
-                (SELECT COUNT(*)::int FROM call_logs WHERE rep_id = u.id AND (duration_seconds > 0 OR disposition ILIKE '%Connected%' OR disposition = 'Contacted')) as "connectedCallsCount",
-                (SELECT COUNT(*)::int FROM deals WHERE rep_id = u.id) as "dealsCount"
+                (SELECT COUNT(*)::int FROM leads WHERE assigned_rep_id = u.id AND tenant_id = u.tenant_id) as "assignedLeadsCount",
+                (SELECT COUNT(*)::int FROM call_logs WHERE rep_id = u.id AND tenant_id = u.tenant_id) as "callLogsCount",
+                (SELECT COUNT(*)::int FROM call_logs WHERE rep_id = u.id AND tenant_id = u.tenant_id AND (duration_seconds > 0 OR disposition ILIKE '%Connected%' OR disposition = 'Contacted')) as "connectedCallsCount",
+                (SELECT COUNT(*)::int FROM deals WHERE rep_id = u.id AND tenant_id = u.tenant_id) as "dealsCount"
          FROM users u
          JOIN organizations o ON u.tenant_id = o.id
-         WHERE u.id = $1
+         WHERE u.id = $1 AND u.tenant_id = $2
          LIMIT 1`,
-        [currentUserId]
+        [currentUserId, tenantId]
       );
 
       if (res.rows.length === 0) {
@@ -76,27 +75,31 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const session = await getSession(request);
+    const session = await requireActiveSession(request);
     if (!session?.sub || !session?.tenantId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const currentUserId = session.sub;
+    const tenantId = session.tenantId;
 
     const body = await request.json();
-    const { fullName, phoneNumber, language, avatarUrl, currentPassword, newPassword } = body;
+    const { fullName, phoneNumber, language, avatarUrl, newPassword } = body;
 
     return await withClient(async (client) => {
-      await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;`).catch(() => {});
-
       const userRes = await client.query(
         `SELECT u.id, u.tenant_id as "tenantId", u.full_name as "fullName",
-                u.email, u.password_hash as "passwordHash", u.role, u.avatar_url as "avatarUrl",
+                u.email, u.phone_number as "phoneNumber", u.role,
+                u.language, u.avatar_url as "avatarUrl",
+                COALESCE(u.must_change_password, false) as "mustChangePassword",
+                COALESCE(u.token_version, 1)::int as "tokenVersion",
+                u.previous_login_at as "previousLoginAt",
+                u.last_login_at as "lastLoginAt",
                 o.id as "orgId", o.name as "orgName", o.plan_tier as "orgPlanTier"
          FROM users u
          JOIN organizations o ON u.tenant_id = o.id
-         WHERE u.id = $1
+         WHERE u.id = $1 AND u.tenant_id = $2
          LIMIT 1`,
-        [currentUserId]
+        [currentUserId, tenantId]
       );
 
       if (userRes.rows.length === 0) {
@@ -107,7 +110,7 @@ export async function PATCH(request: NextRequest) {
 
       let updatedFullName = existingUser.fullName;
       if (fullName !== undefined) {
-        const trimmed = fullName.trim();
+        const trimmed = String(fullName).trim();
         if (!trimmed || trimmed.length < 2) {
           return NextResponse.json(
             { error: "Full name must be at least 2 characters" },
@@ -117,11 +120,11 @@ export async function PATCH(request: NextRequest) {
         updatedFullName = trimmed;
       }
 
-      let updatedPhoneNumber = existingUser.phoneNumber;
+      let updatedPhoneNumber = existingUser.phoneNumber ?? null;
       if (phoneNumber !== undefined) {
-        // Only Level 3 Super Admin can update phone number; other roles must have it updated by Super Admin in Team tab
-        if (existingUser.role === "super_admin") {
-          updatedPhoneNumber = phoneNumber ? phoneNumber.trim() : null;
+        // Only Level 3 Super Admin can update phone number; other roles preserve existing phone number
+        if (isAdmin(existingUser.role)) {
+          updatedPhoneNumber = phoneNumber ? String(phoneNumber).trim() : null;
         }
       }
 
@@ -142,7 +145,18 @@ export async function PATCH(request: NextRequest) {
 
       let updatedAvatarUrl = existingUser.avatarUrl;
       if (avatarUrl !== undefined) {
-        updatedAvatarUrl = avatarUrl && String(avatarUrl).trim().length > 0 ? String(avatarUrl).trim() : null;
+        if (avatarUrl === null || String(avatarUrl).trim() === "") {
+          updatedAvatarUrl = null;
+        } else {
+          const safeAvatar = sanitizeExternalUrl(avatarUrl, { allowRelative: true });
+          if (!safeAvatar) {
+            return NextResponse.json(
+              { error: "Invalid avatar URL (must use http://, https://, or a safe relative path)" },
+              { status: 400 }
+            );
+          }
+          updatedAvatarUrl = safeAvatar;
+        }
       }
 
       if (newPassword) {
@@ -155,12 +169,12 @@ export async function PATCH(request: NextRequest) {
       const updateRes = await client.query(
         `UPDATE users
          SET full_name = $1, phone_number = $2, language = $3, avatar_url = $4
-         WHERE id = $5
+         WHERE id = $5 AND tenant_id = $6
          RETURNING id, tenant_id as "tenantId", full_name as "fullName",
                    email, phone_number as "phoneNumber", role, language,
                    avatar_url as "avatarUrl",
                    is_active as "isActive", created_at as "createdAt"`,
-        [updatedFullName, updatedPhoneNumber, updatedLanguage, updatedAvatarUrl, currentUserId]
+        [updatedFullName, updatedPhoneNumber, updatedLanguage, updatedAvatarUrl, currentUserId, tenantId]
       );
 
       const r = updateRes.rows[0];
@@ -180,6 +194,15 @@ export async function PATCH(request: NextRequest) {
         email: updatedUser.email,
         fullName: updatedUser.fullName,
         avatarUrl: updatedUser.avatarUrl && updatedUser.avatarUrl.length < 500 ? updatedUser.avatarUrl : null,
+        mustChangePassword: Boolean(existingUser.mustChangePassword),
+        tokenVersion: Number(existingUser.tokenVersion ?? 1),
+        lastLoginAt: existingUser.previousLoginAt
+          ? new Date(existingUser.previousLoginAt).toISOString()
+          : (session.lastLoginAt || null),
+        loginAt: existingUser.lastLoginAt
+          ? new Date(existingUser.lastLoginAt).toISOString()
+          : (session.loginAt || new Date().toISOString()),
+        phoneNumber: updatedUser.phoneNumber || null,
       };
 
       const accessToken = await signAccessToken(jwtPayload);

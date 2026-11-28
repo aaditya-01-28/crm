@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { formatDateTime } from "@/lib/utils";
 import { useSession } from "@/components/layout/SessionProvider";
 import { isManagerOrAdmin } from "@/lib/rbac";
+import { sanitizeExternalUrl } from "@/lib/url-safety";
 
 // Web Audio API Polyphonic Chime Synthesizer
 function playChime(type: "reminder" | "now") {
@@ -212,15 +213,17 @@ export function AgendaNotificationListener() {
 
               playChime("now");
 
+              const safeMeetingLink = sanitizeExternalUrl(task.meetingLink);
+
               // High-priority Toast
               toast.success(`🔔 Time Now: ${taskLabel}!`, {
                 description: `Scheduled right now with ${targetName}`,
                 duration: 15000,
-                action: task.meetingLink
+                action: safeMeetingLink
                   ? {
                       label: "🎥 Join Meeting",
                       onClick: () => {
-                        window.open(task.meetingLink!, "_blank", "noopener,noreferrer");
+                        window.open(safeMeetingLink, "_blank", "noopener,noreferrer");
                       },
                     }
                   : canCallFromNotification && phone
@@ -247,8 +250,8 @@ export function AgendaNotificationListener() {
                   });
                   notif.onclick = () => {
                     window.focus();
-                    if (task.meetingLink) {
-                      window.open(task.meetingLink, "_blank", "noopener,noreferrer");
+                    if (safeMeetingLink) {
+                      window.open(safeMeetingLink, "_blank", "noopener,noreferrer");
                     } else {
                       window.location.href = "/agenda";
                     }

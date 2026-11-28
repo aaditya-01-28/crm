@@ -3,8 +3,11 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { BarChart3, Download, RefreshCw, TrendingUp, Calendar, ArrowUp, ArrowDown, ArrowUpDown, Camera, Check } from "lucide-react";
+import { BarChart3, Download, RefreshCw, TrendingUp, Calendar, ArrowUp, ArrowDown, ArrowUpDown, Camera, Check, ShieldAlert } from "lucide-react";
 import { formatCurrency, formatDuration, getISTDateRange, getISTDateString } from "@/lib/utils";
+import { buildCsvRow } from "@/lib/url-safety";
+import { useSession } from "@/components/layout/SessionProvider";
+import { can } from "@/lib/rbac";
 
 type ReportPeriod = "today" | "yesterday" | "week" | "month" | "custom";
 
@@ -482,6 +485,8 @@ function renderEodSnapshotCanvas(params: {
 }
 
 export default function ReportsPage() {
+  const { role } = useSession();
+  const canViewReports = can(role, "reports:view_all");
   const [period, setPeriod] = useState<ReportPeriod>("today");
   const [customDateFrom, setCustomDateFrom] = useState(() => getPresetDates("today").from);
   const [customDateTo, setCustomDateTo] = useState(() => getPresetDates("today").to);
@@ -493,6 +498,7 @@ export default function ReportsPage() {
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["eod", period, customDateFrom, customDateTo],
     queryFn: () => fetchEOD(customDateFrom, customDateTo),
+    enabled: canViewReports,
     refetchInterval: 15_000, // Real-time 15s auto-refresh
   });
 
@@ -519,9 +525,13 @@ export default function ReportsPage() {
     if (customDateFrom) params.set("dateFrom", customDateFrom);
     if (customDateTo) params.set("dateTo", customDateTo);
     const res = await fetch(`/api/reports/eod?${params.toString()}`);
+    if (!res.ok) {
+      toast.error("Failed to export EOD report");
+      return;
+    }
     const exportData = await res.json();
 
-    // Build CSV
+    // Build formula-safe CSV
     const headers = [
       "Rep",
       "Total Calls",
@@ -536,28 +546,34 @@ export default function ReportsPage() {
       "Payments",
       "Revenue (₹)",
     ];
-    const rows = (exportData.reps || []).map((r: RepMetrics) => [
-      r.repName,
-      r.totalCalls,
-      r.uniqueDialed,
-      r.connectedCalls,
-      r.interestedCalls ?? 0,
-      r.talkTimeFormatted || formatDuration((r.talkTimeMins || 0) * 60),
-      r.demosBooked,
-      r.demosCompleted,
-      r.quotesSent,
-      r.totalQuotedValue,
-      r.paymentsCollected,
-      r.revenueCollected,
-    ]);
+    const csvLines = [
+      buildCsvRow(headers),
+      ...(exportData.reps || []).map((r: RepMetrics) =>
+        buildCsvRow([
+          r.repName,
+          r.totalCalls,
+          r.uniqueDialed,
+          r.connectedCalls,
+          r.interestedCalls ?? 0,
+          r.talkTimeFormatted || formatDuration((r.talkTimeMins || 0) * 60),
+          r.demosBooked,
+          r.demosCompleted,
+          r.quotesSent,
+          r.totalQuotedValue,
+          r.paymentsCollected,
+          r.revenueCollected,
+        ])
+      ),
+    ];
 
-    const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
+    const csv = csvLines.join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = `textora-eod-${customDateFrom}-to-${customDateTo}.csv`;
     a.click();
+    URL.revokeObjectURL(url);
   }
 
   const totals = data?.totals;
@@ -639,6 +655,18 @@ export default function ReportsPage() {
       setIsCopyingSnapshot(false);
     }
   };
+
+  if (!canViewReports) {
+    return (
+      <div className="max-w-md mx-auto my-12 p-8 bg-amber-50 border border-amber-200 rounded-2xl text-center space-y-3">
+        <ShieldAlert className="w-8 h-8 text-amber-600 mx-auto" />
+        <h2 className="text-base font-bold text-amber-950">Access Restricted</h2>
+        <p className="text-xs text-amber-800">
+          EOD Sales Reports are restricted to Sales Managers and Super Administrators.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto">

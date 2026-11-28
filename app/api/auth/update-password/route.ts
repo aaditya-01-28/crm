@@ -1,38 +1,61 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession, signAccessToken, signRefreshToken, setAuthCookies } from "@/lib/auth";
+import { requireActiveSession, signAccessToken, signRefreshToken, setAuthCookies } from "@/lib/auth";
 import { withClient, queryUserByEmail } from "@/lib/db";
 import bcrypt from "bcryptjs";
+import { checkRateLimit, getClientIp, validateStrongPassword } from "@/lib/security";
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { newPassword, email, temporaryPassword } = body;
-
-    if (!newPassword || typeof newPassword !== "string" || newPassword.length < 6) {
+    const ip = getClientIp(request);
+    const rate = checkRateLimit(`update-pw:${ip}`, 10, 15 * 60 * 1000);
+    if (!rate.allowed) {
       return NextResponse.json(
-        { error: "New password must be at least 6 characters in length." },
-        { status: 400 }
+        { error: "Too many password update attempts. Please try again later." },
+        { status: 429, headers: { "Retry-After": String(rate.retryAfterSeconds) } }
       );
     }
 
-    let targetUserId: string | null = null;
+    const body = await request.json();
+    const { newPassword, email, temporaryPassword } = body;
 
-    // Check if authenticated via session
-    const session = await getSession(request);
+    const pwCheck = validateStrongPassword(newPassword);
+    if (!pwCheck.valid) {
+      return NextResponse.json({ error: pwCheck.error }, { status: 400 });
+    }
+
+    let targetUserId: string | null = null;
+    let targetTenantId: string | null = null;
+
+    // Check if authenticated via active session
+    const session = await requireActiveSession(request);
     if (session) {
       targetUserId = session.sub;
-    } else if (email && temporaryPassword) {
-      // Validate temporary credentials directly if session cookie is not present
+      targetTenantId = session.tenantId;
+    } else if (typeof email === "string" && typeof temporaryPassword === "string" && email.trim() && temporaryPassword) {
+      // Unauthenticated temporary-password upgrade is strictly limited to active accounts in forced mustChangePassword state
       const user = await queryUserByEmail(email.trim());
       if (user) {
+        if (!user.isActive || !user.orgIsActive) {
+          return NextResponse.json(
+            { error: "This account or organization has been suspended." },
+            { status: 403 }
+          );
+        }
+        if (!user.mustChangePassword) {
+          return NextResponse.json(
+            { error: "Please sign in normally before updating your password." },
+            { status: 401 }
+          );
+        }
         const valid = await bcrypt.compare(temporaryPassword, user.passwordHash);
         if (valid) {
           targetUserId = user.id;
+          targetTenantId = user.tenantId;
         }
       }
     }
 
-    if (!targetUserId) {
+    if (!targetUserId || !targetTenantId) {
       return NextResponse.json(
         { error: "Session expired or invalid credentials. Please sign in again with your temporary password." },
         { status: 401 }
@@ -47,19 +70,24 @@ export async function POST(request: NextRequest) {
          SET password_hash = $1,
              must_change_password = false,
              reset_token = NULL,
-             reset_token_expiry = NULL
-         WHERE id = $2
-         RETURNING id, tenant_id as "tenantId", email, full_name as "fullName", role, avatar_url as "avatarUrl"`,
-        [passwordHash, targetUserId]
+             reset_token_expiry = NULL,
+             token_version = COALESCE(token_version, 1) + 1
+         WHERE id = $2 AND tenant_id = $3 AND is_active = true
+         RETURNING id, tenant_id as "tenantId", email, full_name as "fullName", role,
+                   avatar_url as "avatarUrl", phone_number as "phoneNumber",
+                   last_login_at as "lastLoginAt",
+                   COALESCE(token_version, 1)::int as "tokenVersion"`,
+        [passwordHash, targetUserId, targetTenantId]
       );
 
       if (updateRes.rows.length === 0) {
-        return NextResponse.json({ error: "User not found" }, { status: 404 });
+        return NextResponse.json({ error: "User not found or inactive" }, { status: 404 });
       }
 
       const updated = updateRes.rows[0];
+      const now = new Date().toISOString();
 
-      // Sign fresh tokens with mustChangePassword: false
+      // Sign fresh tokens with updated tokenVersion and mustChangePassword: false
       const jwtPayload = {
         sub: updated.id,
         tenantId: updated.tenantId,
@@ -68,6 +96,10 @@ export async function POST(request: NextRequest) {
         fullName: updated.fullName,
         avatarUrl: updated.avatarUrl && updated.avatarUrl.length < 500 ? updated.avatarUrl : null,
         mustChangePassword: false,
+        tokenVersion: updated.tokenVersion,
+        lastLoginAt: updated.lastLoginAt ? new Date(updated.lastLoginAt).toISOString() : now,
+        loginAt: now,
+        phoneNumber: updated.phoneNumber || null,
       };
 
       const accessToken = await signAccessToken(jwtPayload);

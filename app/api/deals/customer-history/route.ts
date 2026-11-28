@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
+import { isValidUuid } from "@/lib/security";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -17,7 +18,7 @@ interface AccountHistoryItem {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -39,22 +40,19 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const isUuid = (v: string | null) =>
-    Boolean(v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v));
-
   try {
     return await withClient(async (client) => {
       // Resolve all matching lead IDs (selected lead + any duplicate leads with matching last-10 phone digits)
       const matchedLeadIds = new Set<string>();
       let leadFallbackEmail: string | null = null;
 
-      if (isUuid(leadId)) {
-        matchedLeadIds.add(leadId!);
+      if (isValidUuid(leadId)) {
         const lRes = await client.query(
           `SELECT id, phone_number, custom_metadata FROM leads WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
           [leadId, tenantId]
         );
         if (lRes.rows.length > 0) {
+          matchedLeadIds.add(lRes.rows[0].id);
           const meta = lRes.rows[0].custom_metadata as Record<string, any> | null;
           leadFallbackEmail = meta?.customerEmail || meta?.email || null;
           const dbPhone = String(lRes.rows[0].phone_number || "").replace(/\D/g, "");
@@ -104,7 +102,7 @@ export async function GET(request: NextRequest) {
          LEFT JOIN LATERAL (
            SELECT id, panel_user_id, user_type, gstin, payment_mode, final_amount, ops_approval_status, created_at
            FROM payments
-           WHERE deal_id = d.id
+           WHERE deal_id = d.id AND tenant_id = d.tenant_id
            ORDER BY created_at DESC
            LIMIT 1
          ) p ON true

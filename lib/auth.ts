@@ -1,6 +1,7 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
+import { withClient } from "@/lib/db";
 
 const rawSecret =
   process.env.JWT_SECRET ||
@@ -26,6 +27,7 @@ export interface JWTPayload {
   email: string;
   fullName: string;
   tokenType?: "access" | "refresh";
+  tokenVersion?: number;
   avatarUrl?: string | null;
   mustChangePassword?: boolean;
   lastLoginAt?: string | null;
@@ -33,12 +35,26 @@ export interface JWTPayload {
   phoneNumber?: string | null;
 }
 
+export interface SessionDbState {
+  id: string;
+  tenantId: string;
+  role: string;
+  isActive: boolean;
+  tokenVersion: number;
+  orgIsActive: boolean;
+  mustChangePassword?: boolean;
+}
+
 export async function signAccessToken(
   payload: JWTPayload,
   expiresIn?: string
 ): Promise<string> {
   const expiry = expiresIn || process.env.JWT_EXPIRY || JWT_SESSION_EXPIRY;
-  return new SignJWT({ ...payload, tokenType: "access" })
+  return new SignJWT({
+    ...payload,
+    tokenVersion: payload.tokenVersion ?? 1,
+    tokenType: "access",
+  })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(payload.sub)
     .setIssuedAt()
@@ -48,7 +64,11 @@ export async function signAccessToken(
 
 export async function signRefreshToken(payload: JWTPayload): Promise<string> {
   const expiry = process.env.JWT_REFRESH_EXPIRY || JWT_REFRESH_EXPIRY;
-  return new SignJWT({ ...payload, tokenType: "refresh" })
+  return new SignJWT({
+    ...payload,
+    tokenVersion: payload.tokenVersion ?? 1,
+    tokenType: "refresh",
+  })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(payload.sub)
     .setIssuedAt()
@@ -63,13 +83,34 @@ export async function verifyToken(
   try {
     const { payload } = await jwtVerify(token, JWT_SECRET);
     const data = payload as unknown as JWTPayload;
-    if (expectedType && data.tokenType && data.tokenType !== expectedType) {
+    if (expectedType && data.tokenType !== expectedType) {
       return null;
     }
     return data;
   } catch {
     return null;
   }
+}
+
+export function validateSessionRecord(
+  session: JWTPayload,
+  dbUser: SessionDbState | null
+): JWTPayload | null {
+  if (!dbUser || !dbUser.isActive || !dbUser.orgIsActive) {
+    return null;
+  }
+  const sessionTokenVersion = typeof session.tokenVersion === "number" ? session.tokenVersion : 1;
+  const dbTokenVersion = typeof dbUser.tokenVersion === "number" ? dbUser.tokenVersion : 1;
+  if (sessionTokenVersion !== dbTokenVersion) {
+    return null;
+  }
+  return {
+    ...session,
+    tenantId: dbUser.tenantId,
+    role: dbUser.role,
+    tokenVersion: dbTokenVersion,
+    mustChangePassword: dbUser.mustChangePassword ?? session.mustChangePassword,
+  };
 }
 
 export async function getSession(request?: NextRequest | Request): Promise<JWTPayload | null> {
@@ -90,6 +131,45 @@ export async function getSession(request?: NextRequest | Request): Promise<JWTPa
     }
     return null;
   } catch {
+    return null;
+  }
+}
+
+/**
+ * Verifies the JWT signature/expiry AND confirms against PostgreSQL that:
+ * - the user is still active,
+ * - their organization is active,
+ * - the tokenVersion has not been revoked by logout/password reset/block,
+ * - and returns the authoritative DB role & tenantId.
+ */
+export async function requireActiveSession(
+  request?: NextRequest | Request
+): Promise<JWTPayload | null> {
+  const session = await getSession(request);
+  if (!session?.sub || !session?.tenantId) {
+    return null;
+  }
+  try {
+    const dbUser = await withClient(async (client) => {
+      const res = await client.query<SessionDbState>(
+        `SELECT u.id,
+                u.tenant_id as "tenantId",
+                u.role,
+                u.is_active as "isActive",
+                COALESCE(u.token_version, 1)::int as "tokenVersion",
+                COALESCE(u.must_change_password, false) as "mustChangePassword",
+                COALESCE(o.is_active, true) as "orgIsActive"
+         FROM users u
+         JOIN organizations o ON u.tenant_id = o.id
+         WHERE u.id = $1
+         LIMIT 1`,
+        [session.sub]
+      );
+      return res.rows[0] || null;
+    });
+    return validateSessionRecord(session, dbUser);
+  } catch (err) {
+    console.error("[AUTH_SESSION_VERIFY]", err);
     return null;
   }
 }

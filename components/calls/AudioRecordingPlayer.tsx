@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Play, Pause, Download, Volume2, VolumeX, RotateCcw } from "lucide-react";
 import { formatDuration } from "@/lib/utils";
+import { sanitizeExternalUrl } from "@/lib/url-safety";
 
 interface AudioRecordingPlayerProps {
   recordingUrl: string;
@@ -87,12 +88,19 @@ export function AudioRecordingPlayer({
   }
 
   const effectiveDuration = duration > 0 ? duration : durationSeconds;
-  const progressPercent =
-    effectiveDuration > 0 ? Math.min(100, (currentTime / effectiveDuration) * 100) : 0;
+  const safeRecordingUrl = sanitizeExternalUrl(recordingUrl, { allowRelative: true });
+
+  if (!safeRecordingUrl) {
+    return (
+      <div className="inline-flex items-center gap-1.5 text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
+        Audio recording unavailable
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center gap-2 bg-slate-900 text-white px-3 py-1.5 rounded-xl border border-emerald-500/20 shadow-xs max-w-xs">
-      <audio ref={audioRef} src={recordingUrl} preload="metadata" />
+      <audio ref={audioRef} src={safeRecordingUrl} preload="metadata" />
 
       {/* Play/Pause Button */}
       <button
@@ -135,7 +143,7 @@ export function AudioRecordingPlayer({
 
       {/* Download Button */}
       <a
-        href={recordingUrl}
+        href={safeRecordingUrl}
         download
         target="_blank"
         rel="noopener noreferrer"

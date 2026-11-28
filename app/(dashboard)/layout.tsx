@@ -1,4 +1,4 @@
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { redirect } from "next/navigation";
 import Sidebar from "@/components/layout/Sidebar";
@@ -12,7 +12,7 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const session = await getSession();
+  const session = await requireActiveSession();
   if (!session) {
     redirect("/login");
   }
@@ -27,8 +27,8 @@ export default async function DashboardLayout({
 
   try {
     const userRes = await query<{ lastLoginAt: Date | null; phoneNumber: string | null; email: string | null }>(
-      `SELECT last_login_at as "lastLoginAt", phone_number as "phoneNumber", email FROM users WHERE id = $1`,
-      [session.sub]
+      `SELECT last_login_at as "lastLoginAt", phone_number as "phoneNumber", email FROM users WHERE id = $1 AND tenant_id = $2`,
+      [session.sub, session.tenantId]
     );
     if (userRes[0]) {
       if (userRes[0].lastLoginAt && !session.lastLoginAt && !session.loginAt) {

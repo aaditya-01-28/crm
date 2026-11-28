@@ -5,32 +5,49 @@ const PUBLIC_PATHS = [
   "/login",
   "/reset-password",
   "/api/auth/login",
+  "/api/auth/logout",
+  "/api/auth/refresh",
   "/api/auth/register",
   "/api/auth/forgot-password",
   "/api/auth/reset-password",
+  "/api/auth/update-password",
   "/api/app/version",
   "/api/app/download",
   "/downloads",
 ];
 
+const IDENTITY_HEADERS = [
+  "x-user-id",
+  "x-tenant-id",
+  "x-user-role",
+  "x-user-email",
+  "x-user-name",
+];
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Allow public paths
-  if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
-    return NextResponse.next();
+  // Always strip client-supplied identity headers before any routing or early return
+  const sanitizedHeaders = new Headers(request.headers);
+  for (const headerName of IDENTITY_HEADERS) {
+    sanitizedHeaders.delete(headerName);
   }
 
-  // Allow Next.js internals and static assets (images, icons, APK downloads, etc.)
+  // Allow public paths
+  if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
+    return NextResponse.next({ request: { headers: sanitizedHeaders } });
+  }
+
+  // Allow Next.js internals and non-API static assets
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
     pathname.startsWith("/icons") ||
     pathname.startsWith("/logo") ||
     pathname.startsWith("/downloads") ||
-    /\.(png|jpg|jpeg|svg|webp|ico|csv|apk)$/i.test(pathname)
+    (!pathname.startsWith("/api/") && /\.(png|jpg|jpeg|svg|webp|ico|csv|apk)$/i.test(pathname))
   ) {
-    return NextResponse.next();
+    return NextResponse.next({ request: { headers: sanitizedHeaders } });
   }
 
   const authHeader = request.headers.get("authorization");
@@ -67,6 +84,7 @@ export async function proxy(request: NextRequest) {
           fullName: refreshPayload.fullName,
           avatarUrl: refreshPayload.avatarUrl,
           mustChangePassword: refreshPayload.mustChangePassword,
+          tokenVersion: refreshPayload.tokenVersion ?? 1,
           lastLoginAt: refreshPayload.lastLoginAt,
           loginAt: refreshPayload.loginAt,
         });
@@ -90,15 +108,14 @@ export async function proxy(request: NextRequest) {
     return response;
   }
 
-  // Forward request
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set("x-user-id", payload.sub);
-  requestHeaders.set("x-tenant-id", payload.tenantId);
-  requestHeaders.set("x-user-role", payload.role);
-  requestHeaders.set("x-user-email", payload.email);
-  requestHeaders.set("x-user-name", payload.fullName);
+  // Forward verified identity headers (all prior client values already stripped)
+  sanitizedHeaders.set("x-user-id", payload.sub);
+  sanitizedHeaders.set("x-tenant-id", payload.tenantId);
+  sanitizedHeaders.set("x-user-role", payload.role);
+  sanitizedHeaders.set("x-user-email", payload.email);
+  sanitizedHeaders.set("x-user-name", payload.fullName);
 
-  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  const response = NextResponse.next({ request: { headers: sanitizedHeaders } });
 
   // If a renewed access token was generated, update the browser's cookie with remaining 6-hr window
   if (renewedAccessToken) {
@@ -120,6 +137,7 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|csv)$).*)",
+    "/api/:path*",
+    "/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|csv|apk)$).*)",
   ],
 };
