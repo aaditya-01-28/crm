@@ -3,7 +3,7 @@ import { withClient } from "@/lib/db";
 import { requireActiveSession } from "@/lib/auth";
 import { can, isSalesRep } from "@/lib/rbac";
 import { isValidUuid } from "@/lib/security";
-import { formatDuration, getISTDateRange, interestedCallSql, dealCloseDateSql } from "@/lib/utils";
+import { formatDuration, getISTDateRange, interestedCallSql, dealCloseDateSql, dealQuoteDateSql } from "@/lib/utils";
 import { ensureDealSplitsTable, effectiveDealSharesCte } from "@/lib/deal-splits";
 
 export async function GET(request: NextRequest) {
@@ -169,8 +169,8 @@ export async function GET(request: NextRequest) {
              JOIN effective_deal_shares eds ON eds.deal_id = d.id
              WHERE d.tenant_id = $1 AND eds.rep_id = ANY($2::uuid[])
                AND d.stage IN ('quote_sent', 'payment_pending', 'closed_won')
-               AND (CASE WHEN d.stage = 'closed_won' THEN ${dealCloseDateSql("d")} ELSE d.created_at END) >= $3
-               AND (CASE WHEN d.stage = 'closed_won' THEN ${dealCloseDateSql("d")} ELSE d.created_at END) <= $4
+               AND (CASE WHEN d.stage = 'closed_won' THEN ${dealCloseDateSql("d")} WHEN d.stage = 'quote_sent' THEN ${dealQuoteDateSql("d")} ELSE d.created_at END) >= $3
+               AND (CASE WHEN d.stage = 'closed_won' THEN ${dealCloseDateSql("d")} WHEN d.stage = 'quote_sent' THEN ${dealQuoteDateSql("d")} ELSE d.created_at END) <= $4
              GROUP BY eds.rep_id`,
             [tenantId, repIds, startOfDay, endOfDay]
           ),
@@ -197,8 +197,8 @@ export async function GET(request: NextRequest) {
              JOIN effective_deal_shares eds ON eds.deal_id = d.id
              WHERE d.tenant_id = $1 AND eds.rep_id = ANY($2::uuid[])
                AND d.stage IN ('quote_sent', 'payment_pending', 'closed_won')
-               AND (CASE WHEN d.stage = 'closed_won' THEN ${dealCloseDateSql("d")} ELSE d.created_at END) >= $3
-               AND (CASE WHEN d.stage = 'closed_won' THEN ${dealCloseDateSql("d")} ELSE d.created_at END) <= $4`,
+               AND (CASE WHEN d.stage = 'closed_won' THEN ${dealCloseDateSql("d")} WHEN d.stage = 'quote_sent' THEN ${dealQuoteDateSql("d")} ELSE d.created_at END) >= $3
+               AND (CASE WHEN d.stage = 'closed_won' THEN ${dealCloseDateSql("d")} WHEN d.stage = 'quote_sent' THEN ${dealQuoteDateSql("d")} ELSE d.created_at END) <= $4`,
             [tenantId, repIds, startOfDay, endOfDay]
           ),
           client.query(

@@ -213,18 +213,27 @@ export async function POST(request: NextRequest) {
     return await withClient(async (client) => {
       const phones = Array.from(new Set(batchLeads.map((l) => l.phone)));
       const existingRes = await client.query(
-        `SELECT id, phone_number, custom_metadata
+        `SELECT id, phone_number, custom_metadata,
+                RIGHT(REGEXP_REPLACE(phone_number, '\\D', '', 'g'), 10) as norm_phone
          FROM leads
-         WHERE tenant_id = $1 AND phone_number = ANY($2::varchar[])`,
+         WHERE tenant_id = $1
+           AND (
+             phone_number = ANY($2::varchar[])
+             OR RIGHT(REGEXP_REPLACE(phone_number, '\\D', '', 'g'), 10) = ANY($2::text[])
+           )
+         ORDER BY updated_at DESC`,
         [tenantId, phones]
       );
 
       const existingMap = new Map<string, { id: string; custom_metadata: any }>();
       for (const row of existingRes.rows) {
-        existingMap.set(row.phone_number, {
-          id: row.id,
-          custom_metadata: row.custom_metadata || {},
-        });
+        const key = row.norm_phone || cleanPhoneNumber(row.phone_number);
+        if (key && !existingMap.has(key)) {
+          existingMap.set(key, {
+            id: row.id,
+            custom_metadata: row.custom_metadata || {},
+          });
+        }
       }
 
       let roundRobinReps: string[] = [];

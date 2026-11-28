@@ -422,8 +422,23 @@ export function extractWonDateFromNotes(closingNotes?: string | null): string | 
 }
 
 /**
+ * Extracts `quoteSentDate` string from a deal's closingNotes JSON if present.
+ */
+export function extractQuoteSentDateFromNotes(closingNotes?: string | null): string | null {
+  if (!closingNotes) return null;
+  try {
+    const parsed = JSON.parse(closingNotes);
+    if (typeof parsed?.quoteSentDate === "string" && parsed.quoteSentDate.trim()) {
+      return parsed.quoteSentDate.trim();
+    }
+  } catch {}
+  return null;
+}
+
+/**
  * Resolves the effective Date of a pipeline deal for date filtering and card display.
  * Closed Won deals honor `wonDate` / `closedAt` / `expectedClosingDate` before `updatedAt`.
+ * Quote Sent deals honor `quoteSentDate` before `createdAt` / `updatedAt`.
  */
 export function getDealEffectiveDate(deal: {
   stage?: string | null;
@@ -448,6 +463,14 @@ export function getDealEffectiveDate(deal: {
     );
   }
 
+  if (deal.stage === "quote_sent") {
+    const quoteDateStr = extractQuoteSentDateFromNotes(deal.closingNotes);
+    if (quoteDateStr) {
+      const qd = parseDealDateToTimestamp(quoteDateStr);
+      if (qd) return qd;
+    }
+  }
+
   return (
     parseDealDateToTimestamp(deal.createdAt) ||
     parseDealDateToTimestamp(deal.updatedAt)
@@ -461,5 +484,14 @@ export function getDealEffectiveDate(deal: {
 export function dealCloseDateSql(alias = "d"): string {
   const p = alias ? `${alias}.` : "";
   return `COALESCE(${p}closed_at, CASE WHEN ${p}closing_notes ~ '^\\s*\\{' AND COALESCE(${p}closing_notes::jsonb->>'wonDate', '') ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN ((${p}closing_notes::jsonb->>'wonDate') || ' 12:00:00+05:30')::timestamptz ELSE NULL END, ${p}updated_at)`;
+}
+
+/**
+ * SQL expression for effective quote-sent timestamp of a deal row, preferring
+ * `closing_notes->>'quoteSentDate'` (anchored at noon IST) before falling back to `created_at`.
+ */
+export function dealQuoteDateSql(alias = "d"): string {
+  const p = alias ? `${alias}.` : "";
+  return `COALESCE(CASE WHEN ${p}closing_notes ~ '^\\s*\\{' AND COALESCE(${p}closing_notes::jsonb->>'quoteSentDate', '') ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN ((${p}closing_notes::jsonb->>'quoteSentDate') || ' 12:00:00+05:30')::timestamptz ELSE NULL END, ${p}created_at)`;
 }
 

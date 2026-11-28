@@ -20,18 +20,36 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ existing: [] });
     }
 
-    const uniquePhones = Array.from(new Set(phones.slice(0, 5000)));
+    const uniquePhones = Array.from(
+      new Set(
+        phones
+          .slice(0, 5000)
+          .map((p) => {
+            const d = String(p).replace(/\D/g, "");
+            return d.length >= 10 ? d.slice(-10) : d;
+          })
+          .filter(Boolean)
+      )
+    );
+    if (uniquePhones.length === 0) {
+      return NextResponse.json({ existing: [] });
+    }
 
     return await withClient(async (client) => {
       const res = await client.query(
-        `SELECT id, phone_number as "phone", contact_name as "contactName",
+        `SELECT id,
+                COALESCE(NULLIF(RIGHT(REGEXP_REPLACE(phone_number, '\\D', '', 'g'), 10), ''), phone_number) as "phone",
+                phone_number as "rawPhone",
+                contact_name as "contactName",
                 company_name as "companyName", status, service_type as "serviceType",
                 custom_metadata->>'secondaryPhone' as "secondaryPhone"
          FROM leads
          WHERE tenant_id = $1
            AND (
              phone_number = ANY($2::varchar[])
+             OR RIGHT(REGEXP_REPLACE(phone_number, '\\D', '', 'g'), 10) = ANY($2::text[])
              OR custom_metadata->>'secondaryPhone' = ANY($2::varchar[])
+             OR RIGHT(REGEXP_REPLACE(COALESCE(custom_metadata->>'secondaryPhone', ''), '\\D', '', 'g'), 10) = ANY($2::text[])
            )`,
         [session.tenantId, uniquePhones]
       );

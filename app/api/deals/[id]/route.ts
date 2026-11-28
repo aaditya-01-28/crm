@@ -100,6 +100,10 @@ export async function PATCH(
         typeof wonDetails?.wonDate === "string" && wonDetails.wonDate.trim()
           ? parseDealDateToTimestamp(wonDetails.wonDate)
           : null;
+      const explicitQuoteSentDate =
+        newStage === "quote_sent" && typeof body.quoteSentDate === "string" && body.quoteSentDate.trim()
+          ? parseDealDateToTimestamp(body.quoteSentDate)
+          : null;
 
       let newClosingDate =
         expectedClosingDate && !isNaN(new Date(expectedClosingDate).getTime())
@@ -163,9 +167,12 @@ export async function PATCH(
           decisionMakerName: body.decisionMakerName ?? existingDossier.decisionMakerName ?? null,
           notes: closingNotes ?? body.demoNotes ?? existingDossier.notes ?? null,
         });
-      } else if ((newStage === "demo_done" || newStage === "quote_sent") && (body.contactBackDate || body.followupChannel || closingNotes !== undefined)) {
+      } else if ((newStage === "demo_done" || newStage === "quote_sent") && (body.contactBackDate || body.followupChannel || body.quoteSentDate || closingNotes !== undefined)) {
         newNotes = JSON.stringify({
           ...existingDossier,
+          ...(newStage === "quote_sent"
+            ? { quoteSentDate: body.quoteSentDate ?? existingDossier.quoteSentDate ?? getISTDateString() }
+            : {}),
           contactBackDate: body.contactBackDate ?? existingDossier.contactBackDate ?? null,
           followupChannel: body.followupChannel ?? existingDossier.followupChannel ?? null,
           notes: closingNotes ?? body.demoFeedback ?? existingDossier.notes ?? null,
@@ -199,7 +206,7 @@ export async function PATCH(
                    service_type as "serviceType", quantity, quoted_price as "quotedPrice",
                    expected_closing_date as "expectedClosingDate", closed_at as "closedAt", stage, closing_notes as "closingNotes",
                    created_at as "createdAt", updated_at as "updatedAt"`,
-        [newStage, newNotes, newPrice, newClosingDate, newClosedAt, explicitWonDate, newService, newQuantity, id, tenantId]
+        [newStage, newNotes, newPrice, newClosingDate, newClosedAt, explicitWonDate || explicitQuoteSentDate, newService, newQuantity, id, tenantId]
       );
 
       const updated = updateRes.rows[0];

@@ -259,10 +259,20 @@ export async function POST(request: NextRequest) {
           }
 
           const phone = body.phoneNumber.trim();
-          // Check if lead already exists with this phone in this tenant
+          const phoneDigits = phone.replace(/\D/g, "");
+          const phoneSuffix = phoneDigits.length >= 10 ? phoneDigits.slice(-10) : phoneDigits;
+          // Check if lead already exists with this phone (matching normalized last 10 digits)
           const existingLeadRes = await client.query(
-            `SELECT id, assigned_rep_id as "assignedRepId", custom_metadata FROM leads WHERE tenant_id = $1 AND phone_number = $2 LIMIT 1`,
-            [tenantId, phone]
+            `SELECT id, assigned_rep_id as "assignedRepId", custom_metadata
+             FROM leads
+             WHERE tenant_id = $1
+               AND (
+                 phone_number = $2
+                 OR (LENGTH($3) >= 7 AND RIGHT(REGEXP_REPLACE(phone_number, '\\D', '', 'g'), 10) = $3)
+               )
+             ORDER BY updated_at DESC
+             LIMIT 1`,
+            [tenantId, phone, phoneSuffix]
           );
 
           const customerEmail =
@@ -433,8 +443,11 @@ export async function POST(request: NextRequest) {
             decisionMakerName: item.decisionMakerName,
             notes: item.closingNotes || item.demoNotes || null,
           });
-        } else if ((item.stage === "demo_done" || item.stage === "quote_sent") && (item.contactBackDate || item.followupChannel)) {
+        } else if ((item.stage === "demo_done" || item.stage === "quote_sent") && (item.contactBackDate || item.followupChannel || item.quoteSentDate)) {
           closingNotesToStore = JSON.stringify({
+            ...(item.stage === "quote_sent"
+              ? { quoteSentDate: item.quoteSentDate || getISTDateString() }
+              : {}),
             contactBackDate: item.contactBackDate,
             followupChannel: item.followupChannel,
             notes: item.closingNotes || item.demoFeedback || null,
@@ -454,16 +467,21 @@ export async function POST(request: NextRequest) {
           [leadId, tenantId]
         );
 
-        const isClosedWonItem = (item.stage || "quote_sent") === "closed_won";
+        const itemStage = item.stage || "quote_sent";
+        const isClosedWonItem = itemStage === "closed_won";
         const itemWonDateStr = isClosedWonItem
           ? (item.wonDate || body.wonDate || getISTDateString())
           : null;
         const itemWonTs = parseDealDateToTimestamp(itemWonDateStr);
+        const itemQuoteSentTs =
+          itemStage === "quote_sent"
+            ? parseDealDateToTimestamp(item.quoteSentDate || body.quoteSentDate || getISTDateString())
+            : null;
         const itemExpectedClosing =
           itemWonTs ||
           (item.expectedClosingDate ? parseDealDateToTimestamp(item.expectedClosingDate) : null);
         const itemClosedAt = isClosedWonItem ? (itemWonTs || new Date()) : null;
-        const itemCreatedAt = itemWonTs || new Date();
+        const itemCreatedAt = itemWonTs || itemQuoteSentTs || new Date();
 
         const parsedQty = Math.max(0, parseInt(item.quantity) || 0);
         const parsedPrice = Math.max(0, parseFloat(item.quotedPrice) || 0);
@@ -487,7 +505,7 @@ export async function POST(request: NextRequest) {
               parsedPrice,
               itemExpectedClosing,
               itemClosedAt,
-              itemWonTs,
+              itemWonTs || itemQuoteSentTs,
               item.stage || "quote_sent",
               closingNotesToStore,
               existingZeroDeal.rows[0].id,

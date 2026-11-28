@@ -468,6 +468,76 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      const digitsOnly = phoneNumber.replace(/\D/g, "");
+      const normSuffix = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : digitsOnly;
+      const cleanStoredPhone = normSuffix.length === 10 ? normSuffix : phoneNumber.trim();
+
+      if (normSuffix.length >= 7) {
+        const existingLeadRes = await client.query(
+          `SELECT id, tenant_id as "tenantId", assigned_rep_id as "assignedRepId",
+                  first_assigned_rep_id as "firstAssignedRepId", first_assigned_at as "firstAssignedAt",
+                  phone_number as "phoneNumber", contact_name as "contactName",
+                  company_name as "companyName", website_url as "websiteUrl",
+                  business_vertical as "businessVertical", service_type as "serviceType",
+                  source, status, rnr_count as "rnrCount", custom_metadata as "customMetadata",
+                  created_at as "createdAt", updated_at as "updatedAt"
+           FROM leads
+           WHERE tenant_id = $1
+             AND RIGHT(REGEXP_REPLACE(phone_number, '\\D', '', 'g'), 10) = $2
+           ORDER BY updated_at DESC
+           LIMIT 1`,
+          [tenantId, normSuffix]
+        );
+
+        if (existingLeadRes.rows.length > 0) {
+          const ex = existingLeadRes.rows[0];
+          const oldMeta = (ex.customMetadata as Record<string, any>) || {};
+          const mergedMeta = { ...oldMeta, ...metadata };
+          const updateEx = await client.query(
+            `UPDATE leads
+             SET contact_name = COALESCE(NULLIF($1, ''), contact_name),
+                 company_name = COALESCE(NULLIF($2, ''), company_name),
+                 website_url = COALESCE(NULLIF($3, ''), website_url),
+                 business_vertical = COALESCE(NULLIF($4, ''), business_vertical),
+                 service_type = COALESCE(NULLIF($5, ''), service_type),
+                 assigned_rep_id = COALESCE(assigned_rep_id, $6),
+                 first_assigned_rep_id = COALESCE(first_assigned_rep_id, $6),
+                 first_assigned_at = COALESCE(first_assigned_at, CASE WHEN $6::uuid IS NOT NULL THEN NOW() ELSE NULL END),
+                 custom_metadata = $7::jsonb,
+                 updated_at = NOW()
+             WHERE id = $8 AND tenant_id = $9
+             RETURNING id, tenant_id as "tenantId", assigned_rep_id as "assignedRepId",
+                       first_assigned_rep_id as "firstAssignedRepId", first_assigned_at as "firstAssignedAt",
+                       phone_number as "phoneNumber", contact_name as "contactName",
+                       company_name as "companyName", website_url as "websiteUrl",
+                       business_vertical as "businessVertical", service_type as "serviceType",
+                       source, status, rnr_count as "rnrCount", custom_metadata as "customMetadata",
+                       created_at as "createdAt", updated_at as "updatedAt"`,
+            [
+              contactName?.trim() || "",
+              companyName?.trim() || "",
+              safeWebsiteUrl || "",
+              businessVertical?.trim() || "",
+              serviceType?.trim() || "",
+              initialRep || null,
+              JSON.stringify(mergedMeta),
+              ex.id,
+              tenantId,
+            ]
+          );
+          return NextResponse.json(
+            {
+              lead: {
+                ...updateEx.rows[0],
+                preferredLanguage: preferredLanguage || (mergedMeta.preferredLanguage as string) || null,
+              },
+              deduplicated: true,
+            },
+            { status: 200 }
+          );
+        }
+      }
+
       const insertRes = await client.query(
         `INSERT INTO leads (
            tenant_id, assigned_rep_id, first_assigned_rep_id, first_assigned_at,
@@ -488,7 +558,7 @@ export async function POST(request: NextRequest) {
           initialRep || null,
           initialRep || null,
           initialRep ? new Date() : null,
-          phoneNumber.trim(),
+          cleanStoredPhone,
           contactName || null,
           companyName || null,
           safeWebsiteUrl,

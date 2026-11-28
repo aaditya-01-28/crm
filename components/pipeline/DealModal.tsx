@@ -124,6 +124,7 @@ export interface CommercialItem {
   demoNotes?: string;
 
   // Demo Done & Quote Sent specific
+  quoteSentDate?: string;
   contactBackDate?: string;
   followupChannel?: string;
   demoFeedback?: string;
@@ -386,11 +387,19 @@ export function DealModal({
           ? parseFloat(parsedDossier.finalAmount).toFixed(2)
           : (parseFloat(originalAmount || "0") * 1.18).toFixed(2));
 
+    const istToday = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split("T")[0];
+    const quoteSentDate =
+      parsedDossier?.quoteSentDate ||
+      (deal?.createdAt
+        ? new Date(new Date(deal.createdAt).getTime() + 5.5 * 60 * 60 * 1000).toISOString().split("T")[0]
+        : null) ||
+      istToday;
+
     const wonDate =
       parsedDossier?.wonDate ||
       (pay?.createdAt ? pay.createdAt.split("T")[0] : null) ||
       (deal?.createdAt ? deal.createdAt.split("T")[0] : null) ||
-      new Date().toISOString().split("T")[0];
+      istToday;
 
     return [
       {
@@ -406,6 +415,7 @@ export function DealModal({
           ? deal.expectedClosingDate.split("T")[0]
           : "",
         notes: parsedDossier ? (parsedDossier.notes || "") : (deal?.closingNotes || ""),
+        quoteSentDate,
         contactBackDate: parsedDossier?.contactBackDate ? formatForDateTimeLocal(parsedDossier.contactBackDate) : getDefaultNextDayFollowup(),
         demoDate:
           deal?.demoTask?.scheduledTime
@@ -641,6 +651,7 @@ export function DealModal({
         quotedPrice: "0",
         stage: "quote_sent",
         closingDate: "",
+        quoteSentDate: new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split("T")[0],
         notes: "",
         contactBackDate: getDefaultNextDayFollowup(),
         demoDate: getDefaultTomorrowDemo(),
@@ -681,6 +692,7 @@ export function DealModal({
         quotedPrice: "0",
         stage: "quote_sent",
         closingDate: prev[0]?.closingDate || "",
+        quoteSentDate: prev[0]?.quoteSentDate || new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split("T")[0],
         notes: "",
         contactBackDate: getDefaultNextDayFollowup(),
         demoDate: getDefaultTomorrowDemo(),
@@ -738,6 +750,9 @@ export function DealModal({
           }
           if ((value === "demo_done" || value === "quote_sent") && !updated.contactBackDate) {
             updated.contactBackDate = getDefaultNextDayFollowup();
+          }
+          if (value === "quote_sent" && !updated.quoteSentDate) {
+            updated.quoteSentDate = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split("T")[0];
           }
           if (value === "closed_won") {
             if (!updated.wonDate) updated.wonDate = new Date().toISOString().split("T")[0];
@@ -917,6 +932,7 @@ export function DealModal({
             address: address.trim() || null,
             demoDate: firstC.demoDate,
             meetingLink: firstC.meetingLink,
+            quoteSentDate: firstC.quoteSentDate,
             contactBackDate: firstC.contactBackDate,
             decisionMakerName: firstC.decisionMakerName,
             demoNotes: firstC.demoNotes,
@@ -981,6 +997,7 @@ export function DealModal({
               closingNotes: c.notes || c.demoNotes || c.demoFeedback || c.lostRemarks || null,
               demoDate: c.demoDate,
               meetingLink: c.meetingLink,
+              quoteSentDate: c.quoteSentDate,
               contactBackDate: c.contactBackDate,
               recontactDate: c.recontactDate,
               lostRemarks: c.lostRemarks,
@@ -1699,17 +1716,16 @@ export function DealModal({
 
                           <div>
                             <label className="text-xs font-semibold text-gray-700 mb-1 block">
-                              Contact Back Date for Update <span className="text-rose-500">*</span>
+                              Quotation Sent Date <span className="text-rose-500">*</span>
                             </label>
-                            <DateTime12hInput
-                              value={item.contactBackDate || getDefaultNextDayFollowup()}
-                              onChange={(val) => updateCommercial(idx, "contactBackDate", val)}
+                            <input
+                              type="date"
+                              value={item.quoteSentDate || new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().split("T")[0]}
+                              onChange={(e) => updateCommercial(idx, "quoteSentDate", e.target.value)}
                               required
                               disabled={!canEdit}
+                              className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
-                            <p className="text-[10px] text-amber-700 mt-1">
-                              ⚡ Default: Next business day at 11:00 AM for quotation follow-up.
-                            </p>
                           </div>
 
                           <div>
@@ -1723,6 +1739,21 @@ export function DealModal({
                               disabled={!canEdit}
                               className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed"
                             />
+                          </div>
+
+                          <div className="sm:col-span-2">
+                            <label className="text-xs font-semibold text-gray-700 mb-1 block">
+                              Contact Back Date for Update <span className="text-rose-500">*</span>
+                            </label>
+                            <DateTime12hInput
+                              value={item.contactBackDate || getDefaultNextDayFollowup()}
+                              onChange={(val) => updateCommercial(idx, "contactBackDate", val)}
+                              required
+                              disabled={!canEdit}
+                            />
+                            <p className="text-[10px] text-amber-700 mt-1">
+                              ⚡ Default: Next business day at 11:00 AM for quotation follow-up.
+                            </p>
                           </div>
                         </div>
 

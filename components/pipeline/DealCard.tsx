@@ -157,6 +157,10 @@ export function DealCard({
       return formatted ? { label: "Demo Done", value: formatted, icon: "clock" as const } : null;
     }
     if (stage === "quote_sent") {
+      if (meta.quoteSentDate) {
+        const formatted = formatISTCardDateTime(meta.quoteSentDate, false);
+        return formatted ? { label: "Sent", value: formatted, icon: "calendar" as const } : null;
+      }
       if (deal.expectedClosingDate) {
         const formatted = formatISTCardDateTime(deal.expectedClosingDate, false);
         return formatted ? { label: "Target", value: formatted, icon: "calendar" as const } : null;
@@ -166,7 +170,7 @@ export function DealCard({
         const formatted = formatISTCardDateTime(fuRaw, true);
         return formatted ? { label: "Follow-up", value: formatted, icon: "clock" as const } : null;
       }
-      const formatted = formatISTCardDateTime(deal.updatedAt || deal.createdAt, true);
+      const formatted = formatISTCardDateTime(deal.createdAt || deal.updatedAt, true);
       return formatted ? { label: "Sent", value: formatted, icon: "clock" as const } : null;
     }
     if (stage === "payment_pending") {
@@ -366,7 +370,11 @@ export function DealCard({
         const hasDemoDoneDetails =
           stage === "demo_done" && (scheduledWasAt || followupAt || meta.followupChannel || displayNotes);
         const hasQuoteDetails =
-          stage === "quote_sent" && (followupAt || meta.followupChannel || displayNotes);
+          stage === "quote_sent" &&
+          (followupAt ||
+            meta.followupChannel ||
+            displayNotes ||
+            (meta.quoteSentDate && deal.expectedClosingDate));
         const hasPayPendingDetails =
           stage === "payment_pending" && (paymentMode || displayNotes);
         const hasWonDetails =
@@ -443,16 +451,29 @@ export function DealCard({
               </>
             )}
 
-            {stage === "quote_sent" && (followupAt || meta.followupChannel) && (
-              <p className="flex items-center gap-1 flex-wrap text-slate-700">
-                <Clock className="w-3 h-3 text-amber-600 shrink-0" />
-                {followupAt && <span>Follow-up: {followupAt}</span>}
-                {meta.followupChannel && (
-                  <span className="bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.2 rounded text-[10px] font-medium">
-                    {meta.followupChannel}
-                  </span>
+            {stage === "quote_sent" && (
+              <>
+                {meta.quoteSentDate && deal.expectedClosingDate && (() => {
+                  const validFmt = formatISTCardDateTime(deal.expectedClosingDate, false);
+                  return validFmt ? (
+                    <p className="flex items-center gap-1 text-slate-600">
+                      <Calendar className="w-3 h-3 text-amber-600 shrink-0" />
+                      <span>Valid till: {validFmt}</span>
+                    </p>
+                  ) : null;
+                })()}
+                {(followupAt || meta.followupChannel) && (
+                  <p className="flex items-center gap-1 flex-wrap text-slate-700">
+                    <Clock className="w-3 h-3 text-amber-600 shrink-0" />
+                    {followupAt && <span>Follow-up: {followupAt}</span>}
+                    {meta.followupChannel && (
+                      <span className="bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.2 rounded text-[10px] font-medium">
+                        {meta.followupChannel}
+                      </span>
+                    )}
+                  </p>
                 )}
-              </p>
+              </>
             )}
 
             {stage === "payment_pending" && paymentMode && (
