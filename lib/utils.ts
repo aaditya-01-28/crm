@@ -175,18 +175,24 @@ export function formatDuration(seconds: number): string {
 }
 
 export const SERVICE_INTERESTS = [
-  "WhatsApp API",
+  "WhatsApp API (Meta - Marketing)",
+  "WhatsApp API (Meta - Utility)",
   "Bulk WhatsApp",
   "Virtual WhatsApp",
-  "Bulk SMS",
-  "RCS Messaging",
-  "Transactional SMS",
   "Promotional SMS",
-  "Voice SMS / OBD",
-  "OTP API",
-  "DLT & SMS Gateway",
-  "Combo WA+SMS",
-  "Reseller",
+  "Transactional SMS",
+  "Voice SMS (15 Sec)",
+  "Voice SMS (30 Sec)",
+  "RCS (Marketing)",
+  "RCS (Utility)",
+  "Reseller Panel",
+  "DLT Registration",
+  "MSME",
+  "Database",
+  "Website",
+  "CRM",
+  "HRMS",
+  "Email Marketing",
 ];
 
 export function parseServices(serviceStr?: string | null): string[] {

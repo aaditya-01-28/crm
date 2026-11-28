@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { getSession } from "@/lib/auth";
-import { isManagerOrAdmin } from "@/lib/rbac";
+import { requireActiveSession } from "@/lib/auth";
+import { isAdmin, isManagerOrAdmin } from "@/lib/rbac";
+import { isValidUuid, sanitizeExternalUrl } from "@/lib/security";
 import { parseScheduledDateTime, getISTDateString, parseDealDateToTimestamp } from "@/lib/utils";
 import { ensureDealSplitsTable, syncDealSplits } from "@/lib/deal-splits";
 
@@ -13,9 +14,12 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!isValidUuid(id)) {
+    return NextResponse.json({ error: "Invalid deal ID" }, { status: 400 });
   }
   const tenantId = session.tenantId;
   const repId = session.sub;
@@ -26,42 +30,72 @@ export async function PATCH(
     const { stage, closingNotes, quotedPrice, expectedClosingDate, serviceType, quantity } = body;
 
     return await withClient(async (client) => {
-      await client.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;").catch(() => {});
-      await ensureDealSplitsTable(client);
+      await client.query("BEGIN");
+      try {
+        await ensureDealSplitsTable(client);
 
-      const dealRes = await client.query(
-        "SELECT id, lead_id, rep_id, stage, closing_notes, quoted_price, expected_closing_date, closed_at, service_type, quantity FROM deals WHERE id = $1 AND tenant_id = $2",
-        [id, tenantId]
-      );
-
-      if (dealRes.rows.length === 0) {
-        return NextResponse.json({ error: "Deal not found" }, { status: 404 });
-      }
-
-      const deal = dealRes.rows[0];
-
-      // Permissions: Manager/Admin can edit any deal; Executives (sales_rep) can edit their assigned deals
-      const isOwner = deal.rep_id === repId;
-      if (!isManagerOrAdmin(role) && !isOwner) {
-        return NextResponse.json(
-          { error: "Forbidden: You can only edit pipeline details for your assigned deals" },
-          { status: 403 }
+        const dealRes = await client.query(
+          "SELECT id, lead_id, rep_id, stage, closing_notes, quoted_price, expected_closing_date, closed_at, service_type, quantity FROM deals WHERE id = $1 AND tenant_id = $2 FOR UPDATE",
+          [id, tenantId]
         );
-      }
 
-      // Commercial field restriction: only manager/admin can change financial fields
-      const isCommercialEdit =
-        quotedPrice !== undefined || quantity !== undefined || serviceType !== undefined;
-      if (isCommercialEdit && !isManagerOrAdmin(role)) {
-        return NextResponse.json(
-          { error: "Only managers can edit commercial/financial deal details" },
-          { status: 403 }
+        if (dealRes.rows.length === 0) {
+          await client.query("ROLLBACK");
+          return NextResponse.json({ error: "Deal not found" }, { status: 404 });
+        }
+
+        const deal = dealRes.rows[0];
+
+        // Permissions: Manager/Admin can edit any deal; Executives (sales_rep) can edit their assigned deals
+        const isOwner = deal.rep_id === repId;
+        if (!isManagerOrAdmin(role) && !isOwner) {
+          await client.query("ROLLBACK");
+          return NextResponse.json(
+            { error: "Forbidden: You can only edit pipeline details for your assigned deals" },
+            { status: 403 }
+          );
+        }
+
+        const existingPay = await client.query(
+          "SELECT id, ops_approval_status FROM payments WHERE deal_id = $1 AND tenant_id = $2 LIMIT 1",
+          [id, tenantId]
         );
-      }
+        const isApprovedPayment = existingPay.rows[0]?.ops_approval_status === "approved";
+
+        // Commercial & financial field restriction
+        const wonDetails = body.wonDetails || body || {};
+        const isFinancialPayload =
+          quotedPrice !== undefined ||
+          quantity !== undefined ||
+          serviceType !== undefined ||
+          body.wonDetails !== undefined ||
+          body.splitConfig !== undefined ||
+          body.additionalCommercials !== undefined;
+
+        if (isApprovedPayment && isFinancialPayload && !isAdmin(role)) {
+          await client.query("ROLLBACK");
+          return NextResponse.json(
+            { error: "Forbidden: Approved payment records and splits are locked." },
+            { status: 403 }
+          );
+        }
+
+        const isCommercialEdit =
+          quotedPrice !== undefined ||
+          quantity !== undefined ||
+          serviceType !== undefined ||
+          (existingPay.rows.length > 0 &&
+            (body.wonDetails !== undefined || body.splitConfig !== undefined));
+        if (isCommercialEdit && !isManagerOrAdmin(role)) {
+          await client.query("ROLLBACK");
+          return NextResponse.json(
+            { error: "Forbidden: Only managers can edit commercial/financial or submitted payment details" },
+            { status: 403 }
+          );
+        }
 
       const newStage = stage || deal.stage;
-      const newPrice = quotedPrice !== undefined ? quotedPrice : deal.quoted_price;
-      const wonDetails = body.wonDetails || body || {};
+      const newPrice = quotedPrice !== undefined ? Math.max(0, Number(quotedPrice) || 0) : deal.quoted_price;
       const explicitWonDate =
         typeof wonDetails?.wonDate === "string" && wonDetails.wonDate.trim()
           ? parseDealDateToTimestamp(wonDetails.wonDate)
@@ -117,7 +151,7 @@ export async function PATCH(
           finalAmount: wonDetails.finalAmount || newPrice,
           paymentMode: wonDetails.paymentMode || existingDossier.paymentMode || null,
           gstinNumber: wonDetails.gstinNumber || wonDetails.gstin || existingDossier.gstinNumber || null,
-          paymentScreenshotUrl: wonDetails.paymentScreenshotUrl || wonDetails.screenshotUrl || existingDossier.paymentScreenshotUrl || null,
+          paymentScreenshotUrl: sanitizeExternalUrl(wonDetails.paymentScreenshotUrl || wonDetails.screenshotUrl, { allowRelative: true }) || existingDossier.paymentScreenshotUrl || null,
           notes: closingNotes || existingDossier.notes || null,
         };
         newNotes = JSON.stringify(dossier);
@@ -125,7 +159,7 @@ export async function PATCH(
         newNotes = JSON.stringify({
           ...existingDossier,
           demoDate: body.demoDate ?? existingDossier.demoDate ?? null,
-          meetingLink: body.meetingLink ?? existingDossier.meetingLink ?? null,
+          meetingLink: sanitizeExternalUrl(body.meetingLink) ?? existingDossier.meetingLink ?? null,
           decisionMakerName: body.decisionMakerName ?? existingDossier.decisionMakerName ?? null,
           notes: closingNotes ?? body.demoNotes ?? existingDossier.notes ?? null,
         });
@@ -160,12 +194,12 @@ export async function PATCH(
              closed_at = $5,
              created_at = COALESCE($6, created_at),
              service_type = $7, quantity = $8, updated_at = NOW()
-         WHERE id = $9
+         WHERE id = $9 AND tenant_id = $10
          RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
                    service_type as "serviceType", quantity, quoted_price as "quotedPrice",
                    expected_closing_date as "expectedClosingDate", closed_at as "closedAt", stage, closing_notes as "closingNotes",
                    created_at as "createdAt", updated_at as "updatedAt"`,
-        [newStage, newNotes, newPrice, newClosingDate, newClosedAt, explicitWonDate, newService, newQuantity, id]
+        [newStage, newNotes, newPrice, newClosingDate, newClosedAt, explicitWonDate, newService, newQuantity, id, tenantId]
       );
 
       const updated = updateRes.rows[0];
@@ -191,13 +225,14 @@ export async function PATCH(
                  service_type = COALESCE($3, service_type),
                  custom_metadata = $4::jsonb,
                  updated_at = NOW()
-             WHERE id = $5`,
+             WHERE id = $5 AND tenant_id = $6`,
             [
               body.contactName || null,
               body.companyName || null,
               body.serviceType || null,
               JSON.stringify(updatedMeta),
               deal.lead_id,
+              tenantId,
             ]
           );
         }
@@ -205,34 +240,44 @@ export async function PATCH(
 
       // Update lead status according to deal stage
       if (stage === "closed_won" && deal.lead_id) {
-        await client.query("UPDATE leads SET status = 'won', updated_at = NOW() WHERE id = $1", [
+        await client.query("UPDATE leads SET status = 'won', updated_at = NOW() WHERE id = $1 AND tenant_id = $2", [
           deal.lead_id,
+          tenantId,
         ]);
       } else if (stage === "closed_lost" && deal.lead_id) {
-        await client.query("UPDATE leads SET status = 'lost', updated_at = NOW() WHERE id = $1", [
+        await client.query("UPDATE leads SET status = 'lost', updated_at = NOW() WHERE id = $1 AND tenant_id = $2", [
           deal.lead_id,
+          tenantId,
         ]);
       } else if (stage === "demo_done" && deal.lead_id) {
-        await client.query("UPDATE leads SET status = 'demo_done', updated_at = NOW() WHERE id = $1", [
+        await client.query("UPDATE leads SET status = 'demo_done', updated_at = NOW() WHERE id = $1 AND tenant_id = $2", [
           deal.lead_id,
+          tenantId,
         ]);
         await client.query(
-          "UPDATE scheduled_tasks SET status = 'completed', updated_at = NOW() WHERE lead_id = $1 AND task_type = 'product_demo' AND status = 'pending'",
-          [deal.lead_id]
+          "UPDATE scheduled_tasks SET status = 'completed', updated_at = NOW() WHERE lead_id = $1 AND tenant_id = $2 AND task_type = 'product_demo' AND status = 'pending'",
+          [deal.lead_id, tenantId]
         );
       } else if (stage === "demo_scheduled" && deal.lead_id) {
         await client.query(
-          "UPDATE leads SET status = 'demo_scheduled', updated_at = NOW() WHERE id = $1",
-          [deal.lead_id]
+          "UPDATE leads SET status = 'demo_scheduled', updated_at = NOW() WHERE id = $1 AND tenant_id = $2",
+          [deal.lead_id, tenantId]
         );
       } else if ((stage === "quote_sent" || stage === "payment_pending") && deal.lead_id) {
         await client.query(
-          "UPDATE leads SET status = 'deal_created', updated_at = NOW() WHERE id = $1",
-          [deal.lead_id]
+          "UPDATE leads SET status = 'deal_created', updated_at = NOW() WHERE id = $1 AND tenant_id = $2",
+          [deal.lead_id, tenantId]
         );
       }
 
       if (deal.lead_id && Array.isArray(body.additionalCommercials) && body.additionalCommercials.length > 0) {
+        if (!isManagerOrAdmin(role)) {
+          await client.query("ROLLBACK");
+          return NextResponse.json(
+            { error: "Forbidden: Only managers can add additional commercials" },
+            { status: 403 }
+          );
+        }
         for (const item of body.additionalCommercials) {
           if (item.serviceType && item.quantity && item.quotedPrice !== undefined) {
             const addClosingDate =
@@ -250,8 +295,8 @@ export async function PATCH(
                 deal.lead_id,
                 deal.rep_id || session?.sub || repId,
                 item.serviceType,
-                parseInt(item.quantity) || 0,
-                parseFloat(item.quotedPrice) || 0,
+                Math.max(0, parseInt(item.quantity) || 0),
+                Math.max(0, parseFloat(item.quotedPrice) || 0),
                 addClosingDate,
                 item.stage || "quote_sent",
                 item.closingNotes || null,
@@ -261,8 +306,7 @@ export async function PATCH(
         }
       }
 
-      // Closed Won payment dossier record (upsert payment to keep in sync)
-      // Note: "payments" table does NOT have an updated_at column in database schema.
+      // Closed Won payment dossier record (upsert payment to keep in sync; never mutate already-approved payment records here)
       if (newStage === "closed_won" && deal.lead_id) {
         const portalUserId =
           wonDetails.userId ||
@@ -278,35 +322,34 @@ export async function PATCH(
           paymentRepId = userRes.rows[0]?.id || null;
         }
 
-        const existingPay = await client.query(
-          "SELECT id, ops_approval_status FROM payments WHERE deal_id = $1 AND tenant_id = $2 LIMIT 1",
-          [id, tenantId]
-        );
+        const safeScreenshot =
+          sanitizeExternalUrl(wonDetails.paymentScreenshotUrl || wonDetails.screenshotUrl, { allowRelative: true }) || "NA";
 
-        if (existingPay.rows.length > 0) {
+        if (existingPay.rows.length > 0 && !isApprovedPayment) {
           await client.query(
             `UPDATE payments
              SET user_type = $1, panel_user_id = $2, credits_to_add = $3,
                  original_amount = $4, tax_amount = $5, tds_amount = $6, final_amount = $7,
                  payment_mode = $8, gstin = $9, screenshot_url = $10,
                  created_at = COALESCE($11, created_at)
-             WHERE id = $12`,
+             WHERE id = $12 AND tenant_id = $13`,
             [
               wonDetails.userType || "new_user",
               portalUserId,
-              parseInt(wonDetails.creditsToAdd || newQuantity) || 0,
-              parseFloat(wonDetails.originalAmount || newPrice) || 0,
-              parseFloat(wonDetails.taxAmount || 0) || 0,
-              parseFloat(wonDetails.tds || 0) || 0,
-              parseFloat(wonDetails.finalAmount || newPrice) || 0,
+              Math.max(0, parseInt(wonDetails.creditsToAdd || newQuantity) || 0),
+              Math.max(0, parseFloat(wonDetails.originalAmount || newPrice) || 0),
+              Math.max(0, parseFloat(wonDetails.taxAmount || 0) || 0),
+              Math.max(0, parseFloat(wonDetails.tds || 0) || 0),
+              Math.max(0, parseFloat(wonDetails.finalAmount || newPrice) || 0),
               wonDetails.paymentMode || "UPI / QR",
               wonDetails.gstinNumber || wonDetails.gstin || null,
-              wonDetails.paymentScreenshotUrl || wonDetails.screenshotUrl || "NA",
+              safeScreenshot,
               explicitWonDate,
               existingPay.rows[0].id,
+              tenantId,
             ]
           );
-        } else if (paymentRepId) {
+        } else if (existingPay.rows.length === 0 && paymentRepId) {
           await client.query(
             `INSERT INTO payments (
                tenant_id, deal_id, lead_id, rep_id, user_type, panel_user_id,
@@ -321,20 +364,20 @@ export async function PATCH(
               paymentRepId,
               wonDetails.userType || "new_user",
               portalUserId,
-              parseInt(wonDetails.creditsToAdd || newQuantity) || 0,
-              parseFloat(wonDetails.originalAmount || newPrice) || 0,
-              parseFloat(wonDetails.taxAmount || 0) || 0,
-              parseFloat(wonDetails.tds || 0) || 0,
-              parseFloat(wonDetails.finalAmount || newPrice) || 0,
+              Math.max(0, parseInt(wonDetails.creditsToAdd || newQuantity) || 0),
+              Math.max(0, parseFloat(wonDetails.originalAmount || newPrice) || 0),
+              Math.max(0, parseFloat(wonDetails.taxAmount || 0) || 0),
+              Math.max(0, parseFloat(wonDetails.tds || 0) || 0),
+              Math.max(0, parseFloat(wonDetails.finalAmount || newPrice) || 0),
               wonDetails.paymentMode || "UPI / QR",
               wonDetails.gstinNumber || wonDetails.gstin || null,
-              wonDetails.paymentScreenshotUrl || wonDetails.screenshotUrl || "NA",
+              safeScreenshot,
               newClosedAt || new Date(),
             ]
           );
         }
 
-        if (body.splitConfig !== undefined) {
+        if (body.splitConfig !== undefined && !isApprovedPayment) {
           const currentOpsStatus =
             existingPay.rows[0]?.ops_approval_status || "pending_verification";
           await syncDealSplits({
@@ -346,7 +389,7 @@ export async function PATCH(
             status: currentOpsStatus === "approved" ? "approved" : "pending_verification",
           });
         }
-      } else if (body.splitConfig && !body.splitConfig.enabled) {
+      } else if (body.splitConfig && !body.splitConfig.enabled && !isApprovedPayment) {
         await syncDealSplits({
           client,
           tenantId,
@@ -357,23 +400,22 @@ export async function PATCH(
         });
       }
 
-      await client.query("ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_source TEXT DEFAULT 'dialer';").catch(() => {});
-
       // Demo Scheduled calendar task (tagged as pipeline so it doesn't pollute follow-up agenda)
       if (newStage === "demo_scheduled" && body.demoDate && deal.lead_id) {
         const demoDateObj = parseScheduledDateTime(body.demoDate);
         if (demoDateObj && !isNaN(demoDateObj.getTime())) {
+          const safeDemoLink = sanitizeExternalUrl(body.meetingLink);
           const existingTaskRes = await client.query(
-            "SELECT id FROM scheduled_tasks WHERE lead_id = $1 AND task_type = 'product_demo' AND status = 'pending' ORDER BY scheduled_time DESC LIMIT 1",
-            [deal.lead_id]
+            "SELECT id FROM scheduled_tasks WHERE lead_id = $1 AND tenant_id = $2 AND task_type = 'product_demo' AND status = 'pending' ORDER BY scheduled_time DESC LIMIT 1",
+            [deal.lead_id, tenantId]
           );
 
           if (existingTaskRes.rows.length > 0) {
             await client.query(
               `UPDATE scheduled_tasks
                SET scheduled_time = $1, meeting_link = COALESCE($2, meeting_link), notes = COALESCE($3, notes), updated_at = NOW()
-               WHERE id = $4`,
-              [demoDateObj, body.meetingLink || null, body.demoNotes || newNotes || null, existingTaskRes.rows[0].id]
+               WHERE id = $4 AND tenant_id = $5`,
+              [demoDateObj, safeDemoLink, body.demoNotes || newNotes || null, existingTaskRes.rows[0].id, tenantId]
             );
           } else {
             await client.query(
@@ -386,7 +428,7 @@ export async function PATCH(
                 deal.lead_id,
                 session?.sub || repId,
                 demoDateObj,
-                body.meetingLink || null,
+                safeDemoLink,
                 body.demoNotes || newNotes || null,
               ]
             );
@@ -394,59 +436,95 @@ export async function PATCH(
         }
       }
 
-      // Demo Done & Quote Sent contact back callback task
+      // Demo Done & Quote Sent contact back callback task (upsert existing pending callback)
       if ((newStage === "demo_done" || newStage === "quote_sent") && body.contactBackDate && deal.lead_id) {
         const cbDateObj = parseScheduledDateTime(body.contactBackDate);
         if (cbDateObj && !isNaN(cbDateObj.getTime())) {
-          await client.query(
-            `INSERT INTO scheduled_tasks (
-               tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, task_source, created_at, updated_at
-             )
-             VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', 'pipeline', NOW(), NOW())`,
-            [
-              tenantId,
-              deal.lead_id,
-              session?.sub || repId,
-              cbDateObj,
-              newNotes ||
-                (newStage === "demo_done"
-                  ? "Post-demo update follow-up"
-                  : "Quotation update follow-up"),
-            ]
+          const readableCbNote =
+            (typeof closingNotes === "string" && closingNotes.trim()) ||
+            (typeof body.demoFeedback === "string" && body.demoFeedback.trim()) ||
+            (newStage === "demo_done" ? "Post-demo update follow-up" : "Quotation update follow-up");
+          const taskRepId = deal.rep_id || session?.sub || repId;
+
+          const existingCbRes = await client.query(
+            `SELECT id FROM scheduled_tasks
+             WHERE lead_id = $1 AND tenant_id = $2 AND task_type = 'callback' AND status = 'pending'
+             ORDER BY updated_at DESC LIMIT 1`,
+            [deal.lead_id, tenantId]
           );
+
+          if (existingCbRes.rows.length > 0) {
+            await client.query(
+              `UPDATE scheduled_tasks
+               SET scheduled_time = $1, notes = $2, rep_id = COALESCE($3, rep_id), task_source = 'pipeline', updated_at = NOW()
+               WHERE id = $4 AND tenant_id = $5`,
+              [cbDateObj, readableCbNote, taskRepId, existingCbRes.rows[0].id, tenantId]
+            );
+            await client.query(
+              `UPDATE scheduled_tasks SET status = 'rescheduled', updated_at = NOW()
+               WHERE lead_id = $1 AND tenant_id = $2 AND task_type = 'callback' AND status = 'pending' AND id <> $3`,
+              [deal.lead_id, tenantId, existingCbRes.rows[0].id]
+            ).catch(() => {});
+          } else {
+            await client.query(
+              `INSERT INTO scheduled_tasks (
+                 tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, task_source, created_at, updated_at
+               )
+               VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', 'pipeline', NOW(), NOW())`,
+              [tenantId, deal.lead_id, taskRepId, cbDateObj, readableCbNote]
+            );
+          }
         }
       }
 
-      // Closed Lost recontact callback task
+      // Closed Lost recontact callback task (upsert existing pending callback)
       if (newStage === "closed_lost" && body.recontactDate && deal.lead_id) {
         const rcDateObj = parseScheduledDateTime(body.recontactDate);
         if (rcDateObj && !isNaN(rcDateObj.getTime())) {
-          await client.query(
-            `INSERT INTO scheduled_tasks (
-               tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, task_source, created_at, updated_at
-             )
-             VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', 'pipeline', NOW(), NOW())`,
-            [
-              tenantId,
-              deal.lead_id,
-              session?.sub || repId,
-              rcDateObj,
-              body.lostRemarks
-                ? `Closed Lost Re-contact: ${body.lostRemarks}`
-                : "Closed Lost re-contact follow-up",
-            ]
+          const rcNote = body.lostRemarks
+            ? `Closed Lost Re-contact: ${body.lostRemarks}`
+            : "Closed Lost re-contact follow-up";
+          const taskRepId = deal.rep_id || session?.sub || repId;
+
+          const existingCbRes = await client.query(
+            `SELECT id FROM scheduled_tasks
+             WHERE lead_id = $1 AND tenant_id = $2 AND task_type = 'callback' AND status = 'pending'
+             ORDER BY updated_at DESC LIMIT 1`,
+            [deal.lead_id, tenantId]
           );
+
+          if (existingCbRes.rows.length > 0) {
+            await client.query(
+              `UPDATE scheduled_tasks
+               SET scheduled_time = $1, notes = $2, rep_id = COALESCE($3, rep_id), task_source = 'pipeline', updated_at = NOW()
+               WHERE id = $4 AND tenant_id = $5`,
+              [rcDateObj, rcNote, taskRepId, existingCbRes.rows[0].id, tenantId]
+            );
+          } else {
+            await client.query(
+              `INSERT INTO scheduled_tasks (
+                 tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, task_source, created_at, updated_at
+               )
+               VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', 'pipeline', NOW(), NOW())`,
+              [tenantId, deal.lead_id, taskRepId, rcDateObj, rcNote]
+            );
+          }
         }
       }
 
+      await client.query("COMMIT");
       const triggerPaymentModal =
         (newStage === "payment_pending" || newStage === "closed_won") && !wonDetails?.userId;
       return NextResponse.json({ deal: updated, triggerPaymentModal });
+      } catch (txErr) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw txErr;
+      }
     });
   } catch (error: any) {
     console.error("[DEALS PATCH]", error);
     return NextResponse.json(
-      { error: error?.message || "Failed to update deal" },
+      { error: "Failed to update deal" },
       { status: 500 }
     );
   }
@@ -457,9 +535,12 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!isValidUuid(id)) {
+    return NextResponse.json({ error: "Invalid deal ID" }, { status: 400 });
   }
   const tenantId = session.tenantId;
   const role = session.role;
@@ -473,35 +554,54 @@ export async function DELETE(
 
   try {
     return await withClient(async (client) => {
-      const dealRes = await client.query(
-        "SELECT id, lead_id, stage FROM deals WHERE id = $1 AND tenant_id = $2",
-        [id, tenantId]
-      );
-      if (dealRes.rows.length === 0) {
-        return NextResponse.json({ error: "Deal not found" }, { status: 404 });
-      }
-
-      const deal = dealRes.rows[0];
-
-      // Delete payments and scheduled tasks referencing this deal
-      await client.query("DELETE FROM payments WHERE deal_id = $1", [id]);
-      await client.query("DELETE FROM deals WHERE id = $1", [id]);
-
-      // Check if any deals remain for this lead
-      const remainingDealsRes = await client.query(
-        "SELECT id FROM deals WHERE lead_id = $1 AND tenant_id = $2",
-        [deal.lead_id, tenantId]
-      );
-
-      // If no deals remain for this lead, reset the lead status so it doesn't resurrect deals or remain 'won'
-      if (remainingDealsRes.rows.length === 0) {
-        await client.query(
-          "UPDATE leads SET status = 'contact_in_future', updated_at = NOW() WHERE id = $1 AND status IN ('won', 'closed_won', 'lost', 'closed_lost', 'deal_created')",
-          [deal.lead_id]
+      await client.query("BEGIN");
+      try {
+        const dealRes = await client.query(
+          "SELECT id, lead_id, stage FROM deals WHERE id = $1 AND tenant_id = $2",
+          [id, tenantId]
         );
-      }
+        if (dealRes.rows.length === 0) {
+          await client.query("ROLLBACK");
+          return NextResponse.json({ error: "Deal not found" }, { status: 404 });
+        }
 
-      return NextResponse.json({ success: true, message: "Deal deleted successfully" });
+        const deal = dealRes.rows[0];
+        const approvedPay = await client.query(
+          "SELECT id FROM payments WHERE deal_id = $1 AND tenant_id = $2 AND ops_approval_status = 'approved' LIMIT 1",
+          [id, tenantId]
+        );
+        if (approvedPay.rows.length > 0 && !isAdmin(role)) {
+          await client.query("ROLLBACK");
+          return NextResponse.json(
+            { error: "Forbidden: Only Super Admins can delete deals with approved payments." },
+            { status: 403 }
+          );
+        }
+
+        await client.query("DELETE FROM payments WHERE deal_id = $1 AND tenant_id = $2", [id, tenantId]);
+        await client.query("DELETE FROM deal_splits WHERE deal_id = $1 AND tenant_id = $2", [id, tenantId]).catch(() => {});
+        await client.query("DELETE FROM deals WHERE id = $1 AND tenant_id = $2", [id, tenantId]);
+
+        // Check if any deals remain for this lead
+        const remainingDealsRes = await client.query(
+          "SELECT id FROM deals WHERE lead_id = $1 AND tenant_id = $2",
+          [deal.lead_id, tenantId]
+        );
+
+        // If no deals remain for this lead, reset the lead status so it doesn't resurrect deals or remain 'won'
+        if (remainingDealsRes.rows.length === 0) {
+          await client.query(
+            "UPDATE leads SET status = 'contact_in_future', updated_at = NOW() WHERE id = $1 AND tenant_id = $2 AND status IN ('won', 'closed_won', 'lost', 'closed_lost', 'deal_created')",
+            [deal.lead_id, tenantId]
+          );
+        }
+
+        await client.query("COMMIT");
+        return NextResponse.json({ success: true, message: "Deal deleted successfully" });
+      } catch (txErr) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw txErr;
+      }
     });
   } catch (error) {
     console.error("[DEALS DELETE]", error);

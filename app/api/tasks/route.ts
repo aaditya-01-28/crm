@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
+import { isSalesRep } from "@/lib/rbac";
+import { isValidUuid, sanitizeExternalUrl } from "@/lib/security";
 import { parseScheduledDateTime, getISTDateRange } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -20,12 +22,11 @@ export async function GET(request: NextRequest) {
 
   try {
     return await withClient(async (client) => {
-      await client.query("ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_source TEXT DEFAULT 'dialer';").catch(() => {});
-      const isRep = role === "sales_rep";
+      const isRep = isSalesRep(role);
 
-      // Agenda displays dialer/manual callbacks & demos, plus pipeline product_demo tasks (which auto-sync with Agenda)
+      // Agenda displays dialer/manual callbacks & demos, plus pipeline product_demo and callback follow-ups
       const queryParams: any[] = [tenantId];
-      let sourceFilter = "AND (t.task_source IS NULL OR t.task_source = 'dialer' OR t.task_source = 'manual' OR (t.task_source = 'pipeline' AND t.task_type = 'product_demo'))";
+      let sourceFilter = "AND (t.task_source IS NULL OR t.task_source = 'dialer' OR t.task_source = 'manual' OR (t.task_source = 'pipeline' AND t.task_type IN ('product_demo', 'callback')))";
       if (source) {
         sourceFilter = `AND t.task_source = $${queryParams.push(source)}`;
       }
@@ -44,21 +45,28 @@ export async function GET(request: NextRequest) {
                 l.company_name as "lead_companyName", l.business_vertical as "lead_businessVertical",
                 u.full_name as "rep_fullName"
          FROM scheduled_tasks t
-         LEFT JOIN leads l ON t.lead_id = l.id
-         LEFT JOIN users u ON t.rep_id = u.id
+         LEFT JOIN leads l ON t.lead_id = l.id AND l.tenant_id = t.tenant_id
+         LEFT JOIN users u ON t.rep_id = u.id AND u.tenant_id = t.tenant_id
          WHERE t.tenant_id = $1 AND t.status = 'pending' ${sourceFilter} ${repFilter}
-         ORDER BY t.scheduled_time ASC NULLS LAST, t.updated_at DESC`,
+         ORDER BY t.updated_at DESC, t.created_at DESC`,
         queryParams
       );
 
-      // Deduplicate: keep only the newest pending task per lead + type
+      // Deduplicate: keep only the most recently updated pending task per lead + type
       const seenLeadTask = new Set<string>();
-      const uniqueRows = tasksRes.rows.filter((r) => {
-        const key = `${r.leadId}_${r.taskType}`;
-        if (seenLeadTask.has(key)) return false;
-        seenLeadTask.add(key);
-        return true;
-      });
+      const uniqueRows = tasksRes.rows
+        .filter((r) => {
+          const key = `${r.leadId}_${r.taskType}`;
+          if (seenLeadTask.has(key)) return false;
+          seenLeadTask.add(key);
+          return true;
+        })
+        .sort((a, b) => {
+          if (!a.scheduledTime && !b.scheduledTime) return 0;
+          if (!a.scheduledTime) return 1;
+          if (!b.scheduledTime) return -1;
+          return new Date(a.scheduledTime).getTime() - new Date(b.scheduledTime).getTime();
+        });
       const tasks = uniqueRows.map((r) => ({
         id: r.id,
         tenantId: r.tenantId,
@@ -98,16 +106,46 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const tenantId = session.tenantId;
   const repId = session.sub;
+  const role = session.role;
 
   try {
     const body = await request.json();
+    if (!isValidUuid(body.leadId)) {
+      return NextResponse.json({ error: "Valid leadId is required" }, { status: 400 });
+    }
+    if (!body.taskType || typeof body.taskType !== "string") {
+      return NextResponse.json({ error: "taskType is required" }, { status: 400 });
+    }
+
+    let safeMeetingLink: string | null = null;
+    if (body.meetingLink !== undefined && body.meetingLink !== null && String(body.meetingLink).trim() !== "") {
+      safeMeetingLink = sanitizeExternalUrl(body.meetingLink);
+      if (!safeMeetingLink) {
+        return NextResponse.json({ error: "Invalid meetingLink URL" }, { status: 400 });
+      }
+    }
+
     return await withClient(async (client) => {
+      const leadCheck = await client.query(
+        `SELECT id, assigned_rep_id as "assignedRepId" FROM leads WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+        [body.leadId, tenantId]
+      );
+      if (leadCheck.rows.length === 0) {
+        return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+      }
+      if (isSalesRep(role) && leadCheck.rows[0].assignedRepId !== repId) {
+        return NextResponse.json(
+          { error: "Forbidden: You can only schedule tasks for your assigned leads." },
+          { status: 403 }
+        );
+      }
+
       const insertRes = await client.query(
         `INSERT INTO scheduled_tasks (tenant_id, lead_id, rep_id, task_type, scheduled_time, meeting_link, notes, status, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW(), NOW())
@@ -120,7 +158,7 @@ export async function POST(request: NextRequest) {
           repId,
           body.taskType,
           parseScheduledDateTime(body.scheduledTime),
-          body.meetingLink || null,
+          safeMeetingLink,
           body.notes || null,
         ]
       );

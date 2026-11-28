@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
+import { isSalesRep } from "@/lib/rbac";
+import { isValidUuid, sanitizeExternalUrl } from "@/lib/security";
 import { parseScheduledDateTime } from "@/lib/utils";
 
 export async function PATCH(
@@ -8,12 +10,16 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (!isValidUuid(id)) {
+    return NextResponse.json({ error: "Invalid lead ID" }, { status: 400 });
+  }
   const tenantId = session.tenantId;
   const repId = session.sub;
+  const role = session.role;
 
   try {
     const body = await request.json();
@@ -43,8 +49,23 @@ export async function PATCH(
       );
     }
 
+    let safeMeetingLink: string | null = null;
+    if (meetingLink !== undefined && meetingLink !== null && String(meetingLink).trim() !== "") {
+      safeMeetingLink = sanitizeExternalUrl(meetingLink);
+      if (!safeMeetingLink) {
+        return NextResponse.json(
+          { error: "Invalid meeting link URL (must use http:// or https://)" },
+          { status: 400 }
+        );
+      }
+    }
+
+    const safeRecordingUrl = recordingUrl
+      ? sanitizeExternalUrl(recordingUrl, { allowRelative: true })
+      : null;
+
     return await withClient(async (client) => {
-      // Validate lead belongs to tenant
+      // Validate lead belongs to tenant and caller has access
       const leadRes = await client.query(
         "SELECT id, status, rnr_count, assigned_rep_id, service_type FROM leads WHERE id = $1 AND tenant_id = $2",
         [id, tenantId]
@@ -55,6 +76,12 @@ export async function PATCH(
       }
 
       const lead = leadRes.rows[0];
+      if (isSalesRep(role) && lead.assigned_rep_id !== repId) {
+        return NextResponse.json(
+          { error: "Forbidden: You can only log dispositions for leads assigned to you." },
+          { status: 403 }
+        );
+      }
       let newStatus = lead.status;
       let rnrCount = lead.rnr_count || 0;
 
@@ -158,7 +185,7 @@ export async function PATCH(
           taskToCreate = {
             taskType: "product_demo",
             scheduledTime: parseScheduledDateTime(demoDatetime),
-            meetingLink: meetingLink || null,
+            meetingLink: safeMeetingLink,
             notes: [
               decisionMakerName ? `Decision Maker: ${decisionMakerName}` : null,
               remark ? remark : null,
@@ -180,28 +207,13 @@ export async function PATCH(
           break;
       }
 
-      // Create or update call log: attach disposition and remarks to the call from this active session
-      await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
-      await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS log_source TEXT DEFAULT 'dialer_web';").catch(() => {});
-      await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS is_interested BOOLEAN DEFAULT NULL;").catch(() => {});
-      await client.query("ALTER TABLE leads ADD COLUMN IF NOT EXISTS is_interested BOOLEAN DEFAULT false;").catch(() => {});
-
       // Attach disposition, notes, and duration to the call from this active session.
-      // 1. If explicit callLogId is passed and exists, use it.
-      // 2. Otherwise match an un-disposed SIM dialer call (remark = 'Captured from SIM dialer' or log_source IN ('dialer_connected', 'apk_connected')) in the last 30 minutes.
-      // 3. Or match close timestamp proximity (+/- 5 minutes) if callTimestamp is provided.
-      // 4. Or match a call with matching duration (+/- 3 seconds) in the last 15 minutes.
-      // 5. Or any call logged for this lead and rep in the last 10 minutes that was not yet manually disposed with a finalized remark.
       let targetCallId: string | null = null;
 
-      const isUuid = (v: unknown): v is string =>
-        typeof v === "string" &&
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
-
-      if (isUuid(callLogId)) {
+      if (isValidUuid(callLogId)) {
         const idCheck = await client.query(
-          `SELECT id FROM call_logs WHERE id = $1::uuid AND tenant_id = $2::uuid LIMIT 1`,
-          [callLogId, tenantId]
+          `SELECT id FROM call_logs WHERE id = $1::uuid AND lead_id = $2::uuid AND tenant_id = $3::uuid LIMIT 1`,
+          [callLogId, id, tenantId]
         ).catch(() => null);
         if (idCheck && idCheck.rows.length > 0) {
           targetCallId = idCheck.rows[0].id;
@@ -266,14 +278,14 @@ export async function PATCH(
                recording_url = COALESCE($4::text, recording_url),
                log_source = $5::text,
                is_interested = $6::boolean
-           WHERE id = $7::uuid`,
-          [disposition, durationSeconds, remark || null, recordingUrl || null, logSource, isExplicitInterested, targetCallId]
+           WHERE id = $7::uuid AND tenant_id = $8::uuid`,
+          [disposition, durationSeconds, remark || null, safeRecordingUrl, logSource, isExplicitInterested, targetCallId, tenantId]
         );
       } else {
         await client.query(
           `INSERT INTO call_logs (tenant_id, lead_id, rep_id, disposition, duration_seconds, remark, recording_url, log_source, is_interested, call_timestamp)
            VALUES ($1::uuid, $2::uuid, $3::uuid, $4::varchar, $5::int, $6::text, $7::text, $8::text, $9::boolean, $10::timestamptz)`,
-          [tenantId, id, repId, disposition, durationSeconds, remark || null, recordingUrl || null, logSource, isExplicitInterested, finalTimestamp]
+          [tenantId, id, repId, disposition, durationSeconds, remark || null, safeRecordingUrl, logSource, isExplicitInterested, finalTimestamp]
         );
       }
 
@@ -287,22 +299,6 @@ export async function PATCH(
            AND call_timestamp >= NOW() - INTERVAL '30 minutes'`,
         [id, repId, tenantId, targetCallId, durationSeconds]
       ).catch(() => {});
-
-      // Record stage transition into persistent lead_stage_history table
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS lead_stage_history (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          tenant_id UUID NOT NULL,
-          lead_id UUID NOT NULL,
-          rep_id UUID,
-          stage_name VARCHAR(100) NOT NULL,
-          stage_type VARCHAR(50) NOT NULL,
-          notes TEXT,
-          metadata JSONB DEFAULT '{}',
-          created_at TIMESTAMPTZ(6) DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_lead_stage_history_lead ON lead_stage_history(lead_id, created_at DESC);
-      `).catch(() => {});
 
       let stageType = "status";
       let stageName = disposition;
@@ -341,15 +337,15 @@ export async function PATCH(
         demoDatetime: demoDatetime || null,
         callbackDatetime: callbackDatetime || null,
         decisionMakerName: decisionMakerName || null,
-        meetingLink: meetingLink || null,
+        meetingLink: safeMeetingLink,
       });
 
       if (recentStage.rows.length > 0) {
         await client.query(
           `UPDATE lead_stage_history
            SET stage_name = $1, stage_type = $2, notes = $3, metadata = $4, created_at = NOW()
-           WHERE id = $5`,
-          [stageName, stageType, remark || null, stageMeta, recentStage.rows[0].id]
+           WHERE id = $5 AND tenant_id = $6`,
+          [stageName, stageType, remark || null, stageMeta, recentStage.rows[0].id, tenantId]
         ).catch(() => {});
       } else {
         await client.query(
@@ -369,24 +365,20 @@ export async function PATCH(
                WHEN $4::boolean THEN false
                ELSE COALESCE(is_interested, false)
              END,
-             rnr_count = (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $2::uuid AND disposition = 'RNR'),
+             rnr_count = (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $2::uuid AND tenant_id = $5::uuid AND disposition = 'RNR'),
              updated_at = NOW()
-         WHERE id = $2::uuid`,
-        [newStatus, id, isExplicitInterested, shouldClearInterested]
+         WHERE id = $2::uuid AND tenant_id = $5::uuid`,
+        [newStatus, id, isExplicitInterested, shouldClearInterested, tenantId]
       );
 
       // Create scheduled task if needed
       // task_source = 'dialer' so Agenda shows these (not 'pipeline' tasks from deal stage changes)
       if (taskToCreate) {
-        await client.query(
-          `ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_source TEXT DEFAULT 'dialer';`
-        ).catch(() => {});
-
         let updatedExistingTask = false;
         if (taskToCreate.taskType === "callback") {
           const existingCb = await client.query(
-            `SELECT id FROM scheduled_tasks WHERE lead_id = $1 AND task_type = 'callback' AND status = 'pending' ORDER BY updated_at DESC LIMIT 1`,
-            [id]
+            `SELECT id FROM scheduled_tasks WHERE lead_id = $1 AND tenant_id = $2 AND task_type = 'callback' AND status = 'pending' ORDER BY updated_at DESC LIMIT 1`,
+            [id, tenantId]
           );
           if (existingCb.rows.length > 0) {
             updatedExistingTask = true;
@@ -396,14 +388,14 @@ export async function PATCH(
                    notes = COALESCE($2, notes),
                    rep_id = COALESCE($3, rep_id),
                    updated_at = NOW()
-               WHERE id = $4`,
-              [taskToCreate.scheduledTime, taskToCreate.notes, repId, existingCb.rows[0].id]
+               WHERE id = $4 AND tenant_id = $5`,
+              [taskToCreate.scheduledTime, taskToCreate.notes, repId, existingCb.rows[0].id, tenantId]
             );
             // Close any older duplicate pending callback tasks for this same lead
             await client.query(
               `UPDATE scheduled_tasks SET status = 'rescheduled', updated_at = NOW()
-               WHERE lead_id = $1 AND task_type = 'callback' AND status = 'pending' AND id <> $2`,
-              [id, existingCb.rows[0].id]
+               WHERE lead_id = $1 AND tenant_id = $2 AND task_type = 'callback' AND status = 'pending' AND id <> $3`,
+              [id, tenantId, existingCb.rows[0].id]
             ).catch(() => {});
           }
         } else if (taskToCreate.taskType === "product_demo") {
@@ -413,13 +405,13 @@ export async function PATCH(
              SET status = 'completed',
                  notes = CASE WHEN notes IS NOT NULL AND notes <> '' THEN notes || ' [Converted to Demo]' ELSE 'Converted to Demo Scheduled' END,
                  updated_at = NOW()
-             WHERE lead_id = $1 AND task_type = 'callback' AND status = 'pending'`,
-            [id]
+             WHERE lead_id = $1 AND tenant_id = $2 AND task_type = 'callback' AND status = 'pending'`,
+            [id, tenantId]
           ).catch(() => {});
 
           const existingDemo = await client.query(
-            `SELECT id FROM scheduled_tasks WHERE lead_id = $1 AND task_type = 'product_demo' AND status = 'pending' LIMIT 1`,
-            [id]
+            `SELECT id FROM scheduled_tasks WHERE lead_id = $1 AND tenant_id = $2 AND task_type = 'product_demo' AND status = 'pending' LIMIT 1`,
+            [id, tenantId]
           );
           if (existingDemo.rows.length > 0) {
             updatedExistingTask = true;
@@ -429,8 +421,8 @@ export async function PATCH(
                    meeting_link = COALESCE($2, meeting_link),
                    notes = COALESCE($3, notes),
                    updated_at = NOW()
-               WHERE id = $4`,
-              [taskToCreate.scheduledTime, taskToCreate.meetingLink || null, taskToCreate.notes || null, existingDemo.rows[0].id]
+               WHERE id = $4 AND tenant_id = $5`,
+              [taskToCreate.scheduledTime, taskToCreate.meetingLink || null, taskToCreate.notes || null, existingDemo.rows[0].id, tenantId]
             );
           }
         }
@@ -455,8 +447,8 @@ export async function PATCH(
       // Complete pending product_demo tasks if demo done
       if (newStatus === "demo_done") {
         await client.query(
-          "UPDATE scheduled_tasks SET status = 'completed', updated_at = NOW() WHERE lead_id = $1 AND task_type = 'product_demo' AND status = 'pending'",
-          [id]
+          "UPDATE scheduled_tasks SET status = 'completed', updated_at = NOW() WHERE lead_id = $1 AND tenant_id = $2 AND task_type = 'product_demo' AND status = 'pending'",
+          [id, tenantId]
         );
       }
 
@@ -494,13 +486,16 @@ export async function PATCH(
         ).catch(() => {});
       }
 
-      // Auto-resolve pending callback tasks on decisive outcomes (NEVER auto-complete pending callbacks on RNR!)
+      // Auto-resolve pending callback tasks on decisive outcomes, and clear overdue callbacks when attempted (e.g. RNR)
       if (!isManualNote) {
         const shouldAutoCompletePending =
           disposition === "Not Interested" ||
           disposition === "Invalid" ||
           disposition === "Switched Off" ||
           disposition === "Connected" ||
+          disposition === "Demo Done" ||
+          disposition === "Demo Completed" ||
+          (disposition === "Interested" && !callbackDatetime) ||
           newStatus === "already_using" ||
           newStatus === "already_purchased" ||
           (disposition === "Future Requirement" && !callbackDatetime);
@@ -519,6 +514,23 @@ export async function PATCH(
                  updated_at = NOW()
              WHERE lead_id = $1 AND tenant_id = $3 AND status = 'pending' AND task_type <> 'product_demo'`,
             [id, resolutionTag, tenantId]
+          ).catch(() => {});
+        } else if (disposition === "RNR" && !callbackDatetime) {
+          // If an overdue/due callback was attempted today and disposed as RNR, mark that overdue callback completed so it leaves Overdue
+          const attemptTag = remark
+            ? `[Attempted: RNR — ${remark}]`
+            : `[Attempted: RNR]`;
+          await client.query(
+            `UPDATE scheduled_tasks
+             SET status = 'completed',
+                 notes = CASE
+                   WHEN notes IS NOT NULL AND notes <> '' THEN notes || ' ' || $2
+                   ELSE $2
+                 END,
+                 updated_at = NOW()
+             WHERE lead_id = $1 AND tenant_id = $3 AND task_type = 'callback' AND status = 'pending'
+               AND scheduled_time IS NOT NULL AND scheduled_time <= NOW()`,
+            [id, attemptTag, tenantId]
           ).catch(() => {});
         }
       }
@@ -567,8 +579,8 @@ export async function PATCH(
                  rep_id = COALESCE(rep_id, $2),
                  closing_notes = CASE WHEN $1 = 'demo_scheduled' THEN $3 ELSE closing_notes END,
                  updated_at = NOW()
-             WHERE id = $4`,
-            [targetStage, lead.assigned_rep_id || repId, closingNotesContent, dealCheck.rows[0].id]
+             WHERE id = $4 AND tenant_id = $5`,
+            [targetStage, lead.assigned_rep_id || repId, closingNotesContent, dealCheck.rows[0].id, tenantId]
           );
         } else {
           await client.query(
@@ -632,7 +644,7 @@ export async function PATCH(
   } catch (error: any) {
     console.error("[DISPOSE]", error);
     return NextResponse.json(
-      { error: error?.message || "Failed to log disposition" },
+      { error: "Failed to log disposition" },
       { status: 500 }
     );
   }

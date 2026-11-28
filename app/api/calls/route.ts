@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
+import { isSalesRep } from "@/lib/rbac";
+import { escapeLikePattern, isValidUuid, sanitizeExternalUrl } from "@/lib/security";
 import { getISTDateRange, interestedCallSql } from "@/lib/utils";
 
 export async function GET(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -23,63 +25,22 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") || "50")));
   const offset = (page - 1) * limit;
 
+  if (leadId && !isValidUuid(leadId)) {
+    return NextResponse.json({ error: "Invalid leadId" }, { status: 400 });
+  }
+  if (filterRepId && filterRepId !== "all" && !isValidUuid(filterRepId)) {
+    return NextResponse.json({ error: "Invalid repId" }, { status: 400 });
+  }
+
   try {
     return await withClient(async (client) => {
-      await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
-      await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS log_source TEXT DEFAULT 'dialer_web';").catch(() => {});
-
-      // Correct existing leads where remark indicates competitor / other company service but status was already_using
-      await client.query(`
-        UPDATE leads
-        SET status = 'already_purchased', updated_at = NOW()
-        WHERE status = 'already_using'
-          AND id IN (
-            SELECT lead_id FROM call_logs
-            WHERE remark ILIKE '%other compny%' OR remark ILIKE '%other company%' OR remark ILIKE '%competitor%'
-          );
-      `).catch(() => {});
-
-      // Self-healing: Merge and clean up any historical duplicate SIM dialer logs where a manual APK disposition exists for the same call interaction
-      await client.query(`
-        UPDATE call_logs c2
-        SET recording_url = COALESCE(c2.recording_url, c1.recording_url),
-            duration_seconds = GREATEST(c2.duration_seconds, c1.duration_seconds)
-        FROM call_logs c1
-        WHERE c1.remark = 'Captured from SIM dialer'
-          AND c2.lead_id = c1.lead_id
-          AND c2.rep_id = c1.rep_id
-          AND c2.id != c1.id
-          AND (c2.remark IS DISTINCT FROM 'Captured from SIM dialer')
-          AND ABS(c2.duration_seconds - c1.duration_seconds) <= 3
-          AND c2.call_timestamp >= (c1.call_timestamp - INTERVAL '20 minutes')
-          AND c2.call_timestamp <= (c1.call_timestamp + INTERVAL '20 minutes')
-      `).catch(() => {});
-
-      await client.query(`
-        DELETE FROM call_logs c1
-        WHERE c1.remark = 'Captured from SIM dialer'
-          AND EXISTS (
-            SELECT 1 FROM call_logs c2
-            WHERE c2.lead_id = c1.lead_id
-              AND c2.rep_id = c1.rep_id
-              AND c2.id != c1.id
-              AND (c2.remark IS DISTINCT FROM 'Captured from SIM dialer')
-              AND ABS(c2.duration_seconds - c1.duration_seconds) <= 3
-              AND c2.call_timestamp >= (c1.call_timestamp - INTERVAL '20 minutes')
-              AND c2.call_timestamp <= (c1.call_timestamp + INTERVAL '20 minutes')
-          )
-      `).catch(() => {});
-
-      // Remove any historical non-call sheet_import rows from call_logs (already preserved in lead_stage_history)
-      await client.query(`DELETE FROM call_logs WHERE log_source = 'sheet_import';`).catch(() => {});
-
       const conditions: string[] = [
         "c.tenant_id = $1",
         "COALESCE(c.log_source, 'dialer_web') <> 'sheet_import'",
       ];
       const params: any[] = [tenantId];
 
-      if (role === "sales_rep") {
+      if (isSalesRep(role)) {
         conditions.push(`c.rep_id = $${params.push(repId)}`);
       } else if (filterRepId && filterRepId !== "all") {
         conditions.push(`c.rep_id = $${params.push(filterRepId)}`);
@@ -152,7 +113,7 @@ export async function GET(request: NextRequest) {
       }
 
       if (search) {
-        const s = `%${search}%`;
+        const s = `%${escapeLikePattern(search)}%`;
         const pIdx = params.push(s);
         conditions.push(
           `(l.phone_number ILIKE $${pIdx} OR l.contact_name ILIKE $${pIdx} OR l.company_name ILIKE $${pIdx} OR c.remark ILIKE $${pIdx})`
@@ -198,8 +159,8 @@ export async function GET(request: NextRequest) {
                 u.id as "rep_id", u.full_name as "rep_fullName", u.email as "rep_email"
          FROM call_logs c
          LEFT JOIN rnr_numbered rn ON c.id = rn.id
-         LEFT JOIN leads l ON c.lead_id = l.id
-         LEFT JOIN users u ON c.rep_id = u.id
+         LEFT JOIN leads l ON c.lead_id = l.id AND l.tenant_id = c.tenant_id
+         LEFT JOIN users u ON c.rep_id = u.id AND u.tenant_id = c.tenant_id
          WHERE ${whereClause}
          ORDER BY c.call_timestamp DESC
          LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
@@ -221,7 +182,7 @@ export async function GET(request: NextRequest) {
                 END)::int as "interestedCount"
          FROM call_logs c
          LEFT JOIN rnr_numbered rn ON c.id = rn.id
-         LEFT JOIN leads l ON c.lead_id = l.id
+         LEFT JOIN leads l ON c.lead_id = l.id AND l.tenant_id = c.tenant_id
          WHERE ${whereClause}`,
         countParams
       );
@@ -292,81 +253,127 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getSession(request);
-  const tenantId = request.headers.get("x-tenant-id") || session?.tenantId || "";
-  const repId = request.headers.get("x-user-id") || session?.sub || "";
-
-  if (!tenantId || !repId) {
+  const session = await requireActiveSession(request);
+  if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const tenantId = session.tenantId;
+  const repId = session.sub;
+  const role = session.role;
 
   try {
     const body = await request.json();
-    const items = Array.isArray(body.calls) ? body.calls : [body];
+    const isBatch = Array.isArray(body.calls);
+    const items = isBatch ? body.calls : [body];
+
+    if (items.length > 500) {
+      return NextResponse.json({ error: "Batch size exceeds 500 call logs" }, { status: 400 });
+    }
 
     return await withClient(async (client) => {
-      await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS recording_url TEXT;").catch(() => {});
-      await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS log_source TEXT DEFAULT 'dialer_web';").catch(() => {});
-      await client.query("ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS log_source TEXT DEFAULT 'dialer_web';").catch(() => {});
-      const createdLogs = [];
+      await client.query("BEGIN");
+      try {
+        const createdLogs = [];
 
-      for (const item of items) {
-        let targetLeadId = item.leadId;
-        const phoneNumber = item.phoneNumber ? String(item.phoneNumber).trim() : null;
-        const durationSeconds =
-          typeof item.durationSeconds === "number" ? Math.max(0, item.durationSeconds) : 0;
-        const disposition = item.disposition || (durationSeconds > 0 ? "Connected" : "RNR");
-        const remark = item.remark || null;
-        const recordingUrl = item.recordingUrl || item.recording_url || null;
-        const logSource = item.logSource || "apk_manual";
-        const isPendingAutoCapture = logSource === "apk_connected" || logSource === "dialer_connected";
-        const explicitInterestedVal: boolean | null = isPendingAutoCapture
-          ? null
-          : Boolean(item.isInterested) || disposition === "Interested";
+        for (const item of items) {
+          let targetLeadId: string | null = item.leadId ? String(item.leadId).trim() : null;
+          const phoneNumber = item.phoneNumber ? String(item.phoneNumber).trim() : null;
+          const durationSeconds =
+            typeof item.durationSeconds === "number" ? Math.max(0, item.durationSeconds) : 0;
+          const disposition = item.disposition || (durationSeconds > 0 ? "Connected" : "RNR");
+          const remark = item.remark || null;
+          const rawRecordingUrl = item.recordingUrl || item.recording_url || null;
+          const recordingUrl = rawRecordingUrl
+            ? sanitizeExternalUrl(rawRecordingUrl, { allowRelative: true })
+            : null;
+          const logSource = item.logSource || "apk_manual";
+          const isPendingAutoCapture = logSource === "apk_connected" || logSource === "dialer_connected";
+          const explicitInterestedVal: boolean | null = isPendingAutoCapture
+            ? null
+            : Boolean(item.isInterested) || disposition === "Interested";
 
-        // Timezone-safe timestamp parsing:
-        // Indian clients often serialize local ISO strings without trailing Z (e.g. "2026-11-23T11:34:00.000").
-        // In UTC server environments, new Date(str_without_tz) is parsed as UTC, causing an incorrect +5:30 shift in IST browsers.
-        let callTimestamp = new Date();
-        if (item.callTimestamp) {
-          const raw = String(item.callTimestamp).trim();
-          const hasTz = /Z|[+-]\d{2}(:\d{2})?$/i.test(raw);
-          const parsed = new Date(hasTz ? raw : `${raw}+05:30`);
-          if (!isNaN(parsed.getTime())) {
-            // Guard against timestamps in the future (> 5 mins)
-            if (parsed.getTime() > Date.now() + 5 * 60 * 1000) {
-              callTimestamp = new Date();
-            } else {
-              callTimestamp = parsed;
+          let callTimestamp = new Date();
+          if (item.callTimestamp) {
+            const raw = String(item.callTimestamp).trim();
+            const hasTz = /Z|[+-]\d{2}(:\d{2})?$/i.test(raw);
+            const parsed = new Date(hasTz ? raw : `${raw}+05:30`);
+            if (!isNaN(parsed.getTime())) {
+              if (parsed.getTime() > Date.now() + 5 * 60 * 1000) {
+                callTimestamp = new Date();
+              } else {
+                callTimestamp = parsed;
+              }
             }
           }
-        }
 
-        if (!targetLeadId && phoneNumber) {
-          const cleanDigits = phoneNumber.replace(/\D/g, "");
-          const searchSuffix = cleanDigits.slice(-10);
-
-          const existingLeadRes = await client.query(
-            "SELECT id FROM leads WHERE tenant_id = $1 AND phone_number LIKE $2 LIMIT 1",
-            [tenantId, `%${searchSuffix}`]
-          );
-
-          if (existingLeadRes.rows.length > 0) {
-            targetLeadId = existingLeadRes.rows[0].id;
-          } else {
-            const newLeadRes = await client.query(
-              `INSERT INTO leads (tenant_id, phone_number, assigned_rep_id, source, status, created_at, updated_at)
-               VALUES ($1, $2, $3, 'Mobile Dialer App', $4, NOW(), NOW())
-               RETURNING id`,
-              [tenantId, phoneNumber, repId, disposition === "Connected" ? "callback" : "new"]
+          if (targetLeadId) {
+            if (!isValidUuid(targetLeadId)) {
+              if (!isBatch) {
+                await client.query("ROLLBACK");
+                return NextResponse.json({ error: "Invalid leadId" }, { status: 400 });
+              }
+              continue;
+            }
+            const leadCheck = await client.query(
+              `SELECT id, assigned_rep_id as "assignedRepId" FROM leads WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+              [targetLeadId, tenantId]
             );
-            targetLeadId = newLeadRes.rows[0].id;
-          }
-        }
+            if (leadCheck.rows.length === 0) {
+              if (!isBatch) {
+                await client.query("ROLLBACK");
+                return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+              }
+              continue;
+            }
+            const assignedRep = leadCheck.rows[0].assignedRepId;
+            if (isSalesRep(role) && assignedRep && assignedRep !== repId) {
+              if (!isBatch) {
+                await client.query("ROLLBACK");
+                return NextResponse.json(
+                  { error: "Forbidden: Lead is assigned to another representative." },
+                  { status: 403 }
+                );
+              }
+              continue;
+            }
+          } else if (phoneNumber) {
+            const cleanDigits = phoneNumber.replace(/\D/g, "");
+            const searchSuffix = cleanDigits.slice(-10);
 
-        if (!targetLeadId) {
-          continue;
-        }
+            if (searchSuffix.length >= 7) {
+              const existingLeadRes = await client.query(
+                `SELECT id, assigned_rep_id as "assignedRepId" FROM leads WHERE tenant_id = $1 AND phone_number LIKE $2 LIMIT 1`,
+                [tenantId, `%${searchSuffix}`]
+              );
+
+              if (existingLeadRes.rows.length > 0) {
+                const matched = existingLeadRes.rows[0];
+                if (isSalesRep(role) && matched.assignedRepId && matched.assignedRepId !== repId) {
+                  if (!isBatch) {
+                    await client.query("ROLLBACK");
+                    return NextResponse.json(
+                      { error: "Forbidden: Phone belongs to a lead assigned to another representative." },
+                      { status: 403 }
+                    );
+                  }
+                  continue;
+                }
+                targetLeadId = matched.id;
+              } else {
+                const newLeadRes = await client.query(
+                  `INSERT INTO leads (tenant_id, phone_number, assigned_rep_id, source, status, created_at, updated_at)
+                   VALUES ($1, $2, $3, 'Mobile Dialer App', $4, NOW(), NOW())
+                   RETURNING id`,
+                  [tenantId, phoneNumber, repId, disposition === "Connected" ? "callback" : "new"]
+                );
+                targetLeadId = newLeadRes.rows[0].id;
+              }
+            }
+          }
+
+          if (!targetLeadId) {
+            continue;
+          }
 
         // Deduplication and Upsert:
         // Match the same call interaction:
@@ -449,21 +456,21 @@ export async function POST(request: NextRequest) {
                  log_source = $5,
                  call_timestamp = $6,
                  is_interested = COALESCE($7, is_interested)
-             WHERE id = $8
+             WHERE id = $8 AND tenant_id = $9
              RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
                        disposition, duration_seconds as "durationSeconds", remark,
                        recording_url as "recordingUrl", log_source as "logSource", COALESCE(is_interested, false) as "isInterested", call_timestamp as "callTimestamp"`,
-            [finalDisposition, newDuration, finalRemark, finalRecording, finalSource, finalTimestamp, isManualDisposed ? null : explicitInterestedVal, existing.id]
+            [finalDisposition, newDuration, finalRemark, finalRecording, finalSource, finalTimestamp, isManualDisposed ? null : explicitInterestedVal, existing.id, tenantId]
           );
           finalLog = updatedRes.rows[0];
 
           // Synchronize lead rnr_count exactly to count of RNR call logs
           await client.query(
             `UPDATE leads
-             SET rnr_count = (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $1 AND disposition = 'RNR'),
+             SET rnr_count = (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $1 AND tenant_id = $2 AND disposition = 'RNR'),
                  updated_at = NOW()
-             WHERE id = $1`,
-            [targetLeadId]
+             WHERE id = $1 AND tenant_id = $2`,
+            [targetLeadId, tenantId]
           );
         } else {
           const logRes = await client.query(
@@ -479,55 +486,52 @@ export async function POST(request: NextRequest) {
           // Synchronize lead rnr_count exactly to count of RNR call logs
           await client.query(
             `UPDATE leads
-             SET rnr_count = (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $1 AND disposition = 'RNR'),
+             SET rnr_count = (SELECT COUNT(*)::int FROM call_logs WHERE lead_id = $1 AND tenant_id = $2 AND disposition = 'RNR'),
                  updated_at = NOW()
-             WHERE id = $1`,
-            [targetLeadId]
+             WHERE id = $1 AND tenant_id = $2`,
+            [targetLeadId, tenantId]
           );
         }
 
         // Synchronize lead status and demo scheduled/completed tasks
         if (disposition === "Demo Done" || disposition === "Demo Completed") {
-          // 1. Mark pending product_demo tasks completed so scheduled count decrements
           const taskUpdate = await client.query(
-            "UPDATE scheduled_tasks SET status = 'completed', updated_at = NOW() WHERE lead_id = $1 AND task_type = 'product_demo' AND status = 'pending' RETURNING id",
-            [targetLeadId]
+            "UPDATE scheduled_tasks SET status = 'completed', updated_at = NOW() WHERE lead_id = $1 AND tenant_id = $2 AND task_type = 'product_demo' AND status = 'pending' RETURNING id",
+            [targetLeadId, tenantId]
           );
           if ((taskUpdate.rowCount || 0) === 0) {
             await client.query(
               `INSERT INTO scheduled_tasks (tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, task_source, created_at, updated_at)
                VALUES ($1, $2, $3, 'product_demo', $4, 'Product demo completed', 'completed', 'dialer', $4, $4)`,
               [tenantId, targetLeadId, repId, callTimestamp]
-            ).catch(() => {});
+            );
           }
 
-          // 2. Advance lead status to demo_done
           await client.query(
-            "UPDATE leads SET status = 'demo_done', updated_at = NOW() WHERE id = $1",
-            [targetLeadId]
+            "UPDATE leads SET status = 'demo_done', updated_at = NOW() WHERE id = $1 AND tenant_id = $2",
+            [targetLeadId, tenantId]
           );
 
-          // 3. Sync deal stage to demo_done
           const dealCheck = await client.query(
             "SELECT id FROM deals WHERE lead_id = $1 AND tenant_id = $2 LIMIT 1",
             [targetLeadId, tenantId]
           );
           if (dealCheck.rows.length > 0) {
             await client.query(
-              "UPDATE deals SET stage = 'demo_done', updated_at = NOW() WHERE id = $1",
-              [dealCheck.rows[0].id]
+              "UPDATE deals SET stage = 'demo_done', updated_at = NOW() WHERE id = $1 AND tenant_id = $2",
+              [dealCheck.rows[0].id, tenantId]
             );
           } else {
             await client.query(
               `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes, created_at, updated_at)
                VALUES ($1, $2, $3, 'WhatsApp API', 0, 0, 'demo_done', 'Product demo completed', NOW(), NOW())`,
               [tenantId, targetLeadId, repId]
-            ).catch(() => {});
+            );
           }
         } else if (disposition === "Demo Scheduled") {
           await client.query(
-            "UPDATE leads SET status = 'demo_scheduled', updated_at = NOW() WHERE id = $1",
-            [targetLeadId]
+            "UPDATE leads SET status = 'demo_scheduled', updated_at = NOW() WHERE id = $1 AND tenant_id = $2",
+            [targetLeadId, tenantId]
           );
           const dealCheck = await client.query(
             "SELECT id FROM deals WHERE lead_id = $1 AND tenant_id = $2 LIMIT 1",
@@ -538,14 +542,35 @@ export async function POST(request: NextRequest) {
               `INSERT INTO deals (tenant_id, lead_id, rep_id, service_type, quantity, quoted_price, stage, closing_notes, created_at, updated_at)
                VALUES ($1, $2, $3, 'WhatsApp API', 0, 0, 'demo_scheduled', $4, NOW(), NOW())`,
               [tenantId, targetLeadId, repId, remark || "Product demo scheduled"]
-            ).catch(() => {});
+            );
           }
+        }
+
+        // Clear overdue pending callback tasks when a real/disposed call is synced via APK/Dialer
+        if (!isPendingAutoCapture && targetLeadId) {
+          const syncTag = remark
+            ? `[Attempted via Dialer/APK: ${disposition} — ${remark}]`
+            : `[Attempted via Dialer/APK: ${disposition}]`;
+          await client.query(
+            `UPDATE scheduled_tasks
+             SET status = 'completed',
+                 notes = CASE
+                   WHEN notes IS NOT NULL AND notes <> '' THEN notes || ' ' || $4
+                   ELSE $4
+                 END,
+                 updated_at = NOW()
+             WHERE lead_id = $1 AND tenant_id = $2 AND task_type = 'callback' AND status = 'pending'
+               AND scheduled_time IS NOT NULL AND scheduled_time <= $3`,
+            [targetLeadId, tenantId, callTimestamp, syncTag]
+          ).catch(() => {});
         }
 
         createdLogs.push(finalLog);
       }
 
-      if (Array.isArray(body.calls)) {
+      await client.query("COMMIT");
+
+      if (isBatch) {
         return NextResponse.json(
           {
             syncedCount: createdLogs.length,
@@ -563,6 +588,10 @@ export async function POST(request: NextRequest) {
       }
 
       return NextResponse.json({ callLog: createdLogs[0] }, { status: 201 });
+      } catch (txErr) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw txErr;
+      }
     });
   } catch (error) {
     console.error("[CALLS POST]", error);

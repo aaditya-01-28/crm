@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withClient } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { requireActiveSession } from "@/lib/auth";
+import { isSalesRep } from "@/lib/rbac";
+import { isValidUuid, sanitizeExternalUrl } from "@/lib/security";
 import { parseScheduledDateTime, getISTDateString, parseDealDateToTimestamp } from "@/lib/utils";
 import { ensureDealSplitsTable, syncDealSplits } from "@/lib/deal-splits";
 
@@ -8,7 +10,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -16,16 +18,16 @@ export async function GET(request: NextRequest) {
   const repId = session.sub;
   const role = session.role;
 
-  const isRep = role === "sales_rep";
+  const isRep = isSalesRep(role);
   const { searchParams } = new URL(request.url);
   const filterRepId = searchParams.get("repId");
 
-  const isValidUuid = (val?: string | null) =>
-    typeof val === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+  if (filterRepId && filterRepId !== "all" && !isValidUuid(filterRepId)) {
+    return NextResponse.json({ error: "Invalid repId" }, { status: 400 });
+  }
 
   try {
     return await withClient(async (client) => {
-      await client.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;").catch(() => {});
       await ensureDealSplitsTable(client);
 
       let whereClause = "d.tenant_id = $1";
@@ -33,10 +35,10 @@ export async function GET(request: NextRequest) {
 
       if (isRep && isValidUuid(repId)) {
         params.push(repId);
-        whereClause += ` AND (d.rep_id = $${params.length} OR l.assigned_rep_id = $${params.length} OR EXISTS (SELECT 1 FROM deal_splits ds WHERE ds.deal_id = d.id AND ds.rep_id = $${params.length} AND ds.status = 'approved'))`;
-      } else if (!isRep && filterRepId && filterRepId !== "all" && isValidUuid(filterRepId)) {
+        whereClause += ` AND (d.rep_id = $${params.length} OR l.assigned_rep_id = $${params.length} OR EXISTS (SELECT 1 FROM deal_splits ds WHERE ds.deal_id = d.id AND ds.tenant_id = d.tenant_id AND ds.rep_id = $${params.length} AND ds.status = 'approved'))`;
+      } else if (!isRep && filterRepId && filterRepId !== "all") {
         params.push(filterRepId);
-        whereClause += ` AND (d.rep_id = $${params.length} OR l.assigned_rep_id = $${params.length} OR EXISTS (SELECT 1 FROM deal_splits ds WHERE ds.deal_id = d.id AND ds.rep_id = $${params.length} AND ds.status = 'approved'))`;
+        whereClause += ` AND (d.rep_id = $${params.length} OR l.assigned_rep_id = $${params.length} OR EXISTS (SELECT 1 FROM deal_splits ds WHERE ds.deal_id = d.id AND ds.tenant_id = d.tenant_id AND ds.rep_id = $${params.length} AND ds.status = 'approved'))`;
       }
 
       const dealsRes = await client.query(
@@ -71,9 +73,9 @@ export async function GET(request: NextRequest) {
                 followup_task.notes as "followupTask_notes",
                 sp.splits_json as "splitsJson"
          FROM deals d
-         LEFT JOIN leads l ON d.lead_id = l.id
-         LEFT JOIN users u ON d.rep_id = u.id
-         LEFT JOIN users rep_lead ON l.assigned_rep_id = rep_lead.id
+         LEFT JOIN leads l ON d.lead_id = l.id AND l.tenant_id = d.tenant_id
+         LEFT JOIN users u ON d.rep_id = u.id AND u.tenant_id = d.tenant_id
+         LEFT JOIN users rep_lead ON l.assigned_rep_id = rep_lead.id AND rep_lead.tenant_id = d.tenant_id
          LEFT JOIN LATERAL (
            SELECT COALESCE(
              json_agg(
@@ -89,13 +91,14 @@ export async function GET(request: NextRequest) {
              '[]'::json
            ) as splits_json
            FROM deal_splits ds
-           LEFT JOIN users su ON ds.rep_id = su.id
-           WHERE ds.deal_id = d.id
+           LEFT JOIN users su ON ds.rep_id = su.id AND su.tenant_id = ds.tenant_id
+           WHERE ds.deal_id = d.id AND ds.tenant_id = d.tenant_id
          ) sp ON true
          LEFT JOIN LATERAL (
            SELECT st.scheduled_time, st.meeting_link, st.notes, st.status, st.updated_at as completed_at
            FROM scheduled_tasks st
            WHERE st.lead_id = d.lead_id
+             AND st.tenant_id = d.tenant_id
              AND st.task_type = 'product_demo'
              AND st.status IN ('pending', 'completed')
            ORDER BY COALESCE(st.scheduled_time, st.updated_at) DESC
@@ -105,6 +108,7 @@ export async function GET(request: NextRequest) {
            SELECT st.scheduled_time, st.notes
            FROM scheduled_tasks st
            WHERE st.lead_id = d.lead_id
+             AND st.tenant_id = d.tenant_id
              AND st.task_type = 'callback'
              AND st.status = 'pending'
            ORDER BY st.scheduled_time ASC NULLS LAST, st.updated_at DESC
@@ -125,7 +129,7 @@ export async function GET(request: NextRequest) {
                   p.ops_approval_status,
                   p.created_at
            FROM payments p
-           WHERE p.deal_id = d.id
+           WHERE p.deal_id = d.id AND p.tenant_id = d.tenant_id
            ORDER BY p.created_at DESC
            LIMIT 1
          ) pay ON true
@@ -218,13 +222,12 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error("[DEALS GET]", error);
-    const message = error instanceof Error ? error.message : "Failed to fetch deals";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "Failed to fetch deals" }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
-  const session = await getSession(request);
+  const session = await requireActiveSession(request);
   if (!session?.tenantId || !session?.sub) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -235,95 +238,120 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     return await withClient(async (client) => {
-      await client.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;").catch(() => {});
-      await ensureDealSplitsTable(client);
-      let leadId = body.leadId;
+      await client.query("BEGIN");
+      try {
+        await ensureDealSplitsTable(client);
+        let leadId = body.leadId;
 
-      // If leadId is not provided, find or create the lead by phone number
-      if (!leadId) {
-        if (!body.phoneNumber) {
-          return NextResponse.json(
-            { error: "Phone number or an existing lead is required" },
-            { status: 400 }
-          );
+        if (leadId !== undefined && leadId !== null && !isValidUuid(leadId)) {
+          await client.query("ROLLBACK");
+          return NextResponse.json({ error: "Invalid leadId" }, { status: 400 });
         }
 
-        const phone = body.phoneNumber.trim();
-        // Check if lead already exists with this phone in this tenant
-        const existingLeadRes = await client.query(
-          `SELECT id, custom_metadata FROM leads WHERE tenant_id = $1 AND phone_number = $2 LIMIT 1`,
-          [tenantId, phone]
-        );
+        // If leadId is not provided, find or create the lead by phone number
+        if (!leadId) {
+          if (!body.phoneNumber) {
+            await client.query("ROLLBACK");
+            return NextResponse.json(
+              { error: "Phone number or an existing lead is required" },
+              { status: 400 }
+            );
+          }
 
-        const customerEmail =
-          body.customerEmail ||
-          body.email ||
-          body.commercials?.[0]?.customerEmail ||
-          null;
-        if (existingLeadRes.rows.length > 0) {
-          leadId = existingLeadRes.rows[0].id;
-          const oldMeta = (existingLeadRes.rows[0].custom_metadata as Record<string, any>) || {};
-          const updatedMeta = {
-            ...oldMeta,
-            ...(body.address ? { address: body.address } : {}),
-            ...(customerEmail ? { customerEmail } : {}),
-          };
-
-          await client.query(
-            `UPDATE leads 
-             SET contact_name = COALESCE($1, contact_name),
-                 company_name = COALESCE($2, company_name),
-                 service_type = COALESCE($3, service_type),
-                 custom_metadata = $4::jsonb,
-                 status = 'deal_created',
-                 updated_at = NOW()
-             WHERE id = $5`,
-            [
-              body.contactName || null,
-              body.companyName || null,
-              body.serviceType || null,
-              JSON.stringify(updatedMeta),
-              leadId,
-            ]
+          const phone = body.phoneNumber.trim();
+          // Check if lead already exists with this phone in this tenant
+          const existingLeadRes = await client.query(
+            `SELECT id, assigned_rep_id as "assignedRepId", custom_metadata FROM leads WHERE tenant_id = $1 AND phone_number = $2 LIMIT 1`,
+            [tenantId, phone]
           );
+
+          const customerEmail =
+            body.customerEmail ||
+            body.email ||
+            body.commercials?.[0]?.customerEmail ||
+            null;
+          if (existingLeadRes.rows.length > 0) {
+            if (isSalesRep(role) && existingLeadRes.rows[0].assignedRepId && existingLeadRes.rows[0].assignedRepId !== repId) {
+              await client.query("ROLLBACK");
+              return NextResponse.json(
+                { error: "Forbidden: Lead belongs to another representative." },
+                { status: 403 }
+              );
+            }
+            leadId = existingLeadRes.rows[0].id;
+            const oldMeta = (existingLeadRes.rows[0].custom_metadata as Record<string, any>) || {};
+            const updatedMeta = {
+              ...oldMeta,
+              ...(body.address ? { address: body.address } : {}),
+              ...(customerEmail ? { customerEmail } : {}),
+            };
+
+            await client.query(
+              `UPDATE leads 
+               SET contact_name = COALESCE($1, contact_name),
+                   company_name = COALESCE($2, company_name),
+                   service_type = COALESCE($3, service_type),
+                   custom_metadata = $4::jsonb,
+                   status = 'deal_created',
+                   updated_at = NOW()
+               WHERE id = $5 AND tenant_id = $6`,
+              [
+                body.contactName || null,
+                body.companyName || null,
+                body.serviceType || null,
+                JSON.stringify(updatedMeta),
+                leadId,
+                tenantId,
+              ]
+            );
+          } else {
+            // Create new lead in database
+            const newMeta = {
+              ...(body.address ? { address: body.address } : {}),
+              ...(customerEmail ? { customerEmail } : {}),
+            };
+            const newLeadRes = await client.query(
+              `INSERT INTO leads (
+                 tenant_id, assigned_rep_id, first_assigned_rep_id, first_assigned_at,
+                 phone_number, contact_name, company_name, service_type,
+                 source, status, custom_metadata, created_at, updated_at
+               )
+               VALUES ($1, $2, $2, NOW(), $3, $4, $5, $6, 'Pipeline Manual Entry', 'deal_created', $7::jsonb, NOW(), NOW())
+               RETURNING id`,
+              [
+                tenantId,
+                repId,
+                phone,
+                body.contactName || null,
+                body.companyName || null,
+                body.serviceType || null,
+                JSON.stringify(newMeta),
+              ]
+            );
+            leadId = newLeadRes.rows[0].id;
+          }
         } else {
-          // Create new lead in database
-          const newMeta = {
-            ...(body.address ? { address: body.address } : {}),
-            ...(customerEmail ? { customerEmail } : {}),
-          };
-          const newLeadRes = await client.query(
-            `INSERT INTO leads (
-               tenant_id, assigned_rep_id, first_assigned_rep_id, first_assigned_at,
-               phone_number, contact_name, company_name, service_type,
-               source, status, custom_metadata, created_at, updated_at
-             )
-             VALUES ($1, $2, $2, NOW(), $3, $4, $5, $6, 'Pipeline Manual Entry', 'deal_created', $7::jsonb, NOW(), NOW())
-             RETURNING id`,
-            [
-              tenantId,
-              repId,
-              phone,
-              body.contactName || null,
-              body.companyName || null,
-              body.serviceType || null,
-              JSON.stringify(newMeta),
-            ]
+          // Verify lead belongs to tenant & rep has access
+          const existingLeadRes = await client.query(
+            `SELECT id, assigned_rep_id as "assignedRepId", custom_metadata FROM leads WHERE id = $1 AND tenant_id = $2`,
+            [leadId, tenantId]
           );
-          leadId = newLeadRes.rows[0].id;
-        }
-      } else {
-        // Update existing lead details if provided
-        const existingLeadRes = await client.query(
-          `SELECT id, custom_metadata FROM leads WHERE id = $1 AND tenant_id = $2`,
-          [leadId, tenantId]
-        );
-        const customerEmail =
-          body.customerEmail ||
-          body.email ||
-          body.commercials?.[0]?.customerEmail ||
-          null;
-        if (existingLeadRes.rows.length > 0) {
+          if (existingLeadRes.rows.length === 0) {
+            await client.query("ROLLBACK");
+            return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+          }
+          if (isSalesRep(role) && existingLeadRes.rows[0].assignedRepId && existingLeadRes.rows[0].assignedRepId !== repId) {
+            await client.query("ROLLBACK");
+            return NextResponse.json(
+              { error: "Forbidden: Lead is assigned to another representative." },
+              { status: 403 }
+            );
+          }
+          const customerEmail =
+            body.customerEmail ||
+            body.email ||
+            body.commercials?.[0]?.customerEmail ||
+            null;
           const oldMeta = (existingLeadRes.rows[0].custom_metadata as Record<string, any>) || {};
           const updatedMeta = {
             ...oldMeta,
@@ -338,17 +366,17 @@ export async function POST(request: NextRequest) {
                  custom_metadata = $4::jsonb,
                  status = 'deal_created',
                  updated_at = NOW()
-             WHERE id = $5`,
+             WHERE id = $5 AND tenant_id = $6`,
             [
               body.contactName || null,
               body.companyName || null,
               body.serviceType || null,
               JSON.stringify(updatedMeta),
               leadId,
+              tenantId,
             ]
           );
         }
-      }
 
       const commercials = Array.isArray(body.commercials) && body.commercials.length > 0
         ? body.commercials
@@ -394,14 +422,14 @@ export async function POST(request: NextRequest) {
             finalAmount: item.finalAmount || null,
             paymentMode: item.paymentMode || null,
             gstinNumber: item.gstinNumber || null,
-            paymentScreenshotUrl: item.paymentScreenshotUrl || null,
+            paymentScreenshotUrl: sanitizeExternalUrl(item.paymentScreenshotUrl, { allowRelative: true }),
             notes: item.closingNotes || item.notes || null,
           };
           closingNotesToStore = JSON.stringify(dossier);
         } else if (item.stage === "demo_scheduled" && (item.demoDate || item.meetingLink || item.decisionMakerName)) {
           closingNotesToStore = JSON.stringify({
             demoDate: item.demoDate,
-            meetingLink: item.meetingLink,
+            meetingLink: sanitizeExternalUrl(item.meetingLink),
             decisionMakerName: item.decisionMakerName,
             notes: item.closingNotes || item.demoNotes || null,
           });
@@ -437,6 +465,9 @@ export async function POST(request: NextRequest) {
         const itemClosedAt = isClosedWonItem ? (itemWonTs || new Date()) : null;
         const itemCreatedAt = itemWonTs || new Date();
 
+        const parsedQty = Math.max(0, parseInt(item.quantity) || 0);
+        const parsedPrice = Math.max(0, parseFloat(item.quotedPrice) || 0);
+
         let itemRes;
         if (existingZeroDeal.rows.length > 0) {
           itemRes = await client.query(
@@ -444,7 +475,7 @@ export async function POST(request: NextRequest) {
              SET rep_id = $1, service_type = $2, quantity = $3, quoted_price = $4,
                  expected_closing_date = $5, closed_at = $6, created_at = COALESCE($7, created_at),
                  stage = $8, closing_notes = $9, updated_at = NOW()
-             WHERE id = $10
+             WHERE id = $10 AND tenant_id = $11
              RETURNING id, tenant_id as "tenantId", lead_id as "leadId", rep_id as "repId",
                        service_type as "serviceType", quantity, quoted_price as "quotedPrice",
                        expected_closing_date as "expectedClosingDate", closed_at as "closedAt", stage, closing_notes as "closingNotes",
@@ -452,14 +483,15 @@ export async function POST(request: NextRequest) {
             [
               repId,
               item.serviceType,
-              parseInt(item.quantity) || 0,
-              parseFloat(item.quotedPrice) || 0,
+              parsedQty,
+              parsedPrice,
               itemExpectedClosing,
               itemClosedAt,
               itemWonTs,
               item.stage || "quote_sent",
               closingNotesToStore,
               existingZeroDeal.rows[0].id,
+              tenantId,
             ]
           );
         } else {
@@ -478,8 +510,8 @@ export async function POST(request: NextRequest) {
               leadId,
               repId,
               item.serviceType,
-              parseInt(item.quantity) || 0,
-              parseFloat(item.quotedPrice) || 0,
+              parsedQty,
+              parsedPrice,
               itemExpectedClosing,
               itemClosedAt,
               item.stage || "quote_sent",
@@ -501,9 +533,10 @@ export async function POST(request: NextRequest) {
       else if (primaryStage === "demo_scheduled") leadStatus = "demo_scheduled";
       else if (primaryStage === "demo_done") leadStatus = "demo_done";
 
-      await client.query("UPDATE leads SET status = $1, updated_at = NOW() WHERE id = $2", [
+      await client.query("UPDATE leads SET status = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3", [
         leadStatus,
         leadId,
+        tenantId,
       ]);
 
       const firstComm = commercials[0] || {};
@@ -516,6 +549,8 @@ export async function POST(request: NextRequest) {
           parseDealDateToTimestamp(wonDetails.wonDate || body.wonDate) ||
           primaryDeal?.closedAt ||
           new Date();
+        const safePayScreenshot =
+          sanitizeExternalUrl(wonDetails.paymentScreenshotUrl || wonDetails.screenshotUrl, { allowRelative: true }) || "NA";
         await client.query(
           `INSERT INTO payments (
              tenant_id, deal_id, lead_id, rep_id, user_type, panel_user_id,
@@ -530,14 +565,14 @@ export async function POST(request: NextRequest) {
             repId,
             wonDetails.userType || "new_user",
             portalUserId,
-            parseInt(wonDetails.creditsToAdd || firstComm.quantity) || 0,
-            parseFloat(wonDetails.originalAmount || firstComm.quotedPrice) || 0,
-            parseFloat(wonDetails.taxAmount || 0) || 0,
-            parseFloat(wonDetails.tds || 0) || 0,
-            parseFloat(wonDetails.finalAmount || firstComm.quotedPrice) || 0,
+            Math.max(0, parseInt(wonDetails.creditsToAdd || firstComm.quantity) || 0),
+            Math.max(0, parseFloat(wonDetails.originalAmount || firstComm.quotedPrice) || 0),
+            Math.max(0, parseFloat(wonDetails.taxAmount || 0) || 0),
+            Math.max(0, parseFloat(wonDetails.tds || 0) || 0),
+            Math.max(0, parseFloat(wonDetails.finalAmount || firstComm.quotedPrice) || 0),
             wonDetails.paymentMode || "Bank Transfer",
             wonDetails.gstinNumber || wonDetails.gstin || null,
-            wonDetails.paymentScreenshotUrl || wonDetails.screenshotUrl || "NA",
+            safePayScreenshot,
             paymentCreatedAt,
           ]
         );
@@ -554,8 +589,6 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      await client.query("ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_source TEXT DEFAULT 'dialer';").catch(() => {});
-
       // Demo Scheduled calendar task (tagged as pipeline source so it stays in pipeline and doesn't pollute agenda)
       if (primaryStage === "demo_scheduled" && firstComm.demoDate) {
         await client.query(
@@ -568,33 +601,47 @@ export async function POST(request: NextRequest) {
             leadId,
             repId,
             parseScheduledDateTime(firstComm.demoDate),
-            firstComm.meetingLink || null,
+            sanitizeExternalUrl(firstComm.meetingLink),
             firstComm.demoNotes || firstComm.closingNotes || null,
           ]
         );
       }
 
-      // Demo Done & Quote Sent contact back callback task
+      // Demo Done & Quote Sent contact back callback task (upsert)
       if (
         (primaryStage === "demo_done" || primaryStage === "quote_sent") &&
         firstComm.contactBackDate
       ) {
-        await client.query(
-          `INSERT INTO scheduled_tasks (
-             tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, task_source, created_at, updated_at
-           )
-           VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', 'pipeline', NOW(), NOW())`,
-          [
-            tenantId,
-            leadId,
-            repId,
-            parseScheduledDateTime(firstComm.contactBackDate),
+        const cbDateObj = parseScheduledDateTime(firstComm.contactBackDate);
+        if (cbDateObj && !isNaN(cbDateObj.getTime())) {
+          const cbNote =
             firstComm.closingNotes ||
-              (primaryStage === "demo_done"
-                ? "Post-demo update follow-up"
-                : "Quotation update follow-up"),
-          ]
-        );
+            (primaryStage === "demo_done"
+              ? "Post-demo update follow-up"
+              : "Quotation update follow-up");
+          const existingCb = await client.query(
+            `SELECT id FROM scheduled_tasks
+             WHERE lead_id = $1 AND tenant_id = $2 AND task_type = 'callback' AND status = 'pending'
+             ORDER BY updated_at DESC LIMIT 1`,
+            [leadId, tenantId]
+          );
+          if (existingCb.rows.length > 0) {
+            await client.query(
+              `UPDATE scheduled_tasks
+               SET scheduled_time = $1, notes = $2, rep_id = COALESCE($3, rep_id), task_source = 'pipeline', updated_at = NOW()
+               WHERE id = $4 AND tenant_id = $5`,
+              [cbDateObj, cbNote, repId, existingCb.rows[0].id, tenantId]
+            );
+          } else {
+            await client.query(
+              `INSERT INTO scheduled_tasks (
+                 tenant_id, lead_id, rep_id, task_type, scheduled_time, notes, status, task_source, created_at, updated_at
+               )
+               VALUES ($1, $2, $3, 'callback', $4, $5, 'pending', 'pipeline', NOW(), NOW())`,
+              [tenantId, leadId, repId, cbDateObj, cbNote]
+            );
+          }
+        }
       }
 
       // Closed Lost recontact callback task
@@ -616,7 +663,12 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      await client.query("COMMIT");
       return NextResponse.json({ deal: primaryDeal, totalCreated: commercials.length }, { status: 201 });
+      } catch (txErr) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw txErr;
+      }
     });
   } catch (error) {
     console.error("[DEALS POST]", error);
